@@ -68,6 +68,18 @@ The hero's summary, content rating and quality come with its details
 do the info block's. With nothing to show, Home says why: No libraries
 yet, Scanning your libraries…, or Nothing here yet.
 
+### The server out of reach
+
+When the server answers nothing, or another device answers at its
+address, "Pley is offline" shows at the top right for 6 s, as on Android
+TV (not over the players, which say "Reconnecting…" themselves). A page
+that needed the server gives way to "Can't reach your server": why, then
+"Check that the server is on and that this device is on its network.",
+with Retry and Switch server. Meanwhile the app asks every 5 s whether the
+server answers (`GET /api/server`, signed in with the token, so the
+answer counts only once the server there has proved itself), and that
+page comes back by itself once it does.
+
 ### Remote keys
 
 | Key | Where | What it does |
@@ -629,7 +641,7 @@ then shows it. It is kept on the Roku for each server.
 | Path | What |
 |---|---|
 | `source/main.brs` | Starts the scene |
-| `components/MainScene.*` | The screen stack, the HTTP agent for pictures, sign-in when the server ends it, what the user's remotes cast here |
+| `components/MainScene.*` | The screen stack, the HTTP agent for pictures, sign-in when the server ends it, "Pley is offline" and the question whether the server answers again, what the user's remotes cast here |
 | `components/MusicPlayer.*` | The music queue on the scene's Audio node |
 | `components/screens/` | One component per screen |
 | `components/shared/` | Screen helpers (`Ui.brs`), title actions (`Titles.brs`) |

@@ -1,12 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The server doesn't answer: Try again (the screen that needed it) or Switch
-     server. Shown in place of that screen. -->
+<!-- The server doesn't answer: why, Retry (the screen that needed it) or
+     Switch server. Shown in place of that screen, which comes back by
+     itself once the server answers. -->
 <component name="UnreachableScreen" extends="Group">
     <interface>
         <field id="route" type="string" />
         <field id="params" type="assocarray" />
         <field id="navigate" type="assocarray" alwaysNotify="true" />
         <field id="active" type="boolean" alwaysNotify="true" />
+        <!-- The server answers again (the scene's question). -->
+        <field id="reached" type="boolean" alwaysNotify="true" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/screens/UnreachableScreen.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
@@ -15,8 +18,10 @@
     <script type="text/brightscript" uri="pkg:/components/lib/Nav.brs" />
     <children>
         <Label translation="[96, 72]" text="Pley" color="0x38BDF8FF" font="font:ExtraLargeBoldSystemFont" />
-        <Label id="title" translation="[96, 300]" width="1728" wrap="true" maxLines="2" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
+        <Label id="title" translation="[96, 300]" width="1728" text="Can't reach your server" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
         <Label id="text" translation="[96, 400]" width="1400" wrap="true" maxLines="4" lineSpacing="6" color="0xA1A9B6FF" font="font:MediumSystemFont" />
-        <ButtonGroup id="buttons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[96, 620]" layoutDirection="horiz" minWidth="380" />
+        <!-- Which server: Switch server goes to another. -->
+        <Label id="server" translation="[96, 560]" width="1400" color="0x8B95A5FF" font="font:SmallerSystemFont" />
+        <ButtonGroup id="buttons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[96, 640]" layoutDirection="horiz" minWidth="380" />
     </children>
 </component>

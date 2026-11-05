@@ -39,6 +39,9 @@ sub apiRun()
     m.proving = false
     m.proofRetryAt = 0
     m.proofSeq = 0
+    ' Whether the server in use answered nothing when last asked, as the
+    ' session says it (apiReached).
+    m.offline = false
     ' Joining or leaving a network: the server proves itself again.
     m.device = CreateObject("roDeviceInfo")
     m.device.SetMessagePort(m.port)
@@ -384,6 +387,7 @@ sub apiCallAnswered(job as object, status as integer, body as string, headers as
         return
     end if
     answer = httpAnswer(status, body)
+    if job.server = m.server then apiReached(answer.error <> "network")
     if job.network <> "" then aqNetworkKeep(m.networkKept, job.network, answer, m.clock.TotalMilliseconds())
     if httpTrue(job.me) then apiKnowProfile(job, answer)
     if answer.ok and job.play and apiAbandoned(job.request)
@@ -709,6 +713,7 @@ sub apiEnd(reason as string)
 end sub
 
 sub apiFailWaiting(answer as object)
+    if answer.error = "network" then apiReached(false)
     jobs = m.waiting
     m.waiting = []
     for each job in jobs
@@ -794,6 +799,8 @@ sub apiSelect(url as string, name as string)
     end if
     m.signIn = invalid
     m.server = url
+    ' Whether this one answers isn't known yet.
+    apiReached(true)
     m.tokens = invalid
     if url <> "" then m.tokens = tokensLoad(m.tokensSection, url)
     m.lastIssued = invalid
@@ -811,6 +818,16 @@ sub apiSelect(url as string, name as string)
     apiPublish()
     m.session.signedIn = m.tokens <> invalid
     apiAskProfile()
+end sub
+
+' Whether the server in use answers, for the session (its offline): a
+' request it answered nothing, or a proof another device gave in its place,
+' says it doesn't; any answer, or a proof it gave, says it does. Told only
+' when it changes.
+sub apiReached(answered as boolean)
+    if m.offline = not answered then return
+    m.offline = not answered
+    m.session.offline = m.offline
 end sub
 
 ' Who the sign-in acts as (GET /api/auth/me), for the screens: asked as a
@@ -958,6 +975,7 @@ end sub
 function apiSignInUnreachable(signIn as object, status as integer, body as string) as boolean
     answer = httpAnswer(status, body)
     if answer.error <> "network" then return false
+    if signIn.server = m.server then apiReached(false)
     m.signIn = invalid
     apiAnswer(signIn.request, answer)
     return true
@@ -1257,6 +1275,7 @@ sub apiProofAnswered(job as object, status as integer, body as string)
             m.proved = { at: m.clock.TotalMilliseconds(), network: job.network }
             m.doubted = false
         end if
+        if current then apiReached(true)
         apiPublish()
         if job.after <> invalid
             apiSend(job.after)

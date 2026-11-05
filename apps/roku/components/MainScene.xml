@@ -81,6 +81,8 @@
             <Label id="toastText" translation="[40, 22]" color="0xEBEBEBFF" font="font:SmallSystemFont" />
         </Group>
         <Timer id="toastTimer" duration="3.5" />
+        <!-- While the server is out of reach: whether it answers again. -->
+        <Timer id="offlinePoll" duration="5" repeat="true" />
         <!-- While a notice waits: whether the remote has rested and the
              page is free for it, four times a second. -->
         <Timer id="noticeWait" duration="0.25" repeat="true" />

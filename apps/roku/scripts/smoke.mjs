@@ -14,7 +14,7 @@
 // See all), Discover (a movie asked for, a show's seasons picked), the
 // managers' Requests (Approve, then Yours), a ready-to-watch notice on
 // Home whose movie's audio and subtitles are picked on its page, Settings, the
-// server gone and Try again, then signing out and in again on a server
+// server gone and back by itself, then signing out and in again on a server
 // too old for QR codes, requests and two-step sign-in. Then it starts
 // the app again, signed in,
 // and times how soon Home is asked for. Fails on a BrightScript error or
@@ -365,6 +365,8 @@ async function loadedWithin(ms) {
   return false;
 }
 const pages = { diagnostics: false, licences: false };
+// The server gone: whether the app asked if it answers again.
+const offline = { asked: false };
 // Home asks again only after playing, or when its rows are a minute old.
 const home = { kept: false };
 // From when the server knew nothing of requests (an older one).
@@ -1269,10 +1271,12 @@ async function walk() {
   await press("select");
   await sleep(3000);
   shoot("unreachable");
-  fixture.down = false;
+  // The server back: the screen saying so goes back to the library by
+  // itself, the scene asking every 5 s whether it answers.
   since = mark();
-  await press("select"); // Try again
-  await waitFor(/^GET \/api\/libraries\/1\/items\?.*offset=0/, since, "the library after Try again");
+  fixture.down = false;
+  await waitFor(/^GET \/api\/libraries\/1\/items\?.*offset=0/, since, "the library once the server answers again", { ms: 20000 });
+  offline.asked = seen(/^GET \/api\/server$/, since);
   shoot("retried");
   // Signed out, and in again with a server that has no QR codes yet, nor
   // requests, and doesn't say whether it requires two-step sign-in: the
@@ -1378,6 +1382,7 @@ const checks = [
   ["kept Anna as the profile to always start as", registry !== null && /startAs\.http[^"]*","1"/.test(JSON.stringify([...registry]))],
   ["showed subtitle sync", sync.label],
   ["showed Diagnostics and the open-source licences from Settings", pages.diagnostics && pages.licences],
+  ["came back by itself once the server answered again", offline.asked],
   ["showed the playback's details", asked(/^GET \/api\/playback\/s\d+$/)],
   ["saved Movies after TV Shows, every library in the order", fixture.orders.some((ids) => JSON.stringify(ids) === "[2,1,3]")],
   ["went back to the server's order", fixture.orders.includes(null) && fixture.libraryOrder.join() === "1,2,3"],
