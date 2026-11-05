@@ -251,6 +251,10 @@ and goes with `live_channels_changed`. On LG:
   or on, a press at a time, as in the Android TV app. While the guide has
   focus these keys are its own even when music plays; elsewhere on the
   page they go to the music.
+- **A programme's details** (OK held or the menu key): Watch and, beside
+  it, the favourite as a star alone, filled for a favourite, as in the
+  player's controls. Audio Guidance reads Add to or Remove from
+  favourites.
 - **The player:** Up and Down, CH+ and CH−, Next and Previous change
   channel within the category; digits tune a number. OK, the menu or the
   guide key opens the channel list beside the picture, which moves aside

@@ -8,6 +8,14 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Changed
+
+- A programme's details in Live TV have Watch and the favourite side by
+  side, the favourite a star as in the live player, filled for a
+  favourite, where Remove from favourites was a wide button under Watch.
+  In the live player, the star no longer shows its words under it, which
+  ran under Channels.
+
 ## [0.1.6] - 2026-11-05
 
 ### Added
