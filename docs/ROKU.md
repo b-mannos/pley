@@ -45,13 +45,18 @@ code sets it up for whoever hasn't yet. It asks "Who's watching?" at start when 
 than one profile, unless Settings' Always start as names one. Going on
 there as the profile it was left on asks that profile's PIN when it has
 one, as on the other TVs, and so does Always start as: the start opens on
-that profile's PIN pad, and Cancel shows the other profiles. Choosing a
-saved server (Settings' Switch server too) is a start on it: it asks the
-same, whatever was answered on the server before. A PIN is
-typed on Roku's own PIN pad: a wrong one, or too many, asks again saying
-why; a PIN locked after too many wrong tries is said on the screen, since
-Roku's pad can't be dimmed. A profile that needs its password is signed
-in to with a code, choosing it in the browser.
+that profile's PIN pad, and Use another profile shows the other profiles.
+Choosing a saved server (Settings' Switch server too) is a start on it:
+it asks the same, whatever was answered on the server before. A PIN is
+typed on Roku's own PIN pad ("Enter Anna's PIN"): a wrong one, or too
+many, asks again saying why. Where Android TV dims its pad (a PIN locked
+after too many wrong tries, a profile that can't be used from the app),
+Roku's pad can't be dimmed: a message under the same title says why, with
+Use another profile. A profile that needs its password opens the sign-in
+screen as "Approve on your phone": "Robin's profile needs its password:
+approve this code on a phone signed in to Pley, and pick Robin there.",
+with Use another profile back to the profiles. A sign-in that can't
+switch profiles offers Sign in as another profile, the same way.
 
 ### Home
 
