@@ -131,8 +131,10 @@ sealed class RowView : View
             && a.Unwatched == b.Unwatched && a.Description == b.Description && a.Images.SequenceEqual(b.Images) && a.Badges.SequenceEqual(b.Badges));
 
     /// <summary>
-    /// The row's tiles take their new look from <paramref name="next"/>, the same items in the same
-    /// order (the progress a film just played left): focus and the tiles stay where they are.
+    /// The row's tiles are now <paramref name="next"/>: those it has take their new look (the progress
+    /// a film just played left, a badge a request changed), and those past its end are added before
+    /// See all (a list's next page), focus and the tiles staying where they are. A shorter list keeps
+    /// the tiles it had.
     /// </summary>
     public void Update(IReadOnlyList<TileModel> next)
     {
@@ -142,6 +144,15 @@ sealed class RowView : View
             models[i] = next[i];
             if (i < tiles.Count) tiles[i].Bind(next[i], items[i]);
         }
+        if (next.Count <= models.Count) return;
+        for (var i = models.Count; i < next.Count; i++)
+        {
+            models.Add(next[i]);
+            items.Add(Group.Insert(items.Count, ItemFor(i, next[i])));
+        }
+        if (seeAll != null) seeAll.PositionX = models.Count * Ui.Dp(kind.Width + kind.Gap);
+        Make(Ahead(Math.Max(0, focused)));
+        MakeSoon(MakerMs);
     }
 
     public FocusGroup Group { get; }
@@ -384,7 +395,22 @@ sealed class RowColumnView : View
     public FocusGroup Group { get; }
 
     /// <summary>Where the first row starts while the page is at its top, in pixels.</summary>
-    public float Top { get; }
+    public float Top { get; private set; }
+
+    /// <summary>The page is at its top: the rows are where it put them.</summary>
+    bool atTop = true;
+
+    /// <summary>
+    /// The rows start at <paramref name="top"/> dp now (a hero grew by a line that came later): at
+    /// once while the page is at its top, else when it comes back there.
+    /// </summary>
+    public void MoveTop(float top)
+    {
+        Top = Ui.Dp(top);
+        if (!atTop) return;
+        scroll?.Stop();
+        content.PositionY = Top;
+    }
 
     public void Add(RowView row) => Add(row, row.Group);
 
@@ -410,6 +436,7 @@ sealed class RowColumnView : View
         else Near(index);
         // The first row stays where the page put it; others bring their header to the line.
         var target = index == 0 && firstAtTop ? Top : Ui.Dp(lines[index]) - rows[index].PositionY;
+        atTop = target == Top;
         scroll?.Stop();
         scroll = Scrolling.Glide(gate);
         scroll.AnimateTo(content, "PositionY", target);
@@ -447,6 +474,7 @@ sealed class RowColumnView : View
     /// <summary>Back to the page's top: the first row where the page put it, every row drawn.</summary>
     public void ScrollToTop()
     {
+        atTop = true;
         scroll?.Stop();
         scroll = new Animation(PleyMotion.FocusMs) { DefaultAlphaFunction = new AlphaFunction(AlphaFunction.BuiltinFunctions.EaseOut) };
         scroll.AnimateTo(content, "PositionY", Top);

@@ -253,6 +253,10 @@ public sealed class AppState
     public Signal<bool> SignedOut { get; } = new Signal<bool>(false);
     /// <summary>Whether the TV shows the app (not another app, its home screen or standby).</summary>
     public Signal<bool> Visible { get; } = new Signal<bool>(true);
+    /// <summary>The server's events are connected: what changes comes as it happens, and nothing need be polled.</summary>
+    public Signal<bool> Streaming { get; } = new Signal<bool>(false);
+    /// <summary>The server's events connected (each time): nothing is replayed, so what they would have said is asked again.</summary>
+    public event Action? Connected;
     /// <summary>
     /// The server answered a screen nothing (the Android app's TvOfflineState): what shows is what
     /// was saved. Raised by a load the network failed, lowered by the server's events connecting
@@ -494,6 +498,7 @@ public sealed class AppState
         store.Remove(SavedKey(HomeKey, server, id));
         store.Remove(SavedKey(MeKey, server, id));
         store.Remove(SavedKey(LibrariesKey, server, id));
+        foreach (var key in Requests.AppRequests.KeptKeys) store.Remove(SavedKey(key, server, id));
     }
 
     /// <summary>Everything saved from <paramref name="server"/>: signed out of it, or it was forgotten.</summary>
@@ -917,12 +922,14 @@ public sealed class AppState
             Scans.Value = new ScanState[0];
             return;
         }
-        events ??= new EventStream(server, tokens, HandleEvent, Reconnected, connect, scheduler, platform.UserAgent);
+        events ??= new EventStream(server, tokens, HandleEvent, Reconnected, connect, scheduler, platform.UserAgent, () => Streaming.Value = false);
         events.Start();
     }
 
     void Reconnected()
     {
+        Streaming.Value = true;
+        Connected?.Invoke();
         // Nothing is replayed: what is older than 30 s, or anything after the server was out of reach, is asked again.
         var away = Offline.Value;
         ServerAnswered();

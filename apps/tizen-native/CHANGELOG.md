@@ -35,6 +35,14 @@ It has no releases yet: it is built and installed by hand
 
 ### Added
 
+- Discover and requests, as on Android TV: Discover in the rail for a
+  profile that may ask (else Your requests, Requests for administrators)
+  with its number; TMDB's rows, a hero and a title's page with Request,
+  Tell me too and Which seasons?; a row's See all; the requests with
+  their tabs, filters and actions; Discover's row in Search; a library
+  title's request and Request more seasons; and a pop-up when something
+  asked for is ready to watch. Sign-in asks for requests and approvals
+  where the server offers them, and Settings → About credits TMDB.
 - The profiling build traces the network, the Wi-Fi link and the TV's CPUs
   once a second, times each step of opening, seeking and closing a film,
   and takes commands to measure the network (`speed`, `wifi`) and to try
