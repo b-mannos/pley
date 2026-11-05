@@ -188,7 +188,9 @@ left on, kept on the Roku for each server, profile and library.
   (Any HDR, HDR, which takes in Dolby Vision and HDR+, Dolby Vision, HDR+,
   HLG, SDR). Those two show once the server says the titles differ in
   them, offering the choices it lists, or while one is chosen; a title
-  counts by its best file, a show by its best episode.
+  counts by its best file, a show by its best episode. Filters that
+  nothing matches show No matches, with Clear filters, which takes the
+  focus.
 - **Save as…:** once filters are set, the Filter panel ends with Clear
   filters and Save as…, which saves them and the order as a smart playlist
   (`POST /api/playlists` with `library_id` and `smart_filter`, written as

@@ -64,6 +64,8 @@ sub init()
     m.chipScroll = 0
     m.chipRoom = 0
     m.chipPanel = false
+    ' What the message's button does (showMessage), "" without one.
+    m.messageAction = ""
     ' Where the focus goes once the first answer comes: into the titles.
     m.focusContent = true
     m.lastFocus = m.grid
@@ -77,6 +79,7 @@ sub init()
     m.rows.observeField("rowItemSelected", "onRowTile")
     m.choices.observeField("itemSelected", "onChoice")
     m.menu.observeField("itemSelected", "onMenu")
+    m.message.observeField("chosen", "onMessageAction")
     m.top.observeField("active", "onActive")
 end sub
 
@@ -91,6 +94,7 @@ sub onActive()
         if m.grid.isInFocusChain() then m.lastFocus = m.grid
         if m.letters.isInFocusChain() then m.lastFocus = m.letters
         if m.rows.isInFocusChain() then m.lastFocus = m.rows
+        if m.message.isInFocusChain() then m.lastFocus = m.message
         return
     end if
     if not m.started
@@ -182,7 +186,7 @@ sub showTab(wanted as string)
         end if
     end for
     m.viewStrip.visible = wanted = "library"
-    if m.grid.isInFocusChain() or m.rows.isInFocusChain() or m.letters.isInFocusChain() then m.tabs.setFocus(true)
+    if m.grid.isInFocusChain() or m.rows.isInFocusChain() or m.letters.isInFocusChain() or m.message.isInFocusChain() then m.tabs.setFocus(true)
     m.grid.visible = false
     m.rows.visible = false
     showLetters()
@@ -225,13 +229,24 @@ sub showContent()
     else if shownTab = "collections"
         if m.collections.getChildCount() = 0 then empty = "This library has no collections."
     else if m.content.getChildCount() = 0
-        empty = "This library is empty."
-        if libFiltered(m.view) then empty = "No titles match these filters."
+        if libFiltered(m.view)
+            ' Nothing matches: Clear filters, as on Android TV.
+            showMessage("Nothing in this library matches the current filters.", "No matches", "clear")
+        else
+            showMessage("This library is empty.")
+        end if
+        if m.message.action <> "" and m.focusContent and m.top.isInFocusChain() and not m.panel.visible
+            m.focusContent = false
+            focusContent()
+        end if
+        return
     end if
     if empty <> ""
         showMessage(empty)
         return
     end if
+    ' The message's button had the focus: the titles take it.
+    if m.message.isInFocusChain() then m.focusContent = true
     m.message.visible = false
     m.rows.visible = shownTab = "recommended"
     m.grid.visible = shownTab <> "recommended"
@@ -242,13 +257,38 @@ sub showContent()
     end if
 end sub
 
-sub showMessage(text as string)
+' What the tab says in place of its titles: text, under title, with the
+' button of action ("clear": Clear filters) where it has one. The focus
+' in the titles goes to that button, else to the tabs; on the chips or
+' the tabs, it stays.
+sub showMessage(text as string, title = "" as string, action = "" as string)
+    inContent = m.top.hasFocus() or m.grid.isInFocusChain() or m.rows.isInFocusChain() or m.letters.isInFocusChain() or m.message.isInFocusChain()
     m.grid.visible = false
     m.rows.visible = false
     showLetters()
+    m.messageAction = action
+    label = ""
+    if action = "clear" then label = "Clear filters"
+    m.message.title = title
     m.message.text = text
+    m.message.action = label
     m.message.visible = true
-    if not m.panel.visible and m.top.isInFocusChain() and not m.viewChips.isInFocusChain() then m.tabs.setFocus(true)
+    if m.panel.visible or not inContent or not m.top.isInFocusChain() then return
+    if label <> ""
+        m.message.setFocus(true)
+    else
+        m.tabs.setFocus(true)
+    end if
+end sub
+
+' The message's button: Clear filters lists every title again, the focus
+' going to them as they come.
+sub onMessageAction()
+    if m.messageAction = "clear"
+        libClearFilters(m.view)
+        m.focusContent = true
+        applyView()
+    end if
 end sub
 
 sub focusContent()
@@ -256,6 +296,8 @@ sub focusContent()
         m.rows.setFocus(true)
     else if m.grid.visible
         m.grid.setFocus(true)
+    else if m.message.visible and m.message.action <> ""
+        m.message.setFocus(true)
     end if
 end sub
 
@@ -836,11 +878,11 @@ function onKeyEvent(key as string, press as boolean) as boolean
         return false
     end if
     chips = m.tabs.isInFocusChain() or m.viewChips.isInFocusChain()
-    if key = "down" and chips and (m.grid.visible or m.rows.visible)
+    if key = "down" and chips and (m.grid.visible or m.rows.visible or (m.message.visible and m.message.action <> ""))
         focusContent()
         return true
     end if
-    if key = "up" and (m.grid.isInFocusChain() or m.rows.isInFocusChain() or m.letters.isInFocusChain())
+    if key = "up" and (m.grid.isInFocusChain() or m.rows.isInFocusChain() or m.letters.isInFocusChain() or m.message.isInFocusChain())
         m.tabs.setFocus(true)
         return true
     end if
