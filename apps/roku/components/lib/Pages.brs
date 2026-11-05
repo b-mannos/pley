@@ -88,14 +88,33 @@ function pageExtras(detail as object, server as string) as object
 end function
 
 ' The rows under a title's details that come with it: [{ key, title,
-' wide, tiles }], cast and crew then extras, rows without tiles left out.
+' wide, tiles }], extras then cast and crew, as on Android TV, rows
+' without tiles left out.
 function pageDetailRows(detail as object, server as string) as object
     rows = []
-    credits = pageCredits(detail, server)
-    if credits.Count() > 0 then rows.Push({ key: "credits", title: "Cast & crew", wide: false, tiles: credits })
     extras = pageExtras(detail, server)
     if extras.Count() > 0 then rows.Push({ key: "extras", title: "Extras", wide: true, tiles: extras })
+    credits = pageCredits(detail, server)
+    if credits.Count() > 0 then rows.Push({ key: "credits", title: pageCreditsTitle(detail), wide: false, tiles: credits })
     return rows
+end function
+
+' The cast and crew row's title, by what it holds, as Android TV's: "Cast",
+' "Crew" or "Cast & Crew"; an episode's cast are its "Guest Stars".
+function pageCreditsTitle(detail as object) as string
+    cast = false
+    for each credit in httpArray(detail.cast)
+        if GetInterface(credit, "ifAssociativeArray") <> invalid and httpNumber(credit.id, 0) > 0 then cast = true
+    end for
+    crew = false
+    for each credit in httpArray(detail.crew)
+        if GetInterface(credit, "ifAssociativeArray") <> invalid and httpNumber(credit.id, 0) > 0 and pageRoleLabel(httpString(credit.role)) <> "" then crew = true
+    end for
+    actors = "Cast"
+    if httpString(detail.kind) = "episode" then actors = "Guest Stars"
+    if not crew then return actors
+    if not cast then return "Crew"
+    return actors + " & Crew"
 end function
 
 ' A collection as a tile: its poster (the server's own picture of it when
@@ -139,7 +158,7 @@ function pageCollection(detail as object, server as string) as object
         kind = ""
         if GetInterface(item, "ifAssociativeArray") <> invalid then kind = httpString(item.kind)
         if contentShown(kind)
-            tiles.Push(contentTile(item, server, false))
+            tiles.Push(contentTile(item, server, false, true))
             if kind = "movie" then movies = true
             if contentPlayable(kind) then queue.Push(contentUpNext(item, server))
             if kind = "show" or kind = "season" then shows.Push(httpNumber(item.id, 0))
@@ -291,27 +310,6 @@ function pageFilterOrder(sort as string) as string
     return "Sorted by " + field
 end function
 
-' A show's seasons as poster tiles: "Season 1", and its episodes.
-function pageSeasonTiles(children as dynamic, server as string) as object
-    tiles = []
-    for each item in httpArray(children)
-        if GetInterface(item, "ifAssociativeArray") <> invalid and httpString(item.kind) = "season"
-            tile = contentTile(item, server, false)
-            seasons = contentSeasons([item])
-            tile.title = seasons[0].title
-            episodes = seasons[0].episodes
-            tile.subtitle = ""
-            if episodes = 1
-                tile.subtitle = "1 episode"
-            else if episodes > 1
-                tile.subtitle = urlValue(episodes) + " episodes"
-            end if
-            tiles.Push(tile)
-        end if
-    end for
-    return tiles
-end function
-
 ' --- People ---
 
 ' A person's page (GET /api/people/{id}): { name, photo, initials, line,
@@ -413,21 +411,36 @@ function pageInitials(name as string) as string
     return out
 end function
 
-' What the Options key offers on a tile: [{ label, action }]. inList: the
-' title is in My List (true or false), or invalid when not known; a
-' Continue Watching tile can be taken out of it. Kinds without actions
+' What the Options key offers on a tile, in the other TVs' order: [{
+' label, action }]. Play ("play": a show's or a season's next episode),
+' or Resume and From start ("resume", "start") while in progress; the
+' watched mark; Remove from Continue Watching from that row
+' (continueWatching); My List, where inList says whether the title is in
+' it (true or false; invalid when not known); Add to playlist; an
+' episode's Go to show and Go to season, a season's Go to show. Music
+' opens its page ("open") or goes in a playlist. Kinds without actions
 ' get none.
 function pageTileOptions(tile as object, continueWatching as boolean, inList as dynamic) as object
     kind = httpString(tile.kind)
     options = []
     ' Music has no watched marks or My List.
-    if contentMusic(kind) then return [{ label: "Add to playlist", action: "playlist" }]
+    if contentMusic(kind) then return [{ label: "Open", action: "open" }, { label: "Add to playlist", action: "playlist" }]
     if kind <> "movie" and kind <> "show" and kind <> "season" and kind <> "episode" then return options
-    if httpTrue(tile.watched)
+    watched = httpTrue(tile.watched)
+    ' A show or a season is watched once every episode is.
+    if (kind = "show" or kind = "season") and httpNumber(tile.leafCount, 0) > 0 then watched = httpNumber(tile.unwatched, 0) = 0
+    if (kind = "movie" or kind = "episode") and not watched and fmtResumable(tile.positionMs, tile.durationMs)
+        options.Push({ label: "Resume", action: "resume" })
+        options.Push({ label: "From start", action: "start" })
+    else
+        options.Push({ label: "Play", action: "play" })
+    end if
+    if watched
         options.Push({ label: "Mark as unwatched", action: "unwatched" })
     else
         options.Push({ label: "Mark as watched", action: "watched" })
     end if
+    if continueWatching then options.Push({ label: "Remove from Continue Watching", action: "hide" })
     if (kind = "movie" or kind = "show") and GetInterface(inList, "ifBoolean") <> invalid
         if inList
             options.Push({ label: "Remove from My List", action: "listRemove" })
@@ -436,11 +449,9 @@ function pageTileOptions(tile as object, continueWatching as boolean, inList as 
         end if
     end if
     options.Push({ label: "Add to playlist", action: "playlist" })
-    if continueWatching then options.Push({ label: "Remove from Continue Watching", action: "hide" })
-    if kind = "episode" and httpNumber(tile.grandparentId, 0) > 0
-        options.Push({ label: "Go to show", action: "show" })
-        if httpNumber(tile.parentId, 0) > 0 then options.Push({ label: "Go to season", action: "season" })
-    end if
+    if kind = "episode" and httpNumber(tile.grandparentId, 0) > 0 then options.Push({ label: "Go to show", action: "show" })
+    if kind = "episode" and httpNumber(tile.parentId, 0) > 0 then options.Push({ label: "Go to season", action: "season" })
+    if kind = "season" and httpNumber(tile.parentId, 0) > 0 then options.Push({ label: "Go to show", action: "show" })
     return options
 end function
 

@@ -6,24 +6,40 @@ sub init()
     m.column = m.top.findNode("column")
     m.text = m.top.findNode("text")
     m.heading = m.top.findNode("heading")
+    m.context = m.top.findNode("context")
     m.line = m.top.findNode("line")
+    m.left = m.top.findNode("left")
     m.genres = m.top.findNode("genres")
     m.credits = m.top.findNode("credits")
     m.tagline = m.top.findNode("tagline")
     m.summary = m.top.findNode("summary")
     m.note = m.top.findNode("note")
     m.buttons = m.top.findNode("buttons")
+    m.lower = m.top.findNode("lower")
+    m.tabs = m.top.findNode("tabs")
+    m.episodes = m.top.findNode("episodes")
+    m.episodesNote = m.top.findNode("episodesNote")
     m.rows = m.top.findNode("rows")
+    m.infoBlock = m.top.findNode("infoBlock")
+    m.infoTitle = m.top.findNode("infoTitle")
+    m.infoMeta = m.top.findNode("infoMeta")
+    m.infoEpisode = m.top.findNode("infoEpisode")
+    m.infoEpisodeLine = m.top.findNode("infoEpisodeLine")
+    m.infoSummary = m.top.findNode("infoSummary")
     m.message = m.top.findNode("message")
+    m.messageTitle = m.top.findNode("messageTitle")
+    m.messageText = m.top.findNode("messageText")
+    m.messageButton = m.top.findNode("messageButton")
     m.stage = m.top.findNode("stage")
     m.stageLine = m.top.findNode("stageLine")
     m.requestPoll = m.top.findNode("requestPoll")
+    m.tabRest = m.top.findNode("tabRest")
+    m.episodeRest = m.top.findNode("episodeRest")
     m.panel = m.top.findNode("panel")
     m.panelTitle = m.top.findNode("panelTitle")
     m.menu = m.top.findNode("menu")
     m.choices = m.top.findNode("choices")
     m.info = m.top.findNode("info")
-    m.column.visible = false
     ' What the panel shows: "" (closed), a menu ("more", "tracks"), the
     ' choices of one of its entries ("rating", "version", "audio",
     ' "subtitles") or the media info ("info"); the menu Back goes back to
@@ -41,36 +57,57 @@ sub init()
     m.started = false
     ' What the server says of requests for the title (GET
     ' /api/items/{id}/request), invalid for nothing to show; the asks (an
-    ' answer to an earlier one is left out); Request more seasons' tile
-    ' while the person may ask for some.
+    ' answer to an earlier one is left out); where Request more seasons
+    ' goes (its tile's fields) while the person may ask for some.
     m.itemRequest = invalid
     m.requestAsks = 0
     m.askMore = invalid
     ' The item's JSON, which the player starts with, and what it shows; a
-    ' show's episode to play next, once the server said (invalid for none).
+    ' show's or a season's episode to play next, once the server said
+    ' (invalid for none); the titles of the collections it is part of.
     m.item = invalid
     m.detail = invalid
     m.onDeck = invalid
     m.onDeckKnown = false
-    ' The rows under the details by key, as they come, and their keys as
+    m.partOf = []
+    ' The seasons of the tabs ([{ itemId, title, year }], the show's), once
+    ' they came; the season whose episodes show (0 for none yet) and the one
+    ' asked for last; the episode the row's focus goes to first.
+    m.seasons = invalid
+    m.shownSeason = 0
+    m.askedSeason = 0
+    m.episodeTarget = 0
+    ' The rows under the episodes by key, as they come, and their keys as
     ' shown, in order.
     m.rowNodes = {}
     m.rowKeys = []
+    ' Where the focus is: "hero" (the buttons), "tabs", "episodes" or
+    ' "rows"; and the episode the info block says, once the focus rested on
+    ' one.
+    m.area = "hero"
+    m.infoShown = invalid
     m.buttons.observeField("buttonSelected", "onButton")
+    m.messageButton.observeField("buttonSelected", "onMessageButton")
     m.menu.observeField("itemSelected", "onMenu")
     m.choices.observeField("itemSelected", "onChoice")
     m.rows.observeField("rowItemSelected", "onTile")
+    m.episodes.observeField("rowItemSelected", "onEpisode")
+    m.episodes.observeField("rowItemFocused", "onEpisodeFocused")
+    m.tabs.observeField("focusIndex", "onTabFocused")
+    m.tabs.observeField("chosen", "onTabChosen")
+    m.tabRest.observeField("fire", "onTabRested")
+    m.episodeRest.observeField("fire", "onEpisodeRested")
     m.requestPoll.observeField("fire", "askItemRequest")
     m.top.observeField("active", "onActive")
     m.top.observeField("requestSummary", "onSummary")
     m.top.observeField("requestsChanged", "onRequestsChanged")
 end sub
 
-' Loaded each time it shows: back from the player, the place has changed.
-' Asking for it also has the server read the start of the file ahead. The
-' focus comes here at once, as the screen before had it: the remote works
-' whatever the answer, and a second Back goes back. The rows come with the
-' first answer.
+' Loaded each time it shows: back from the player, the place has changed,
+' and so have the episodes' marks. Asking for it also has the server read
+' the start of the file ahead. The focus comes here at once, where it was:
+' the remote works whatever the answer, and a second Back goes back. The
+' rows come with the first answer.
 sub onActive()
     if not m.top.active
         m.requestPoll.control = "stop"
@@ -79,70 +116,112 @@ sub onActive()
     uiChangesSince()
     if m.panel.visible
         closePanel()
-    else if m.rows.visible and m.page.translation[1] < 0
-        m.rows.setFocus(true)
-    else if m.buttons.visible
-        m.buttons.setFocus(true)
     else
-        m.top.setFocus(true)
+        focusArea(m.area)
     end if
-    path = "/api/items/" + urlValue(m.top.params.itemId)
     if m.started
-        uiGet(path, "onDetail")
+        uiGet("/api/items/" + urlValue(m.top.params.itemId), "onDetail")
+        if m.shownSeason <> 0 then askEpisodes(m.shownSeason)
     else
         m.started = true
-        uiRequest({ method: "GET", path: path, build: "detail" }, "onDetail")
+        askDetail()
     end if
 end sub
 
-sub onTitleChanged(change as object)
-    if m.detail <> invalid and change.itemId = m.detail.itemId then uiGet("/api/items/" + urlValue(m.detail.itemId), "onDetail")
+sub askDetail()
+    uiRequest({ method: "GET", path: "/api/items/" + urlValue(m.top.params.itemId), build: "detail" }, "onDetail")
 end sub
 
-' A reload that fails leaves the details as they were.
+' A title marked here or on another screen: its tiles show it at once,
+' then as the server has it.
+sub onTitleChanged(change as object)
+    uiPatchTiles(m.episodes.content, change)
+    if m.detail <> invalid and change.itemId = m.detail.itemId then uiGet("/api/items/" + urlValue(m.detail.itemId), "onDetail")
+    if m.shownSeason <> 0 then askEpisodes(m.shownSeason)
+end sub
+
+' A reload that fails leaves the details as they were; the first says why,
+' with Retry, as on Android TV (Back for a title gone).
 sub onDetail(event as object)
     answer = event.getData()
     if not answer.ok or answer.data = invalid
-        if m.detail = invalid and not uiFailed(answer) then m.message.text = answer.message
+        if m.detail = invalid and not uiFailed(answer) then showFailure(answer)
         return
     end if
     first = m.item = invalid
     m.item = answer.data
     kind = httpString(m.item.kind)
-    if kind = "show"
-        m.onDeckKnown = false
+    ' Asked again each time: back from the player, it has moved on. The
+    ' buttons wait for it the first time only.
+    if kind = "show" or kind = "season"
+        if first then m.onDeckKnown = false
         uiGet("/api/items/" + urlValue(m.item.id) + "/on-deck", "onOnDeck")
     end if
-    if first then askRows(event.getRoSGNode(), answer, kind)
+    if first
+        askRows(event.getRoSGNode(), answer, kind)
+        askSeasons(kind)
+    end if
     showDetail()
     askItemRequest()
 end sub
 
-' A show's next episode: its button comes first.
+sub showFailure(answer as object)
+    gone = answer.status = 404
+    m.messageTitle.text = "Couldn't load this item"
+    m.messageText.text = answer.message
+    m.messageButton.buttons = ["Retry"]
+    if gone
+        m.messageTitle.text = "Item not found"
+        m.messageText.text = "It may have been removed, or this profile can't see it."
+        m.messageButton.buttons = ["Back"]
+    end if
+    m.messageButton.visible = true
+    m.message.visible = true
+    if m.top.isInFocusChain() then m.messageButton.setFocus(true)
+end sub
+
+' Retry asks again, Loading… meanwhile; Back leaves.
+sub onMessageButton()
+    if m.messageButton.buttons[0] = "Back"
+        uiNavigate({ back: true })
+        return
+    end if
+    m.messageTitle.text = ""
+    m.messageText.text = "Loading…"
+    m.messageButton.visible = false
+    m.top.setFocus(true)
+    askDetail()
+end sub
+
+' A show's or a season's next episode: its button comes first, and a
+' show's page opens on its season.
 sub onOnDeck(event as object)
     answer = event.getData()
     m.onDeck = invalid
     if answer.ok and answer.data <> invalid then m.onDeck = httpObject(answer.data.item)
     m.onDeckKnown = true
     showDetail()
+    pickSeason()
 end sub
 
 sub showDetail()
     if m.item = invalid then return
-    m.detail = contentDetail(m.item, m.global.session.server, m.onDeck)
+    years = []
+    if m.seasons <> invalid
+        for each season in m.seasons
+            years.Push(season.year)
+        end for
+    end if
+    beside = { fileId: m.fileId, askMore: m.askMore <> invalid, partOf: m.partOf, years: years }
+    m.detail = contentDetail(m.item, m.global.session.server, m.onDeck, beside)
     m.message.visible = false
     m.heading.text = m.detail.heading
+    m.context.text = m.detail.context
     m.line.text = m.detail.line
+    m.left.text = m.detail.left
     m.genres.text = m.detail.genres
     m.credits.text = m.detail.credits
-    m.tagline.text = m.detail.tagline
-    ' Seven buttons take a line from the summary (three, as on Android TV),
-    ' and so does the credits line: under a heading of two lines they would
-    ' reach the rows' title. More's Details has the whole of it.
-    m.summary.maxLines = 4
-    if m.detail.buttons.Count() > 6 then m.summary.maxLines = 3
-    if m.detail.credits <> "" then m.summary.maxLines = m.summary.maxLines - 1
-    m.summary.text = m.detail.summary
+    fitSummary()
     m.note.text = m.detail.note
     layoutText()
     agent = m.top.getScene().getHttpAgent()
@@ -154,37 +233,61 @@ sub showDetail()
         m.poster.setHttpAgent(agent)
         m.poster.uri = m.detail.poster
     end if
-    ' A show's buttons wait for its next episode, which comes first.
-    hasButtons = m.detail.buttons.Count() > 0 and (m.detail.kind <> "show" or m.onDeckKnown)
+    ' A show's or a season's buttons wait for its next episode, which comes
+    ' first.
+    hasButtons = m.detail.buttons.Count() > 0 and ((m.detail.kind <> "show" and m.detail.kind <> "season") or m.onDeckKnown)
     if hasButtons
         focused = m.buttons.buttonFocused
+        if not m.buttons.visible then focused = m.detail.focus
         if FormatJson(m.buttons.buttons) <> FormatJson(m.detail.buttons) then m.buttons.buttons = m.detail.buttons
         if focused > 0 and focused < m.detail.buttons.Count() then m.buttons.focusButton = focused
     end if
     m.buttons.visible = hasButtons
     m.column.visible = true
+    placeLower()
+    drawInfo()
     ' A menu of the panel says its entries as they are now.
     if m.panelKind = "more"
         openMore()
     else if m.panelKind = "tracks"
         openTracks()
     end if
-    ' Only while this screen has the focus: a dialog or the panel over it
-    ' keeps it.
-    if m.top.isInFocusChain() and not m.rows.isInFocusChain() and not m.panel.visible
-        if hasButtons
-            m.buttons.setFocus(true)
-        else
-            m.top.setFocus(true)
-        end if
+    ' Only while this screen has the focus on its buttons: a dialog or the
+    ' panel over it keeps it.
+    if m.top.isInFocusChain() and m.area = "hero" and not m.panel.visible then focusArea("hero")
+end sub
+
+' The column ends above the top of what is under it: past six buttons each
+' takes a line from the summary (four at most), and so do the context
+' line, the time left and the credits; the tagline gives its room up once
+' the summary would keep fewer than two lines. That is for a heading of
+' two lines: one of a line gives one back. More's Details has the whole
+' summary.
+sub fitSummary()
+    room = 4
+    count = m.detail.buttons.Count()
+    if count > 6 then room = room - (count - 6)
+    for each part in [m.detail.context, m.detail.left, m.detail.credits]
+        if part <> "" then room = room - 1
+    end for
+    if m.heading.boundingRect().height < 100 then room = room + 1
+    tagline = m.detail.tagline
+    if tagline <> "" and room < 2
+        tagline = ""
+        room = room + 1
     end if
+    if room < 1 then room = 1
+    if room > 4 then room = 4
+    m.tagline.text = tagline
+    m.summary.maxLines = room
+    m.summary.text = m.detail.summary
 end sub
 
 ' The labels with text, one under the other.
 sub layoutText()
     shown = [m.heading]
     spacings = []
-    for each part in [{ label: m.line, gap: 20 }, { label: m.genres, gap: 8 }, { label: m.credits, gap: 8 }, { label: m.tagline, gap: 28 }, { label: m.summary, gap: 20 }, { label: m.note, gap: 28 }]
+    for each part in [{ label: m.context, gap: 8 }, { label: m.line, gap: 16 }, { label: m.left, gap: 8 }, { label: m.genres, gap: 8 }, { label: m.credits, gap: 8 }, { label: m.tagline, gap: 28 }, { label: m.summary, gap: 20 }, { label: m.note, gap: 28 }]
         if part.label.text <> ""
             spacings.Push(part.gap)
             shown.Push(part.label)
@@ -195,11 +298,187 @@ sub layoutText()
     m.text.itemSpacings = spacings
 end sub
 
+' --- The seasons and episodes ---
+
+' A show's seasons are its tabs, a season's are its show's; an episode
+' shows its own season, without tabs, its focus on itself, as on Android
+' TV.
+sub askSeasons(kind as string)
+    showId = 0
+    if kind = "show" then showId = httpNumber(m.item.id, 0)
+    if kind = "season" then showId = httpNumber(m.item.parent_id, 0)
+    if showId > 0
+        uiRequest({ method: "GET", path: "/api/items/" + urlValue(showId) + "/children", build: "seasons" }, "onSeasons")
+    else if kind = "season"
+        m.seasons = []
+        pickSeason()
+    else if kind = "episode"
+        m.seasons = []
+        m.episodeTarget = httpNumber(m.item.id, 0)
+        seasonId = httpNumber(m.item.parent_id, 0)
+        if seasonId > 0 then askEpisodes(seasonId)
+    end if
+end sub
+
+sub onSeasons(event as object)
+    answer = event.getData()
+    content = event.getRoSGNode().content
+    m.seasons = []
+    if answer.ok and content <> invalid
+        for each node in content.getChildren(-1, 0)
+            m.seasons.Push({ itemId: node.itemId, title: node.title, index: node.index, year: node.year })
+        end for
+    end if
+    chips = []
+    for each season in m.seasons
+        chips.Push({ label: season.title, width: 0 })
+    end for
+    m.tabs.chips = chips
+    showDetail()
+    pickSeason()
+end sub
+
+' The season shown first, once the seasons (and a show's next episode)
+' came: a season's own, else the next episode's (contentFirstSeason).
+sub pickSeason()
+    if m.item = invalid or m.seasons = invalid or m.shownSeason <> 0 or m.askedSeason <> 0 then return
+    kind = httpString(m.item.kind)
+    if kind = "season"
+        if not m.onDeckKnown then return
+        m.episodeTarget = 0
+        if m.onDeck <> invalid and httpNumber(m.onDeck.parent_id, 0) = httpNumber(m.item.id, 0) then m.episodeTarget = httpNumber(m.onDeck.id, 0)
+        askEpisodes(httpNumber(m.item.id, 0))
+        return
+    end if
+    ' Waits for the next episode, so the page doesn't jump to its season.
+    if kind <> "show" or not m.onDeckKnown then return
+    seasonId = contentFirstSeason(m.seasons, m.onDeck)
+    m.episodeTarget = 0
+    if m.onDeck <> invalid then m.episodeTarget = httpNumber(m.onDeck.id, 0)
+    if seasonId > 0 then askEpisodes(seasonId)
+end sub
+
+sub askEpisodes(seasonId as dynamic)
+    m.askedSeason = seasonId
+    ' The season rides along in the spec, which the API task ignores.
+    uiRequest({ method: "GET", path: "/api/items/" + urlValue(seasonId) + "/children", build: "episodes", seasonId: seasonId }, "onEpisodes")
+end sub
+
+sub onEpisodes(event as object)
+    request = event.getRoSGNode()
+    seasonId = request.spec.seasonId
+    ' An answer for a season left meanwhile.
+    if seasonId <> m.askedSeason then return
+    answer = event.getData()
+    if not answer.ok
+        if not uiFailed(answer) and m.shownSeason = 0
+            m.episodesNote.text = answer.message
+            m.shownSeason = seasonId
+            placeLower()
+        end if
+        return
+    end if
+    again = seasonId = m.shownSeason
+    keep = 0
+    position = m.episodes.rowItemFocused
+    if again and position <> invalid and position.Count() = 2 then keep = position[1]
+    m.shownSeason = seasonId
+    row = CreateObject("roSGNode", "ContentNode")
+    row.title = seasonTitleOf(seasonId)
+    if request.content <> invalid then row.appendChildren(request.content.getChildren(-1, 0))
+    root = CreateObject("roSGNode", "ContentNode")
+    root.appendChild(row)
+    count = row.getChildCount()
+    ' Focus goes to the episode to watch (the page's own episode), else
+    ' stays where it was.
+    if not again
+        keep = 0
+        for i = 0 to count - 1
+            if row.getChild(i).itemId = m.episodeTarget then keep = i
+        end for
+    end if
+    m.episodes.showRowLabel = [not hasTabs()]
+    m.episodes.content = root
+    if keep > 0 and keep < count then m.episodes.jumpToRowItem = [0, keep]
+    m.episodesNote.text = ""
+    if count = 0 then m.episodesNote.text = "No episodes found."
+    for i = 0 to m.seasons.Count() - 1
+        if m.seasons[i].itemId = seasonId then m.tabs.current = i
+    end for
+    placeLower()
+    if m.area = "episodes" and count = 0 then focusArea("tabs")
+    drawInfo()
+end sub
+
+' The row's title without tabs: the season's ("Season 1"), as Android TV
+' heads it.
+function seasonTitleOf(seasonId as dynamic) as string
+    if m.seasons <> invalid
+        for each season in m.seasons
+            if season.itemId = seasonId then return season.title
+        end for
+    end if
+    if m.item <> invalid and httpString(m.item.kind) = "episode"
+        title = contentSeasonTitle({ index: m.item.parent_index, title: "" })
+        if httpNumber(m.item.parent_index, -1) < 0 and httpSentence(m.item.parent_title) <> "" then title = httpSentence(m.item.parent_title)
+        return title
+    end if
+    if m.item <> invalid and httpString(m.item.kind) = "season" then return contentSeasonTitle(m.item)
+    return "Episodes"
+end function
+
+' A tab the focus rests on shows its season; OK shows it at once.
+sub onTabFocused()
+    m.tabRest.control = "stop"
+    if m.tabs.isInFocusChain() then m.tabRest.control = "start"
+end sub
+
+sub onTabRested()
+    if m.tabs.isInFocusChain() then showTab(m.tabs.focusIndex)
+end sub
+
+sub onTabChosen()
+    showTab(m.tabs.chosen)
+end sub
+
+sub showTab(at as integer)
+    if m.seasons = invalid or at < 0 or at >= m.seasons.Count() then return
+    seasonId = m.seasons[at].itemId
+    if seasonId = m.askedSeason then return
+    m.episodeTarget = 0
+    if m.onDeck <> invalid then m.episodeTarget = httpNumber(m.onDeck.id, 0)
+    askEpisodes(seasonId)
+end sub
+
+sub onEpisode()
+    uiOpenTile(focusedEpisode())
+end sub
+
+' The episode in focus in the row, or invalid.
+function focusedEpisode() as dynamic
+    if m.episodes.content = invalid then return invalid
+    row = m.episodes.content.getChild(0)
+    position = m.episodes.rowItemFocused
+    if row = invalid or position = invalid or position.Count() < 2 then return invalid
+    return row.getChild(position[1])
+end function
+
+' Tabs for more than one season, as on Android TV.
+function hasTabs() as boolean
+    return m.seasons <> invalid and m.seasons.Count() > 1
+end function
+
+function hasEpisodes() as boolean
+    if m.episodes.content = invalid then return false
+    row = m.episodes.content.getChild(0)
+    return row <> invalid and row.getChildCount() > 0
+end function
+
 ' --- The rows ---
 
-' The rows that came with the details (cast and crew, extras), and those
-' asked for now: a show's seasons, More Like This and the collections a
-' movie or show is part of.
+' The rows that came with the details (extras, cast and crew), and those
+' asked for now: More Like This and the collections a movie or show is
+' part of.
 sub askRows(request as object, answer as object, kind as string)
     built = request.content
     if built <> invalid and answer.rows <> invalid
@@ -209,7 +488,6 @@ sub askRows(request as object, answer as object, kind as string)
         end for
     end if
     path = "/api/items/" + urlValue(m.item.id)
-    if kind = "show" then uiRequest({ method: "GET", path: path + "/children", build: "seasonTiles", row: "seasons", title: "Seasons" }, "onRow")
     if kind = "movie" or kind = "show"
         uiRequest({ method: "GET", path: path + "/related", query: { limit: 20 }, build: "tiles", row: "related", title: "More like this" }, "onRow")
         uiRequest({ method: "GET", path: path + "/collections", build: "collections", row: "collections", title: "Collections" }, "onRow")
@@ -225,7 +503,14 @@ sub onRow(event as object)
     row.title = request.spec.title
     row.appendChildren(request.content.getChildren(-1, 0))
     keepRow(request.spec.row, row, false)
-    if request.spec.row = "seasons" then placeAskTile()
+    ' The collections it is part of are on the genres' line too.
+    if request.spec.row = "collections"
+        m.partOf = []
+        for each tile in row.getChildren(-1, 0)
+            m.partOf.Push(tile.title)
+        end for
+        showDetail()
+    end if
     showRows()
 end sub
 
@@ -233,10 +518,10 @@ sub keepRow(key as string, row as object, wide as boolean)
     m.rowNodes[key] = { node: row, wide: wide }
 end sub
 
-' The rows there are, in their order; the focus stays on its row.
+' The rows there are, in Android TV's order; the focus stays on its row.
 sub showRows()
     keys = []
-    for each key in ["seasons", "credits", "extras", "related", "collections"]
+    for each key in ["extras", "credits", "related", "collections"]
         if m.rowNodes.DoesExist(key) then keys.Push(key)
     end for
     if keys.Count() = 0 or FormatJson(keys) = FormatJson(m.rowKeys) then return
@@ -264,30 +549,166 @@ sub showRows()
         if keys[i] = focusedKey then m.rows.jumpToRowItem = [i, position[1]]
     end for
     m.rows.visible = true
-end sub
-
-' The page slides up to the rows as they take the focus, the backdrop
-' shaded under them all, and back down.
-sub focusRows(onRows as boolean)
-    if onRows
-        m.page.translation = [0, -820]
-        m.shade.width = 1920
-        m.rows.setFocus(true)
-    else
-        m.page.translation = [0, 0]
-        m.shade.width = 1260
-        if m.buttons.visible
-            m.buttons.setFocus(true)
-        else
-            m.top.setFocus(true)
-        end if
-    end if
+    placeLower()
 end sub
 
 sub onTile(event as object)
     position = event.getData()
     row = m.rows.content.getChild(position[0])
     if row <> invalid then uiOpenTile(row.getChild(position[1]))
+end sub
+
+' --- Where the focus is ---
+
+' The parts under the buttons, one under the other: the tabs (more than
+' one season), the season's episodes (or why there are none), the rows.
+' With the focus on the buttons their top shows at y = 940; under them,
+' the part with the focus comes up under the info block (y = 350), the
+' parts above it put away, as on Android TV.
+sub placeLower()
+    y = 0
+    tops = {}
+    m.tabs.visible = hasTabs() and (m.area = "hero" or m.area = "tabs" or m.area = "episodes")
+    if hasTabs()
+        tops.tabs = y
+        m.tabs.translation = [96, y]
+        y = y + 72
+    end if
+    episodes = hasEpisodes()
+    m.episodes.visible = episodes and m.area <> "rows"
+    m.episodesNote.visible = not episodes and m.episodesNote.text <> "" and m.area <> "rows"
+    if episodes or m.episodesNote.text <> ""
+        tops.episodes = y
+        m.episodes.translation = [96, y]
+        m.episodesNote.translation = [96, y]
+        if episodes
+            y = y + 388
+        else
+            y = y + 72
+        end if
+    end if
+    tops.rows = y
+    m.rows.translation = [96, y]
+    if m.area = "hero"
+        m.lower.translation = [0, 940]
+    else if m.area = "rows"
+        m.lower.translation = [0, 350 - tops.rows]
+    else if tops.DoesExist("tabs")
+        m.lower.translation = [0, 350 - tops.tabs]
+    else if tops.DoesExist("episodes")
+        m.lower.translation = [0, 350 - tops.episodes]
+    end if
+    m.page.visible = m.area = "hero" and m.detail <> invalid
+    m.infoBlock.visible = m.area <> "hero" and m.detail <> invalid
+    if m.area = "hero"
+        m.shade.width = 1260
+    else
+        m.shade.width = 1920
+    end if
+end sub
+
+' The parts the focus can go to, top to bottom.
+function areas() as object
+    out = ["hero"]
+    if hasTabs() then out.Push("tabs")
+    if hasEpisodes() then out.Push("episodes")
+    if m.rows.visible and m.rows.content <> invalid and m.rows.content.getChildCount() > 0 then out.Push("rows")
+    return out
+end function
+
+' The part above or below the one with the focus (delta -1 or 1), "" for
+' none.
+function areaBeside(delta as integer) as string
+    list = areas()
+    for i = 0 to list.Count() - 1
+        if list[i] = m.area
+            if i + delta >= 0 and i + delta < list.Count() then return list[i + delta]
+            return ""
+        end if
+    end for
+    return ""
+end function
+
+sub focusArea(area as string)
+    if area = ""
+        area = "hero"
+    else if area <> "hero"
+        ' A part gone meanwhile (a season without episodes): the buttons.
+        found = false
+        for each other in areas()
+            if other = area then found = true
+        end for
+        if not found then area = "hero"
+    end if
+    entering = area <> m.area
+    m.area = area
+    placeLower()
+    if area = "tabs"
+        ' On the shown season's tab, never the one nearest the focus.
+        if entering and m.tabs.current >= 0 then m.tabs.focusIndex = m.tabs.current
+        m.tabs.setFocus(true)
+    else if area = "episodes"
+        m.episodes.setFocus(true)
+        if entering then showEpisodeInfo()
+    else if area = "rows"
+        m.rows.setFocus(true)
+    else if m.message.visible and m.messageButton.visible
+        m.messageButton.setFocus(true)
+    else if m.buttons.visible
+        m.buttons.setFocus(true)
+    else
+        m.top.setFocus(true)
+    end if
+    drawInfo()
+end sub
+
+' --- The info block ---
+
+' Focus moved in the episodes: once it rests, the info block says the
+' episode, as on the other TVs.
+sub onEpisodeFocused()
+    m.episodeRest.control = "stop"
+    if m.episodes.isInFocusChain() then m.episodeRest.control = "start"
+end sub
+
+sub onEpisodeRested()
+    if m.episodes.isInFocusChain() then showEpisodeInfo()
+end sub
+
+sub showEpisodeInfo()
+    episode = focusedEpisode()
+    if episode <> invalid then m.infoShown = { name: episode.name, line: episode.line, summary: episode.summary }
+    drawInfo()
+end sub
+
+' The title and its line; in the tabs and the episodes, the episode the
+' focus rested on, else the title's summary.
+sub drawInfo()
+    if m.detail = invalid then return
+    m.infoTitle.text = m.detail.heading
+    m.infoMeta.text = m.detail.line
+    episode = invalid
+    if m.area = "tabs" or m.area = "episodes" then episode = m.infoShown
+    if episode <> invalid
+        m.infoEpisode.text = episode.name
+        m.infoEpisodeLine.text = episode.line
+        m.infoSummary.text = episode.summary
+    else
+        m.infoEpisode.text = ""
+        m.infoEpisodeLine.text = ""
+        m.infoSummary.text = m.detail.summary
+    end if
+    shown = [m.infoTitle]
+    spacings = []
+    for each part in [{ label: m.infoMeta, gap: 8 }, { label: m.infoEpisode, gap: 14 }, { label: m.infoEpisodeLine, gap: 4 }, { label: m.infoSummary, gap: 8 }]
+        if part.label.text <> ""
+            spacings.Push(part.gap)
+            shown.Push(part.label)
+        end if
+    end for
+    m.infoBlock.removeChildrenIndex(m.infoBlock.getChildCount(), 0)
+    m.infoBlock.appendChildren(shown)
+    m.infoBlock.itemSpacings = spacings
 end sub
 
 ' --- Requests ---
@@ -337,20 +758,11 @@ sub showItemRequest()
         m.stage.visible = true
         m.stageLine.visible = stage.line <> ""
     end if
+    ' Request more seasons is a button while more may be asked for.
+    asked = m.askMore <> invalid
     m.askMore = invalid
     if shown.askMore and shown.kind = "show" and shown.tmdbId > 0 then m.askMore = reqAskMoreTile(shown.kind, shown.tmdbId, httpSentence(m.item.title))
-    placeAskTile()
-end sub
-
-' Request more seasons at the end of the show's seasons, once they show,
-' while more may be asked for.
-sub placeAskTile()
-    if not m.rowNodes.DoesExist("seasons") then return
-    row = m.rowNodes.seasons.node
-    count = row.getChildCount()
-    placed = count > 0 and row.getChild(count - 1).kind = "askMore"
-    if placed and m.askMore = invalid then row.removeChildIndex(count - 1)
-    if not placed and m.askMore <> invalid then nodesAppend(row, [m.askMore])
+    if asked <> (m.askMore <> invalid) then showDetail()
 end sub
 
 ' The summary changed: the requests asked for, if they weren't yet;
@@ -384,12 +796,21 @@ sub onButton(event as object)
         params = { itemId: m.detail.itemId, startMs: startMs, item: m.item }
         if m.fileId <> invalid then params.fileId = m.fileId
         uiNavigate({ to: "player", params: params })
-    else if action = "playNext"
-        if m.onDeck = invalid then return
+    else if action = "playNext" or action = "nextFromStart"
+        if m.onDeck = invalid
+            uiToast("Nothing to play")
+            return
+        end if
         tile = contentTile(m.onDeck, m.global.session.server, true)
-        uiNavigate({ to: "player", params: { itemId: tile.itemId, startMs: playerStartOf(tile.positionMs, tile.durationMs) } })
-    else if action = "episodes"
-        uiNavigate({ to: "show", params: { showId: m.detail.itemId, seasonId: 0 } })
+        startMs = 0
+        if action = "playNext" then startMs = playerStartOf(tile.positionMs, tile.durationMs)
+        uiNavigate({ to: "player", params: { itemId: tile.itemId, startMs: startMs } })
+    else if action = "unavailable"
+        ' Nothing plays: the other TVs' button can't be pressed.
+        return
+    else if action = "askMore"
+        ' The show's TMDB page, its season picker open.
+        if m.askMore <> invalid then uiOpenTile(m.askMore)
     else if action = "trailer"
         ' From its start, as on the other TVs.
         uiNavigate({ to: "player", params: { itemId: m.detail.trailerId, startMs: 0 } })
@@ -405,8 +826,22 @@ end sub
 ' What the title's tile would do with the Options key: mark it, My List,
 ' Add to playlist, Go to show or season.
 sub titleAction(action as string)
-    uiTitleAction({ itemId: m.detail.itemId, kind: m.detail.kind, parentId: m.detail.seasonId, grandparentId: m.detail.showId }, action)
+    uiTitleAction(ownTile(), action)
 end sub
+
+' The title as its tile would be, for the Options key and titleAction.
+function ownTile() as object
+    return {
+        itemId: m.detail.itemId,
+        kind: m.detail.kind,
+        title: m.detail.heading,
+        watched: m.detail.watched,
+        parentId: httpNumber(m.item.parent_id, 0),
+        grandparentId: httpNumber(m.item.grandparent_id, 0),
+        positionMs: m.detail.positionMs,
+        durationMs: m.detail.durationMs
+    }
+end function
 
 ' --- The panel ---
 
@@ -642,11 +1077,13 @@ end sub
 sub chooseVersion(fileId as dynamic)
     m.fileId = fileId
     m.audioPick = -2
+    ' Its edition and quality on the line.
+    showDetail()
 end sub
 
 sub onTracksSaved(event as object)
     answer = event.getData()
-    if not answer.ok and not uiFailed(answer) then uiMessage("That didn't work", [answer.message])
+    if not answer.ok and not uiFailed(answer) then uiToast(answer.message, true)
     if m.item <> invalid then uiGet("/api/items/" + urlValue(m.item.id), "onDetail")
 end sub
 
@@ -670,7 +1107,7 @@ sub onRated(event as object)
     rating = invalid
     if before > 0 then rating = before * 2
     showRating(rating)
-    if not uiFailed(answer) then uiMessage("That didn't work", [answer.message])
+    if not uiFailed(answer) then uiToast(answer.message, true)
 end sub
 
 sub showRating(rating as dynamic)
@@ -683,33 +1120,39 @@ sub showRating(rating as dynamic)
     showDetail()
 end sub
 
-' Down from the buttons goes to the rows, up from the first row back; the
-' Options key on a title of the rows offers what can be done with it. Back
-' or Left closes the panel (an entry's choices go back to its menu), and
-' keys its lists leave go nowhere else.
+' Down and Up go from the buttons to the tabs, the episodes and the rows,
+' and back; Back leaves the page from anywhere on it, as on Android TV. The
+' Options key on an episode or a title of the rows offers what can be done
+' with it. Back or Left closes the panel (an entry's choices go back to its
+' menu), and keys its lists leave go nowhere else.
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
     if m.panel.visible
         if key = "back" or key = "left" then goBackInPanel()
         return true
     end if
-    if key = "down" and not m.rows.isInFocusChain() and m.rows.visible
-        focusRows(true)
+    if m.detail = invalid then return false
+    if key = "down" or key = "up"
+        delta = 1
+        if key = "up" then delta = -1
+        other = areaBeside(delta)
+        if other = "" then return m.area <> "hero"
+        focusArea(other)
         return true
     end if
-    if (key = "up" or key = "back") and m.rows.isInFocusChain()
-        focusRows(false)
+    if key = "options" and m.area = "episodes"
+        uiTileOptions(focusedEpisode(), false)
         return true
     end if
-    if key = "options" and m.rows.isInFocusChain()
+    if key = "options" and m.area = "rows"
         position = m.rows.rowItemFocused
         row = m.rows.content.getChild(position[0])
         if row <> invalid then uiTileOptions(row.getChild(position[1]), false)
         return true
     end if
-    ' The title's own: Add to playlist besides what its buttons do.
-    if key = "options" and m.detail <> invalid
-        uiTileOptions({ itemId: m.detail.itemId, kind: m.detail.kind, title: m.detail.heading, watched: m.detail.watched, parentId: m.detail.seasonId, grandparentId: m.detail.showId }, false)
+    ' The title's own, as its tile's.
+    if key = "options"
+        uiTileOptions(ownTile(), false)
         return true
     end if
     return false

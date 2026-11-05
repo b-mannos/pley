@@ -26,14 +26,27 @@ sub test_format_progress()
 end sub
 
 sub test_format_episode_codes()
-    tkEqual(fmtEpisode(1, 2), "S1 E2")
-    tkEqual(fmtEpisode(0, 3), "S0 E3")
+    tkEqual(fmtEpisode(1, 2), "S1 · E2", "as the other apps write it")
+    tkEqual(fmtEpisode(0, 3), "S0 · E3")
     tkEqual(fmtEpisode(invalid, 7), "E7")
-    tkEqual(fmtEpisode(1, invalid), "")
+    tkEqual(fmtEpisode(1, invalid), "S1")
+    tkEqual(fmtEpisode(invalid, invalid), "")
+end sub
+
+sub test_format_long_episode_numbers()
+    tkEqual(fmtEpisodeLong(2, 5), "Season 2 · Episode 5")
+    tkEqual(fmtEpisodeLong(0, 1), "Specials · Episode 1")
+    tkEqual(fmtEpisodeLong(invalid, 3), "Episode 3")
+    tkEqual(fmtEpisodeLong(invalid, invalid), "")
+end sub
+
+sub test_format_plurals()
+    tkEqual(fmtPlural(1, "season"), "1 season")
+    tkEqual(fmtPlural(3, "season"), "3 seasons")
+    tkEqual(fmtPlural(0, "episode"), "0 episodes")
 end sub
 
 sub test_format_resume_points()
-    tkEqual(fmtResume(754000), "Resume from 12:34")
     tkTrue(fmtResumable(600000, 6000000))
     tkFalse(fmtResumable(0, 6000000))
     tkFalse(fmtResumable(500, 6000000), "under a second")

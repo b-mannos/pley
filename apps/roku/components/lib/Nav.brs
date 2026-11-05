@@ -10,7 +10,6 @@ function navScreen(name as string) as string
         live: "LiveTvScreen",
         livePlayer: "LivePlayerScreen",
         library: "LibraryScreen",
-        show: "ShowScreen",
         details: "DetailsScreen",
         grid: "GridScreen",
         collection: "CollectionScreen",
@@ -53,8 +52,9 @@ function navMenuFocus(keys as object, key as string, at as integer) as integer
 end function
 
 ' The screen a tile opens: { to, params }, or invalid for kinds this
-' version doesn't open. A season opens its show on that season; a
-' collection, a person and an artist, their page; a playlist, its
+' version doesn't open. A movie, a show, a season and an episode open
+' their title page; a collection, a person and an artist, their page; a
+' playlist, its
 ' entries; a track, its album; an extra plays at once. A TMDB title
 ' opens its page (Request more seasons, with its season picker); See all,
 ' its list, or TMDB's results for its words (a library row's See all is
@@ -78,12 +78,7 @@ function navForTile(tile as object) as dynamic
     end if
     id = httpNumber(tile.itemId, 0)
     if id = 0 then return invalid
-    if kind = "movie" or kind = "episode" or kind = "show" then return { to: "details", params: { itemId: id } }
-    if kind = "season"
-        showId = httpNumber(tile.parentId, 0)
-        if showId = 0 then return invalid
-        return { to: "show", params: { showId: showId, seasonId: id } }
-    end if
+    if kind = "movie" or kind = "episode" or kind = "show" or kind = "season" then return { to: "details", params: { itemId: id } }
     if kind = "collection" or kind = "person" or kind = "artist" then return { to: kind, params: { id: id, title: httpString(tile.title) } }
     if kind = "album" then return { to: "album", params: { id: id, title: httpString(tile.title) } }
     if kind = "track"

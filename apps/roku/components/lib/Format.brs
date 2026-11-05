@@ -46,18 +46,15 @@ function fmtProgress(positionMs as dynamic, durationMs as dynamic) as float
     return position / duration
 end function
 
-' "S1 E2"; "E2" without a season; "" without an episode.
+' "S1 · E2", as the other apps write it; "E2" without a season, "S1"
+' without an episode, "" with neither.
 function fmtEpisode(season as dynamic, episode as dynamic) as string
     s = httpNumber(season, -1)
     e = httpNumber(episode, -1)
-    if e < 0 then return ""
-    if s < 0 then return "E" + Int(e).ToStr()
-    return "S" + Int(s).ToStr() + " E" + Int(e).ToStr()
-end function
-
-' "Resume from 12:34".
-function fmtResume(ms as dynamic) as string
-    return "Resume from " + fmtClock(ms)
+    parts = []
+    if s >= 0 then parts.Push("S" + Int(s).ToStr())
+    if e >= 0 then parts.Push("E" + Int(e).ToStr())
+    return parts.Join(" · ")
 end function
 
 ' Whether a title has a place to resume from: started, not near its end.
@@ -81,6 +78,28 @@ function fmtMeta(item as object) as string
     score = httpNumber(item.rating, 0)
     if score > 0 then parts.Push("★ " + fmtOneDecimal(score))
     return parts.Join(" · ")
+end function
+
+' "Season 2 · Episode 5", the parts that are known ("Specials" for season
+' 0), as an episode's info says it.
+function fmtEpisodeLong(season as dynamic, episode as dynamic) as string
+    s = httpNumber(season, -1)
+    e = httpNumber(episode, -1)
+    parts = []
+    if s = 0
+        parts.Push("Specials")
+    else if s > 0
+        parts.Push("Season " + Int(s).ToStr())
+    end if
+    if e >= 0 then parts.Push("Episode " + Int(e).ToStr())
+    return parts.Join(" · ")
+end function
+
+' "1 season", "3 seasons": count of noun.
+function fmtPlural(count as dynamic, noun as string) as string
+    n = Int(httpNumber(count, 0))
+    if n = 1 then return "1 " + noun
+    return n.ToStr() + " " + noun + "s"
 end function
 
 ' "1 movie", "245 movies", "31 shows", "12 artists" for a library's kind.

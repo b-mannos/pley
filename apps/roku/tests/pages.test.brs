@@ -40,6 +40,21 @@ sub test_pages_extras_say_what_they_are()
     tkEqual(rows[0].key, "extras")
 end sub
 
+sub test_pages_cast_row_is_titled_by_what_it_holds_after_extras()
+    actor = { id: 7, name: "Amy Adams", role: "actor", character: "Louise Banks" }
+    director = { id: 9, name: "Denis Villeneuve", role: "director" }
+    both = { kind: "movie", cast: [actor], crew: [director], extras: [{ id: 40, kind: "extra", extra_type: "trailer" }] }
+    rows = pageDetailRows(both, "http://nas:7539")
+    tkEqual(rows[0].key, "extras", "Extras first, as on Android TV")
+    tkEqual(rows[1].key, "credits")
+    tkEqual(rows[1].title, "Cast & Crew")
+    tkEqual(pageCreditsTitle({ kind: "movie", cast: [actor], crew: [] }), "Cast")
+    tkEqual(pageCreditsTitle({ kind: "movie", cast: [], crew: [director] }), "Crew")
+    tkEqual(pageCreditsTitle({ kind: "episode", cast: [actor], crew: [] }), "Guest Stars")
+    tkEqual(pageCreditsTitle({ kind: "episode", cast: [actor], crew: [director] }), "Guest Stars & Crew")
+    tkEqual(pageCreditsTitle({ kind: "movie", cast: [actor], crew: [{ id: 10, name: "Someone", role: "gaffer" }] }), "Cast", "a role the row doesn't show")
+end sub
+
 sub test_pages_person_has_a_row_per_role()
     person = { id: 7, name: "Amy Adams", photo_url: "/api/people/7/photo?v=1", credits: [
         { item: { id: 99, kind: "show", title: "Sharp Objects", year: 2018 }, roles: [{ role: "actor", character: "Camille", episodes: 8 }, { role: "producer" }] },
@@ -87,19 +102,12 @@ sub test_pages_roles_in_words()
     tkEqual(pageInitials(""), "")
 end sub
 
-sub test_pages_collections_and_seasons_as_tiles()
+sub test_pages_collections_as_tiles()
     tile = pageCollectionTile({ id: 3, title: "Dune Collection", item_count: 2 }, "http://nas:7539")
     tkEqual(tile.image, "http://nas:7539/api/collections/3/images/poster?w=220", "the server's picture of it")
     tkEqual(tile.subtitle, "2 titles")
     tkEqual(tile.kind, "collection")
     tkEqual(pageCollectionTile({ id: 4, title: "One", item_count: 1, poster_url: "/api/collections/4/images/poster?v=2" }, "http://nas:7539").image, "http://nas:7539/api/collections/4/images/poster?v=2&w=220")
-    seasons = pageSeasonTiles([{ id: 100, kind: "season", index: 1, parent_id: 99, leaf_count: 9 }, { id: 101, kind: "season", index: 0, title: "", leaf_count: 1 }, { id: 5, kind: "episode" }], "http://nas:7539")
-    tkEqual(seasons.Count(), 2)
-    tkEqual(seasons[0].title, "Season 1")
-    tkEqual(seasons[0].subtitle, "9 episodes")
-    tkEqual(seasons[0].parentId, 99)
-    tkEqual(seasons[1].title, "Specials")
-    tkEqual(seasons[1].subtitle, "1 episode")
 end sub
 
 sub test_pages_collection_of_movies_plays_them_in_order()
@@ -177,13 +185,24 @@ sub test_pages_tile_options_by_kind()
         end for
         return out
     end function
-    tkEqual(labels(pageTileOptions({ kind: "movie", itemId: 12, watched: false }, false, false)), ["Mark as watched", "Add to My List", "Add to playlist"])
-    tkEqual(labels(pageTileOptions({ kind: "movie", itemId: 12, watched: true }, true, true)), ["Mark as unwatched", "Remove from My List", "Add to playlist", "Remove from Continue Watching"])
-    tkEqual(labels(pageTileOptions({ kind: "show", itemId: 99 }, false, invalid)), ["Mark as watched", "Add to playlist"], "My List not known")
-    tkEqual(labels(pageTileOptions({ kind: "episode", itemId: 101, grandparentId: 99 }, true, false)), ["Mark as watched", "Add to playlist", "Remove from Continue Watching", "Go to show"])
-    tkEqual(labels(pageTileOptions({ kind: "episode", itemId: 101, parentId: 100, grandparentId: 99 }, false, invalid)), ["Mark as watched", "Add to playlist", "Go to show", "Go to season"])
+    tkEqual(labels(pageTileOptions({ kind: "movie", itemId: 12, watched: false }, false, false)), ["Play", "Mark as watched", "Add to My List", "Add to playlist"])
+    tkEqual(labels(pageTileOptions({ kind: "movie", itemId: 12, watched: true }, true, true)), ["Play", "Mark as unwatched", "Remove from Continue Watching", "Remove from My List", "Add to playlist"], "Android TV's order")
+    started = pageTileOptions({ kind: "movie", itemId: 12, watched: false, positionMs: 600000, durationMs: 6960000 }, true, false)
+    tkEqual(labels(started), ["Resume", "From start", "Mark as watched", "Remove from Continue Watching", "Add to My List", "Add to playlist"])
+    tkEqual(started[0].action, "resume")
+    tkEqual(started[1].action, "start")
+    tkEqual(labels(pageTileOptions({ kind: "show", itemId: 99 }, false, invalid)), ["Play", "Mark as watched", "Add to playlist"], "My List not known")
+    tkEqual(labels(pageTileOptions({ kind: "show", itemId: 99, watched: false, leafCount: 18, unwatched: 0 }, false, invalid))[1], "Mark as unwatched", "every episode watched")
+    tkEqual(labels(pageTileOptions({ kind: "show", itemId: 99, watched: true, leafCount: 18, unwatched: 3 }, false, invalid))[1], "Mark as watched", "three left")
+    tkEqual(labels(pageTileOptions({ kind: "episode", itemId: 101, grandparentId: 99 }, true, false)), ["Play", "Mark as watched", "Remove from Continue Watching", "Add to playlist", "Go to show"])
+    tkEqual(labels(pageTileOptions({ kind: "episode", itemId: 101, parentId: 100, grandparentId: 99 }, false, invalid)), ["Play", "Mark as watched", "Add to playlist", "Go to show", "Go to season"])
+    season = pageTileOptions({ kind: "season", itemId: 100, parentId: 99 }, false, invalid)
+    tkEqual(labels(season), ["Play", "Mark as watched", "Add to playlist", "Go to show"], "a season's show")
+    tkEqual(season[3].action, "show")
     tkEqual(pageTileOptions({ kind: "person", itemId: 7 }, false, false).Count(), 0)
-    tkEqual(labels(pageTileOptions({ kind: "album", itemId: 5 }, false, false)), ["Add to playlist"], "music: playlists only")
+    music = pageTileOptions({ kind: "album", itemId: 5 }, false, false)
+    tkEqual(labels(music), ["Open", "Add to playlist"], "music: its page, or a playlist")
+    tkEqual(music[0].action, "open")
 end sub
 
 sub test_pages_playlists()
@@ -203,12 +222,12 @@ sub test_pages_playlists()
     rows = pagePlaylistEntries(entries, "http://nas:7539")
     tkEqual(rows[0].entryId, 5)
     tkEqual(rows[0].subtitle, "2016 · 1 h 46 min left")
-    tkEqual(rows[1].subtitle, "S1 E1 · Good News About Hell · 55 min · Watched")
+    tkEqual(rows[1].subtitle, "S1 · E1 · Good News About Hell · 55 min · Watched")
     queue = pagePlaylistQueue(entries, "http://nas:7539")
     tkEqual(queue[0].title, "Arrival")
     tkEqual(queue[0].line, "2016", "a movie's year")
     tkEqual(queue[0].startMs, 600000)
-    tkEqual(queue[1].line, "S1 E1 · Good News About Hell")
+    tkEqual(queue[1].line, "S1 · E1 · Good News About Hell")
     tkEqual(pageQueueFrom(queue, 1, false).Count(), 1, "from the entry chosen")
     shuffled = pageQueueFrom(queue, 1, true)
     tkEqual(shuffled.Count(), 2, "shuffled: every entry")
@@ -231,7 +250,7 @@ sub test_pages_watch_history()
     rows = pageHistoryRows([{ id: 9, viewed_at: now - 7300, device: "Roku Ultra", item: contentTestEpisode() }, { id: 10, viewed_at: now, item: { id: 7, kind: "person" } }], "http://nas:7539", now)
     tkEqual(rows.Count(), 1, "kinds this version shows")
     tkEqual(rows[0].title, "Severance")
-    tkEqual(rows[0].subtitle, "S1 E1 · Good News About Hell · 2 hours ago · Roku Ultra")
+    tkEqual(rows[0].subtitle, "S1 · E1 · Good News About Hell · 2 hours ago · Roku Ultra")
     tkEqual(rows[0].historyId, 9)
 end sub
 

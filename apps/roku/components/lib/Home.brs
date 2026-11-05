@@ -38,7 +38,7 @@ end function
 ' What the hero or the info block says about item: an ItemSummary from the
 ' rows, or the ItemDetail once asked for (complete), which alone brings a
 ' movie's summary, the content rating and the quality badges. { itemId,
-' kind, title (a show's name for an episode), context ("S2 E5 · The Long
+' kind, title (a show's name for an episode), context ("S2 · E5 · The Long
 ' Night"), meta ("2019 · 2h 2m · PG-13 · ★ 7.4 · 4K · HDR"), summary,
 ' progress (0 to 1), timeLeft ("26 min left" while in progress), video
 ' (it plays itself), watched, positionMs, durationMs, backdrop, complete }.

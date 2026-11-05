@@ -486,10 +486,6 @@ sub apiBuild(job as object, answer as object)
             keys.Push({ key: row.key, wide: row.wide })
         end for
         answer.rows = keys
-    else if job.build = "seasonTiles"
-        tiles = pageSeasonTiles(data.items, server)
-        job.request.content = nodesContent(tiles)
-        answer.data = { shown: tiles.Count() }
     else if job.build = "collections"
         tiles = pageCollectionTiles(data.collections, server)
         job.request.content = nodesContent(tiles)

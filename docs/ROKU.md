@@ -54,7 +54,7 @@ each), Now Playing while music plays, and Settings.
 
 Beside it, as on Android TV and the native Samsung app, a hero shows the
 first of Continue Watching, else the newest title in the rows: its
-backdrop, its title (a show's name over an episode's "S2 E5 · Title"),
+backdrop, its title (a show's name over an episode's "S2 · E5 · Title"),
 year, length, content rating, stars and quality ("4K", "DV"), the time
 left, its summary, then Resume (or Play), From start, Info and Mark as
 watched. Resume has the focus as Home first shows. Down goes to the
@@ -66,11 +66,21 @@ The hero's summary, content rating and quality come with its details
 do the info block's. With nothing to show, Home says why: No libraries
 yet, Scanning your libraries…, or Nothing here yet.
 
+Tiles are captioned as on the other TVs, in rows and grids: a title in
+progress says the time left ("26 min left"), else what it is: a movie's
+year, a show's seasons ("3 seasons"), a season's episodes ("10
+episodes"), an album's artist and year, a track's artist and album. An
+episode's tile is its show's, with "S1 · E3 · 26 min left" (its title
+when not started). A show's or a season's tile has the number of its
+episodes left to watch where the watched mark goes, the mark only once
+every one is watched. Continue Watching, and any row whose first title
+is an episode, has 16:9 stills.
+
 ### Remote keys
 
 | Key | Where | What it does |
 |---|---|---|
-| Options (\*) | A title | Mark watched, My List, Add to playlist, Remove from Continue Watching, Go to show, Go to season |
+| Options (\*) | A title | As on Android TV: Play (a show's or a season's next episode), or Resume and From start; the watched mark, Remove from Continue Watching, My List, Add to playlist, an episode's Go to show and Go to season, a season's Go to show; music's Open and Add to playlist. What it came to ("Added to Road trip", or why not) shows in a toast at the top right |
 | Options (\*) | Watch history | Removes it |
 | Options (\*) | A playlist entry | Move (Up and Down carry it, OK puts it there, Back puts it back), Remove from playlist, Go to its title's page |
 | Down | The player | Pley's menu: Subtitles, Audio, Quality, Subtitle sync, Chapters, Sleep timer, Find subtitles…, Playback details |
@@ -84,14 +94,53 @@ yet, Scanning your libraries…, or Nothing here yet.
 
 ### A title's page
 
-A movie's, an episode's or a show's page has its buttons in a column at
-the left, Play (or Resume and Play from start) first, then Mark as
-watched, Audio and subtitles, My List, Trailer (where its extras have
-one: it plays from its start) and More…. Audio and subtitles and More
-open a panel at the right; Back closes it, and Down from the buttons goes
-to the rows under them. Over the summary, as on Android TV, a line says
-who made it and who is in it ("Directed by Grace Hopper · Starring Ada
-Lovelace, Alan Turing"; a show's "Created by").
+A movie's, a show's, a season's or an episode's page says what Android
+TV's does, in its order: the title (an episode's or a season's show, with
+"S1 · E3 · Pilot" or "Season 1" under it), then a line of what it is: a
+movie's year, an episode's air day, a show's seasons and years ("3
+seasons · 2019-2024"), a season's episodes, the version's
+edition, the runtime, the content rating, the stars and the quality of
+the version Play plays ("4K · DV P8.1 · Atmos"). A title resumed says
+how much is left ("1 h 33 min left"); the genres are followed by the
+collections it is part of ("Drama · Part of Dune").
+
+Its buttons are in a column at the left: Resume and From start (or Play;
+a show's or a season's next episode, "Resume S1 · E3" or "Play S1 ·
+E3"), Request more
+seasons for a show with seasons left to ask for, Mark as watched, Audio
+and subtitles, My List, Trailer (where its extras have one: it plays from
+its start), Add to playlist and More…. With nothing to play the first
+says Unavailable, and the focus starts on the next. Audio and subtitles
+and More open a panel at the right; Back closes it. Over the summary, as
+on Android TV,
+a line says who made it and who is in it ("Directed by Grace Hopper ·
+Starring Ada Lovelace, Alan Turing"; a show's "Created by"). The column
+keeps above the rows: past six buttons the summary gives up lines, as it
+does for the lines over it, and the tagline goes when the summary would
+keep fewer than two.
+
+Under the buttons, their top in view, a show's or a season's page has
+its seasons' tabs (when there are two or more), then a row of the
+season's episodes: 16:9 stills, "5. Glasshouse" and the time left (else
+the runtime) under each, as on Android TV. A show's page opens on its
+next episode's season, a season's on its own, the focus coming into the
+row on the next episode; an episode's page has its own season's
+episodes, without tabs, the focus on itself. A tab the focus rests on
+(0.35 s) shows its season, as OK does. A season tile opens the season's
+page.
+
+The rows under them are in Android TV's order: Extras, then the people,
+titled by who is there (Cast, Crew or Cast & Crew; an episode's Guest
+Stars), More like this and the collections the title is part of. Down
+from the buttons goes to the tabs, the episodes and the rows, Up back:
+once the focus is there, an info block at the top keeps the title in
+view, with its line and, in the tabs and the episodes, the episode the
+focus rests on (0.4 s): its title, "Season 2 · Episode 5 · 55 min · Aired
+Mar 4, 2024" and two lines of its summary, else the title's. The part
+with the focus comes up under it. Back leaves the page from anywhere on
+it, as on Android TV. A page that doesn't load says why, with Retry
+(Back for a title that is gone, or the profile can't see); one the server
+doesn't answer for says it can't be reached, as any screen does.
 
 - **Audio and subtitles** (a movie or an episode with several files, or
   whose file has two audio tracks or more, or subtitles):
@@ -107,9 +156,9 @@ Lovelace, Alan Turing"; a show's "Created by").
     it only when picked here, Automatic as none, as on the other TVs.
 - **More**, what is used less, as on the other TVs: Rate (Your rating,
   once given: No rating, or 1 to 5 stars, kept for the profile on the
-  server), an episode's Go to show (the show's page) and Go to season
-  (its episodes), Media info, Details and Add to playlist. The Options
-  key on an episode's tile goes to them alike.
+  server), an episode's or a season's Go to show (the show's page) and
+  an episode's Go to season (the season's page), Media info and Details.
+  The Options key on an episode's tile goes to them alike.
 - **Media info** (a movie or an episode with a file): each file, under its
   edition or "VERSION 2" when there are several, and every stream in
   full, in the other apps' words (codec, profile and level, size, frame
@@ -240,7 +289,7 @@ queue's end, turns the timer off.
 
 As each item begins (the first, the next episode, a playlist's or a
 collection's next), its title shows at the top for 4 s, a show's name over
-the episode's "S1 E2 · Pilot", as on Android TV.
+the episode's "S1 · E2 · Pilot", as on Android TV.
 
 - **Up Next** shows at the credits (else 30 s before the end) with its
   countdown. Cancelled, or with Play the next episode by itself off, it
@@ -666,8 +715,8 @@ was asked.
   for the words ("Results for “dune”") of every title TMDB has for them,
   with its badge, a page at a time as See all's are; Back goes back to
   Search. A library title that was asked for shows its request's stage
-  under the poster, and a show with seasons left to ask for ends its
-  seasons with Request more seasons.
+  under the poster, and a show with seasons left to ask for has Request
+  more seasons among its buttons.
 - **Ready to watch:** a requested title that arrives is told of in a
   card at the bottom right: its poster, "“The Last Lighthouse” is ready
   to watch." (a show's seasons once each batch is ready; "3 of your
