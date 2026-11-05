@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Watch history (Settings): the profile's plays, newest first, when and
      where each played. OK opens a title; the Options key takes a play out
-     of the history. -->
+     of the history at once. -->
 <component name="HistoryScreen" extends="Group">
     <interface>
         <field id="route" type="string" />

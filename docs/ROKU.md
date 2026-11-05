@@ -75,7 +75,7 @@ yet, Scanning your libraries…, or Nothing here yet.
 | Key | Where | What it does |
 |---|---|---|
 | Options (\*) | A title | Mark watched, My List, Add to playlist, Remove from Continue Watching, Go to show, Go to season |
-| Options (\*) | Watch history | Removes it |
+| Options (\*) | Watch history | Removes the play at once, as Android TV's cross does; a toast says so, and the focus goes to the next |
 | Options (\*) | A playlist entry | Move (Up and Down carry it, OK puts it there, Back puts it back), Remove from playlist, Go to its title's page |
 | Options (\*) | A request | What can be done with it (Approve, Decline, Withdraw…) |
 | Down | The player | Pley's menu: Subtitles, Audio, Quality, Subtitle sync, Chapters, Sleep timer, Find subtitles…, Playback details |

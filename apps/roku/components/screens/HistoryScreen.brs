@@ -1,6 +1,7 @@
 ' Watch history (GET /api/history), 50 plays at a time, the next as the
-' focus nears the end; a play taken out (DELETE /api/history/{id}) goes
-' from the list at once.
+' focus nears the end. The Options key takes the play in focus out at
+' once (DELETE /api/history/{id}), as Android TV's cross does: it goes
+' from the list, a toast says so, and the focus is on the play after it.
 
 sub init()
     m.count = m.top.findNode("count")
@@ -13,9 +14,8 @@ sub init()
     m.offset = 0
     m.total = -1
     m.loading = false
-    m.dialog = invalid
-    ' The row the Options key was pressed on.
-    m.removing = -1
+    ' The plays being taken out, by their id, each asked once.
+    m.removing = {}
     m.entries.observeField("itemSelected", "onEntry")
     m.entries.observeField("itemFocused", "onFocused")
     m.top.observeField("active", "onActive")
@@ -81,39 +81,42 @@ sub onEntry(event as object)
     uiOpenTile(m.content.getChild(event.getData()))
 end sub
 
-' The Options key: Remove from history.
-sub entryOptions()
+' The Options key: the play in focus out of the history, at once.
+sub removeFocused()
     entry = m.content.getChild(m.entries.itemFocused)
     if entry = invalid then return
-    dialog = CreateObject("roSGNode", "StandardMessageDialog")
-    dialog.title = entry.title
-    dialog.buttons = ["Remove from history", "Cancel"]
-    dialog.observeField("buttonSelected", "onEntryOption")
-    m.removing = m.entries.itemFocused
-    m.dialog = dialog
-    m.top.getScene().dialog = dialog
+    key = urlValue(entry.historyId)
+    if m.removing.DoesExist(key) then return
+    m.removing[key] = true
+    uiRequest({ method: "DELETE", path: "/api/history/" + key, historyId: entry.historyId, title: entry.title }, "onRemoved")
 end sub
 
-sub onEntryOption(event as object)
-    if m.dialog <> invalid then m.dialog.close = true
-    m.dialog = invalid
-    if event.getData() <> 0 then return
-    entry = m.content.getChild(m.removing)
-    if entry = invalid then return
-    uiRequest({ method: "DELETE", path: "/api/history/" + urlValue(entry.historyId), historyId: entry.historyId }, "onRemoved")
-end sub
-
+' Taken out: its row goes, by its id (rows taken out meanwhile moved the
+' others), and the focus stays in its place, on the play after it (the
+' one before, for the last). Refused: a toast says why.
 sub onRemoved(event as object)
+    spec = event.getRoSGNode().spec
+    gone = spec.historyId
+    m.removing.Delete(urlValue(gone))
     answer = event.getData()
     if not answer.ok
-        if not uiFailed(answer) then uiMessage("That didn't work", [answer.message])
+        if not uiFailed(answer) then uiToast(answer.message, true)
         return
     end if
-    ' By its id: rows taken out meanwhile moved the others.
-    gone = event.getRoSGNode().spec.historyId
+    focused = m.entries.itemFocused
     for i = m.content.getChildCount() - 1 to 0 step -1
-        if m.content.getChild(i).historyId = gone then m.content.removeChildIndex(i)
+        if m.content.getChild(i).historyId = gone
+            m.content.removeChildIndex(i)
+            if i < focused then focused = focused - 1
+        end if
     end for
+    uiToast("Removed “" + httpSentence(spec.title) + "”")
+    count = m.content.getChildCount()
+    if count > 0
+        if focused >= count then focused = count - 1
+        if focused < 0 then focused = 0
+        m.entries.jumpToItem = focused
+    end if
     m.total = m.total - 1
     m.offset = m.offset - 1
     showCount()
@@ -126,7 +129,7 @@ end sub
 
 function onKeyEvent(key as string, press as boolean) as boolean
     if press and key = "options" and m.content.getChildCount() > 0
-        entryOptions()
+        removeFocused()
         return true
     end if
     return false
