@@ -107,14 +107,10 @@ function detSimplified(text as dynamic) as string
     return out
 end function
 
-' The playback's details: { method, why, rows: [{ label, value }] }. info
-' is the session's PlaybackInfo, file the file it plays, audioIndex the
-' audio playing (-1 for the server's), live the session's TranscodeInfo
-' (GET /api/playback/{session}) or invalid, positionMs where it is.
-function detPlayback(info as object, file as dynamic, audioIndex as integer, live as dynamic, positionMs as integer) as object
-    method = httpString(info.method)
-    transcode = invalid
-    if method <> "direct" then transcode = httpObject(live)
+' The file's video and the audio that plays: { video, audio }, each a
+' stream or invalid. audioIndex is the audio playing (-1 for the server's
+' pick, info's audio_index), else the default, else the first.
+function detStreams(info as object, file as dynamic, audioIndex as integer) as object
     video = invalid
     audios = []
     if file <> invalid
@@ -136,6 +132,20 @@ function detPlayback(info as object, file as dynamic, audioIndex as integer, liv
         if audio = invalid and httpTrue(stream.default) then audio = stream
     end for
     if audio = invalid and audios.Count() > 0 then audio = audios[0]
+    return { video: video, audio: audio }
+end function
+
+' The playback's details: { method, why, rows: [{ label, value }] }. info
+' is the session's PlaybackInfo, file the file it plays, audioIndex the
+' audio playing (-1 for the server's), live the session's TranscodeInfo
+' (GET /api/playback/{session}) or invalid, positionMs where it is.
+function detPlayback(info as object, file as dynamic, audioIndex as integer, live as dynamic, positionMs as integer) as object
+    method = httpString(info.method)
+    transcode = invalid
+    if method <> "direct" then transcode = httpObject(live)
+    streams = detStreams(info, file, audioIndex)
+    video = streams.video
+    audio = streams.audio
     why = ""
     if method <> "direct"
         reasons = []
@@ -191,6 +201,63 @@ function detPlayback(info as object, file as dynamic, audioIndex as integer, liv
         end if
     end if
     return { method: detMethod(info), why: why, rows: rows }
+end function
+
+' The readout over the video (Settings → Playback details), as Android
+' TV's short one: how it plays; the file's video and audio, and, where the
+' Roku decodes a conversion, what it decodes; the subtitles; the file's
+' bitrate, and a conversion's; and the network as the Roku measures it.
+' node is what the Video node says: { videoFormat, audioFormat,
+' streamBps, networkBps } (streamInfo's streamBitrate and
+' measuredBitrate), and subtitles, as the menu names them.
+' ["Playback: Direct play", "Video: HEVC 4K HDR10", …].
+function detReadout(info as object, file as dynamic, audioIndex as integer, node as object) as object
+    method = httpString(info.method)
+    converted = method = "transcode"
+    streams = detStreams(info, file, audioIndex)
+    lines = ["Playback: " + detMethod(info)]
+    if streams.video <> invalid
+        value = detVideo(streams.video)
+        decoded = detCodec(detNodeCodec(node.videoFormat))
+        if converted and decoded <> "" then value = value + " → " + decoded
+        lines.Push("Video: " + value)
+    end if
+    if streams.audio <> invalid
+        value = detAudio(streams.audio)
+        decoded = detCodec(node.audioFormat)
+        if (converted or httpTrue(info.audio_converted)) and decoded <> "" then value = value + " → " + decoded
+        lines.Push("Audio: " + value)
+    end if
+    subtitles = httpString(node.subtitles)
+    if httpTrue(info.burn_subtitles)
+        if subtitles = ""
+            subtitles = "Burned in"
+        else
+            subtitles = subtitles + " (burned in)"
+        end if
+    end if
+    if subtitles <> "" then lines.Push("Subtitles: " + subtitles)
+    bitrate = ""
+    if file <> invalid then bitrate = fmtBitrate(file.bitrate)
+    stream = fmtBitrate(node.streamBps)
+    if method <> "direct" and stream <> "" and stream <> bitrate
+        if bitrate <> "" then bitrate = bitrate + " → "
+        bitrate = bitrate + stream
+    end if
+    if bitrate <> "" then lines.Push("Bitrate: " + bitrate)
+    network = fmtBitrate(node.networkBps)
+    if network <> "" then lines.Push("Network: " + network)
+    return lines
+end function
+
+' The Video node's codec (its videoFormat, as "mpeg4 avc" or "hevc") as
+' ffprobe names it, for detCodec.
+function detNodeCodec(format as dynamic) as string
+    name = LCase(httpString(format))
+    if name.InStr("avc") >= 0 or name.InStr("264") >= 0 then return "h264"
+    if name.InStr("hevc") >= 0 or name.InStr("265") >= 0 then return "hevc"
+    if name = "mpeg2" then return "mpeg2video"
+    return name
 end function
 
 ' A file's chapters, by start: [{ label ("Opening · 0:00"), startMs }].

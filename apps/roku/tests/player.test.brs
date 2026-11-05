@@ -188,6 +188,17 @@ sub test_player_names_what_comes_next()
     tkEqual(playerNextLabel([{ itemId: 1 }, { itemId: 2 }]), "Next in the queue", "a playlist's or a collection's")
 end sub
 
+sub test_player_shows_details_when_settings_say_so()
+    section = CreateObject("roRegistrySection", "playerDetailsTest")
+    section.Delete("showDetails")
+    tkFalse(playerShowsDetails(section), "off unless set")
+    section.Write("showDetails", "true")
+    tkTrue(playerShowsDetails(section))
+    section.Write("showDetails", "false")
+    tkFalse(playerShowsDetails(section))
+    section.Delete("showDetails")
+end sub
+
 sub test_player_jumps_as_android_tvs_keys()
     tkEqual(playerJumpMs(), 30000, "fast forward and rewind")
     tkEqual(playerReplayMs(), 10000, "instant replay")

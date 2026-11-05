@@ -64,6 +64,12 @@
                 <Label id="bannerEnds" translation="[1264, 108]" width="560" horizAlign="right" maxLines="1" color="0xA1A9B6FF" font="font:SmallSystemFont" />
             </Group>
         </Group>
+        <!-- Settings → Playback details: how it plays, at the top left in
+             the title's place while nothing else shows (updateReadout). -->
+        <Group id="readout" translation="[96, 54]" visible="false">
+            <Rectangle id="readoutBack" width="840" color="0x16191EB8" />
+            <Label id="readoutText" translation="[24, 16]" width="792" wrap="true" maxLines="8" lineSpacing="4" color="0xEBEBEBFF" font="font:SmallestSystemFont" />
+        </Group>
         <!-- Waiting for the video, after 500 ms: the spinner in the middle,
              as Android TV's ring, and while the server is out of reach
              "Reconnecting…" 32 px under it, on a backing, as the picture

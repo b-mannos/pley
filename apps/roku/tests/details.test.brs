@@ -39,6 +39,22 @@ sub test_details_of_a_direct_play_and_a_conversion()
     tkEqual(remux.rows[1].value, "TrueHD 7.1 → …", "the audio converted, its output not known yet")
 end sub
 
+sub test_details_readout_over_the_video()
+    file = detailsTestFile()
+    node = { videoFormat: "", audioFormat: "", streamBps: 0, networkBps: 0, subtitles: "Off" }
+    tkEqual(detReadout({ method: "direct", audio_index: 2 }, file, -1, node), ["Playback: Direct play", "Video: HEVC 4K Dolby Vision P8.1", "Audio: AC3 5.1", "Subtitles: Off", "Bitrate: 24 Mbps"])
+    ' Converted: what the Roku decodes, the stream's bitrate and the network.
+    node = { videoFormat: "mpeg4 avc", audioFormat: "aac", streamBps: 8000000, networkBps: 42000000, subtitles: "English (PGS)" }
+    converted = detReadout({ method: "transcode", audio_index: 1, burn_subtitles: true }, file, -1, node)
+    tkEqual(converted, ["Playback: Transcoding", "Video: HEVC 4K Dolby Vision P8.1 → H.264", "Audio: TrueHD 7.1 → AAC", "Subtitles: English (PGS) (burned in)", "Bitrate: 24 Mbps → 8 Mbps", "Network: 42 Mbps"])
+    ' A direct stream copies the video; what the node says of it is the file's.
+    remux = detReadout({ method: "remux", audio_converted: true }, file, -1, { videoFormat: "hevc", audioFormat: "ac3", streamBps: 0, networkBps: 0, subtitles: "" })
+    tkEqual(remux, ["Playback: Direct stream · Audio transcoding", "Video: HEVC 4K Dolby Vision P8.1", "Audio: TrueHD 7.1 → AC3", "Bitrate: 24 Mbps"])
+    tkEqual(detReadout({ method: "direct" }, invalid, -1, { subtitles: "" }), ["Playback: Direct play"], "no file known")
+    tkEqual(detNodeCodec("HEVC"), "hevc")
+    tkEqual(detNodeCodec("vp9"), "vp9")
+end sub
+
 sub test_details_chapters()
     chapters = detChapters(detailsTestFile())
     tkEqual(chapters, [{ label: "Opening · 0:00", startMs: 0 }, { label: "Chapter 2 · 1:00", startMs: 60000 }])

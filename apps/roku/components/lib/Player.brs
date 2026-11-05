@@ -93,6 +93,13 @@ function playerSessionState(status as integer) as string
     return "alive"
 end function
 
+' Settings → Playback details, kept on the Roku in the "playback" section
+' ("true" or "false"): a short readout of how the video plays at the top
+' left while nothing else shows, as on Android TV. Off unless set.
+function playerShowsDetails(section as object) as boolean
+    return section.Read("showDetails") = "true"
+end function
+
 ' Stopped by the server or another device, the player says why this long
 ' before it leaves by itself, as Android TV's does.
 function playerStoppedLeaveMs() as integer

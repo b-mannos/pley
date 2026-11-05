@@ -218,6 +218,12 @@ sub init()
     m.bannerTimer.observeField("fire", "hideBanner")
     m.clockTimer = m.top.findNode("clockTimer")
     m.clockTimer.observeField("fire", "updateBanner")
+    ' Settings → Playback details: the readout in the title's place, read
+    ' as the player opens.
+    m.showDetails = false
+    m.readout = m.top.findNode("readout")
+    m.readoutBack = m.top.findNode("readoutBack")
+    m.readoutText = m.top.findNode("readoutText")
     ' Whether Roku's bar shows, where the Video node says so; elsewhere
     ' the controls are up while paused alone.
     m.video.observeField("trickPlayBarVisibilityHint", "onBar")
@@ -377,6 +383,7 @@ sub onActive()
     end if
     if m.started then return
     m.started = true
+    m.showDetails = playerShowsDetails(playbackSection())
     ' A video takes over from the music.
     m.global.music.control = "stop"
     ' Playlists and segments carry the token: a refreshed one goes to the
@@ -798,9 +805,14 @@ sub onBitrate(event as object)
 end sub
 
 ' The title at the top for 4 s as an item begins to play (the first, the
-' next episode, a queue's next), not as the same one opens again.
+' next episode, a queue's next), not as the same one opens again; not with
+' Playback details, which have its place, as on Android TV.
 sub showBanner()
     m.bannerDue = false
+    if m.showDetails
+        updateBanner()
+        return
+    end if
     m.bannerUp = true
     m.bannerTimer.control = "stop"
     m.bannerTimer.control = "start"
@@ -812,6 +824,36 @@ sub hideBanner()
     m.bannerUp = false
     updateBanner()
 end sub
+
+' Settings → Playback details: the readout at the top left while nothing
+' else shows (the controls, the menu, Up Next, subtitle sync, what went
+' wrong), read again as the video plays: Details.brs's detReadout, with
+' what the Video node says of the stream.
+sub updateReadout()
+    shown = m.showDetails and m.info <> invalid and not controlsShown() and not m.menu.visible and not m.upNext.visible and not m.notice.visible and not m.sync.visible
+    m.readout.visible = shown
+    if not shown then return
+    node = { videoFormat: m.video.videoFormat, audioFormat: m.video.audioFormat, streamBps: 0, networkBps: 0, subtitles: subtitleLabel() }
+    stream = httpObject(m.video.streamInfo)
+    if stream <> invalid
+        node.streamBps = httpNumber(stream.streamBitrate, 0)
+        node.networkBps = httpNumber(stream.measuredBitrate, 0)
+    end if
+    m.readoutText.text = detReadout(m.info, playingFile(), m.audioPlaying, node).Join(Chr(10))
+    m.readoutBack.height = m.readoutText.boundingRect().height + 32
+end sub
+
+' The subtitles showing, as the menu names them: Off, a track of the file,
+' or "" for one it doesn't list.
+function subtitleLabel() as string
+    tracks = mediaTracks(playingFile()).subtitles
+    playing = subtitlePlaying()
+    for i = 0 to tracks.values.Count() - 1
+        if tracks.values[i] = playing then return tracks.labels[i]
+    end for
+    if playing < 0 then return "Off"
+    return ""
+end function
 
 ' Roku's bar showing or gone (trick play, a pause, OK pressed).
 sub onBar()
@@ -840,6 +882,7 @@ sub updateBanner()
     m.bannerLine.text = banner.line
     ticking = shown and controls
     m.bannerRight.visible = ticking
+    updateReadout()
     if ticking <> m.clockTicking
         m.clockTicking = ticking
         if ticking
@@ -1128,6 +1171,7 @@ sub onPosition(event as object)
     updateSkip()
     followPictures()
     drawPictures()
+    if m.readout.visible then updateReadout()
 end sub
 
 ' Skip Intro or Skip Credits while the playhead is in one and the video
@@ -1785,6 +1829,7 @@ sub openMenu()
     m.menuList.visible = true
     m.menuHint.text = "Back closes this."
     m.menu.visible = true
+    updateReadout()
     m.menuList.setFocus(true)
 end sub
 
@@ -1794,6 +1839,7 @@ sub closeMenu()
     m.menuKind = ""
     m.video.setFocus(true)
     updateSkip()
+    updateReadout()
 end sub
 
 ' The file playing: the session's, else the item's first.

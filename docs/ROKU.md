@@ -289,7 +289,15 @@ paused leaves the player, as in Roku's own apps.
   top, and go by themselves.
 - **Progress** goes to the server every 10 s while playing, every 30 s
   paused, and at once after a seek, in Roku's own bar too.
-- **Playback details** are asked for again every 2 s while they show.
+- **Playback details** in the menu are asked for again every 2 s while
+  they show.
+- **Settings → Playback details** (kept on the Roku, off at first) keeps a
+  short readout at the top left while nothing else shows, in the place of
+  the title, which then doesn't show as an item begins, as on Android TV:
+  how it plays, the file's video and audio (and, converted, what the Roku
+  decodes), the subtitles, the bitrate (the file's, and a conversion's),
+  and the network as the Roku measures it. The setting is read as the
+  player opens; the readout follows the video each second.
 - **Chapters** are in the menu for a file with two or more, each named by
   its title, or "Chapter 3" when it has none or only its time ("00:06:19",
   as mkvmerge names them). With them come Previous chapter (the start of
