@@ -183,15 +183,15 @@ sub onFocus()
     end if
     ' On the accent pill, an accent number is dark instead.
     if m.danger
-        m.countBack.color = "0xEB6B70FF"
+        m.countBack.blendColor = "0xEB6B70FF"
         m.count.color = "0x16191EFF"
         m.dot.blendColor = "0xEB6B70FF"
     else if focused
-        m.countBack.color = "0x16191EFF"
+        m.countBack.blendColor = "0x16191EFF"
         m.count.color = "0x7DD3FCFF"
         m.dot.blendColor = "0x38BDF8FF"
     else
-        m.countBack.color = "0x38BDF8FF"
+        m.countBack.blendColor = "0x38BDF8FF"
         m.count.color = "0x16191EFF"
         m.dot.blendColor = "0x38BDF8FF"
     end if

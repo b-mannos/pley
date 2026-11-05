@@ -152,7 +152,8 @@ end sub
 ' (danger), as the menu's; else plain, in bold after the words, as a
 ' row of eight tabs has room for.
 function makeNumber(group as object, chip as object) as object
-    back = group.createChild("Rectangle")
+    back = group.createChild("Poster")
+    back.uri = "pkg:/images/pill.9.png"
     text = group.createChild("Label")
     text.font = typeFont(700, 24)
     text.text = chip.count
@@ -251,13 +252,13 @@ end sub
 ' its words' colour (words).
 sub lookNumber(number as object, lit as boolean, words as string)
     if number.tone = "danger"
-        number.back.color = "0xEB6B70FF"
+        number.back.blendColor = "0xEB6B70FF"
         number.text.color = "0x16191EFF"
     else if number.tone = "accent" and lit
-        number.back.color = "0x16191EFF"
+        number.back.blendColor = "0x16191EFF"
         number.text.color = "0x7DD3FCFF"
     else if number.tone = "accent"
-        number.back.color = "0x38BDF8FF"
+        number.back.blendColor = "0x38BDF8FF"
         number.text.color = "0x16191EFF"
     else
         number.text.color = words
