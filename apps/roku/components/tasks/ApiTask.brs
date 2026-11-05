@@ -1306,7 +1306,7 @@ end sub
 ' setting's or Automatic's, AutoQuality.brs) or once the original didn't
 ' play here; subtitleIndex, picture subtitles for the server to draw;
 ' audioIndex, the audio a cast named (Cast.brs's castGivenTracks);
-' picturesOff, once the server turned out not to make PGS's pictures;
+' picturesOff, once the server turned out not to make the pictures;
 ' controls, what the player obeys of the user's remote (Remote.brs).
 sub apiPlay(request as object, spec as object)
     mode = httpString(spec.mode)

@@ -65,6 +65,10 @@ describes how they are made.
 
 ### Changed
 
+- VobSub and DVB subtitles (DVDs, TV recordings) are drawn by the app over
+  the video, as PGS subtitles are, instead of being burned in by the
+  server, so a file with them plays as it is and keeps its HDR. A server
+  too old to make their pictures still burns them in.
 - Up Next waits at the end of an episode once cancelled, or when the next
   episode doesn't play by itself, where the player used to leave.
 - A video that stands still for 12 s is converted or opened again, and the

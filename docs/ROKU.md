@@ -288,11 +288,14 @@ next.
   Accessibility → Captions style). The app never sets `captionStyle`,
   which would change them for the whole Roku.
 - Text subtitles go to the Video node as WebVTT.
-- **PGS subtitles** are drawn by the app over the video
-  (`components/lib/Pictures.brs`), so the file plays as it is and HDR stays
-  HDR. The app reports `hdmv_pgs_subtitle` in `subtitle_codecs` with
-  `picture_subtitles_sideload`, and asks for no `subtitle_index` for them.
-  The session's key opens the track's pictures:
+- **Picture subtitles** (PGS, VobSub, DVB) are drawn by the app over the
+  video (`components/lib/Pictures.brs`), so the file plays as it is and HDR
+  stays HDR. BrightScript is too slow to decode them, so the server does,
+  as the other apps decode them themselves, and sends each picture as a
+  PNG. The app reports `hdmv_pgs_subtitle`, `dvd_subtitle` and
+  `dvb_subtitle` in `subtitle_codecs` with `picture_subtitles_sideload`,
+  and asks for no `subtitle_index` for them. The session's key opens the
+  track's pictures:
   `/api/media/{key}/subtitles-{index}.json?at={ms}` lists each one's time,
   its place on the subtitle plane and its PNG beside it (named with the
   list's `at`). The server reads the pictures around `at` first: while the
@@ -310,7 +313,7 @@ next.
   else every second.
 - Roku's options list only text tracks, and a conversion's one audio.
   Pley's menu (Down) lists every track of the file, as the title's page
-  does: Subtitles (Off, then each, PGS too) and Audio (Automatic, then
+  does: Subtitles (Off, then each, pictures too) and Audio (Automatic, then
   each). A pick there is saved for the show or movie, and the stream opens
   again where it was with it. The remote on the profile's other devices
   picks them the same way ([Remote control](#remote-control)).
@@ -318,14 +321,15 @@ next.
   captions turned off there turn them off; captions turned on without a
   text track leave them be.
 - A server that can't make the pictures has them burned in: the stream
-  reopens where it was with `subtitle_index`, and caps without PGS in
-  `subtitle_codecs` or `picture_subtitles_sideload` (to the server, a
-  listed codec is the player's to show, never burned in), as for VobSub
-  and DVB, which are always burned in. The app keeps burning them in until
-  the player closes. That is an older server (`404` "unknown file", or
-  "unknown playlist file" for a stream, as its keyed media knows no such
-  name), a transcoder too old to copy the track (`503` "update it"), or a
-  track that isn't PGS. Anything else (a disk asleep, the transcoder
+  reopens where it was with `subtitle_index`, and caps without picture
+  codecs in `subtitle_codecs` or `picture_subtitles_sideload` (to the
+  server, a listed codec is the player's to show, never burned in). The
+  app keeps burning them in until the player closes. That is an older
+  server (`404` "unknown file", or "unknown playlist file" for a stream,
+  as its keyed media knows no such name; for VobSub and DVB, `404` "no PGS
+  subtitle track has this index" from one that makes PGS's alone), a
+  transcoder too old to copy the track (`503` "update it"), or a track it
+  makes no pictures of. Anything else (a disk asleep, the transcoder
   restarting or out of reach, the network) is asked again 3 s later:
   burning them in would need the same server.
 - **Subtitle sync:** Left and Right move subtitles 0.1 s, up to 10 s either
@@ -663,7 +667,7 @@ Rules the code keeps:
 - Videos play from [keyed addresses](API.md#keyed-urls): Roku fetches a
   BIF file of seek previews without its HTTP agent's headers, so the
   previews come from the session's key, beside its media. So do the
-  pictures of PGS subtitles and their list, fetched without the token.
+  subtitles' pictures and their list, fetched without the token.
 - Refreshes run one at a time per server, and the new token pair is saved
   before use (a refresh token works once).
 - The User-Agent is `pleyRoku/<version> (Roku OS <version>; <model>)`; the

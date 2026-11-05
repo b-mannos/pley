@@ -17,7 +17,7 @@
 ' remote chooses it as the menu does); when it doesn't play well,
 ' Automatic lowers a conversion's bitrate as it is sent, or opens the
 ' stream again lower where it was once it stopped anyway
-' (AutoQuality.brs). PGS subtitles are drawn over the video from
+' (AutoQuality.brs). Picture subtitles are drawn over the video from
 ' the server's pictures (Pictures.brs), so the file plays as it is; the
 ' server burns them in only where it can't make those.
 
@@ -489,7 +489,7 @@ sub requestPlayback(choice as string, ceilingKbps as float)
     ' Keyed addresses: Roku fetches the seek previews itself, without the
     ' Authorization header.
     spec = { op: "play", itemId: m.itemId, startMs: m.startMs, mode: m.mode, attempt: m.attempt, keyed: true }
-    ' PGS the app can't draw (no pictures from this server) is burned in:
+    ' Pictures the app can't draw (none from this server) are burned in:
     ' the caps say the app doesn't show it, or the server would leave it out.
     drawn = picCodecs()
     if m.picturesOff

@@ -26,7 +26,7 @@ function picTestList(complete as boolean) as object
     }
 end function
 
-sub test_pictures_drawn_are_pgs_the_person_picked()
+sub test_pictures_drawn_are_those_the_person_picked()
     file = picTestFile()
     tkEqual(picTrack({ burn_subtitles: false }, file, false), 4)
     tkEqual(picTrack({ burn_subtitles: true, subtitle_index: 4 }, file, false), -1, "burned in by the server")
@@ -34,7 +34,10 @@ sub test_pictures_drawn_are_pgs_the_person_picked()
     file.selected_subtitle = 1004
     tkEqual(picTrack({}, file, false), 1004, "a .sup next to the media")
     file.selected_subtitle = 5
-    tkEqual(picTrack({}, file, false), -1, "VobSub is burned in")
+    tkEqual(picTrack({}, file, false), 5, "VobSub too")
+    file.streams.Push({ index: 6, kind: "subtitle", codec: "dvb_subtitle", text_based: false })
+    file.selected_subtitle = 6
+    tkEqual(picTrack({}, file, false), 6, "DVB too")
     file.selected_subtitle = 3
     tkEqual(picTrack({}, file, false), -1, "text: the Video node shows it")
     file.selected_subtitle = invalid
@@ -194,7 +197,8 @@ sub test_pictures_answers_say_whether_to_burn_them_in()
     tkEqual(picAnswerKind({ ok: true, status: 200, data: picRead(picTestList(false)), error: "" }), "ok")
     tkEqual(picAnswerKind(picTestRefusal(404, "not_found", "unknown file")), "unavailable", "an older server, playing the file as it is")
     tkEqual(picAnswerKind(picTestRefusal(404, "not_found", "unknown playlist file")), "unavailable", "an older server, streaming")
-    tkEqual(picAnswerKind(picTestRefusal(404, "not_found", "no PGS subtitle track has this index")), "unavailable", "not PGS")
+    tkEqual(picAnswerKind(picTestRefusal(404, "not_found", "no PGS subtitle track has this index")), "unavailable", "an older server, which makes PGS's alone")
+    tkEqual(picAnswerKind(picTestRefusal(404, "not_found", "no picture subtitle track has this index")), "unavailable", "not pictures")
     tkEqual(picAnswerKind(picTestRefusal(503, "unavailable", "the transcoder can't copy subtitle tracks yet: update it")), "unavailable", "a transcoder too old")
     tkEqual(picAnswerKind(picTestRefusal(400, "bad_request", "no")), "unavailable")
 end sub

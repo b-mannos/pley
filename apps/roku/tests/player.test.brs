@@ -62,7 +62,8 @@ sub test_player_asks_for_picture_subtitles_to_be_drawn()
     tkEqual(playerBurnIndex(file, []), 4, "PGS the app doesn't draw")
     tkEqual(playerBurnIndex(file, picCodecs()), -1, "PGS the app draws itself")
     file.selected_subtitle = 6
-    tkEqual(playerBurnIndex(file, picCodecs()), 6, "VobSub, which the app doesn't draw")
+    tkEqual(playerBurnIndex(file, picCodecs()), -1, "VobSub the app draws itself")
+    tkEqual(playerBurnIndex(file, []), 6, "VobSub, once the server turned out not to make pictures")
     file.selected_subtitle = 3
     tkEqual(playerBurnIndex(file, []), -1, "text: the Video node shows it")
     file.selected_subtitle = 5

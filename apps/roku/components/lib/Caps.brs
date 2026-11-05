@@ -19,8 +19,8 @@ function capsContainers(webm as boolean) as object
 end function
 
 ' What this Roku plays (POST /api/playback's caps). drawsPictures: whether
-' the app draws PGS itself; once the server turned out not to make the
-' pictures, it doesn't, and the server burns PGS in again.
+' the app draws picture subtitles itself; once the server turned out not
+' to make the pictures, it doesn't, and the server burns them in again.
 function capsBuild(device as object, drawsPictures = true as boolean) as object
     video = []
     h264 = capsH264(device)
@@ -84,12 +84,12 @@ function capsBuild(device as object, drawsPictures = true as boolean) as object
         hls: { master_playlist: true, segments: ["ts"], variants: true },
         device: { form: "tv", model: capsModel(device) }
     }
-    ' PGS is drawn by the app over whatever plays (Pictures.brs), so the
-    ' server doesn't burn it in; VobSub and DVB, not listed, are. To the
-    ' server, a listed codec is the player's to show: unlisted, PGS asked
-    ' for is burned in.
+    ' Picture subtitles are drawn by the app over whatever plays
+    ' (Pictures.brs), so the server doesn't burn them in. To the server, a
+    ' listed codec is the player's to show: unlisted, pictures asked for
+    ' are burned in.
     if drawsPictures
-        report.subtitle_codecs = ["hdmv_pgs_subtitle"]
+        report.subtitle_codecs = ["hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle"]
         report.picture_subtitles_sideload = true
     end if
     ' Roku's Dolby Vision decoders take profiles 5 and 8; their levels go
@@ -138,7 +138,7 @@ function capsLines(report as object) as object
     if httpNumber(report.audio_channels, 2) > 2 then sound = "Surround (5.1)"
     lines.Push("Sound: " + sound)
     if httpTrue(report.picture_subtitles_sideload) and capsListed(httpArray(report.subtitle_codecs), "hdmv_pgs_subtitle")
-        lines.Push("Picture subtitles: PGS drawn here, VobSub and DVB burned in")
+        lines.Push("Picture subtitles: PGS, VobSub and DVB drawn here")
     end if
     lines.Push("Containers: " + httpArray(report.containers).Join(", "))
     lines.Push("Streams: HLS, in several sizes")

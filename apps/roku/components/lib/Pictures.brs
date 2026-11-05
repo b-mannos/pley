@@ -1,18 +1,19 @@
 ' Picture subtitles the app draws over the video, rather than having the
-' server burn them in, so the file plays as it is and HDR stays HDR: PGS
-' only (VobSub and DVB are still burned in). A keyed session's
+' server burn them in, so the file plays as it is and HDR stays HDR: PGS,
+' VobSub and DVB, which the server decodes. A keyed session's
 ' GET /api/media/{key}/subtitles-{index}.json?at={ms} lists a track's
 ' pictures, { complete, width, height, cues: [{ start_ms, end_ms, x, y,
 ' width, height, image }] }: each cue a PNG beside the list, shown at its
 ' box in the plane (width × height) from start_ms until end_ms, on the
 ' file's times. The server reads the pictures around `at` first, so the
 ' first answers can hold only those: while complete is false the player
-' asks again, from where it is. An older server answers 404 and a
-' transcoder too old 503: the pictures are burned in then.
+' asks again, from where it is. An older server answers 404 (one that
+' makes PGS's alone does for VobSub and DVB) and a transcoder too old 503:
+' the pictures are burned in then.
 
 ' The picture subtitle codecs this app draws.
 function picCodecs() as object
-    return ["hdmv_pgs_subtitle"]
+    return ["hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle"]
 end function
 
 ' How long before a track that isn't whole yet is asked for again (ms), as
@@ -288,9 +289,10 @@ end function
 ' make pictures of the track, so they are burned in from then on: an older
 ' server, which knows no such file (404 "unknown file", or "unknown
 ' playlist file" in a stream), a transcoder too old to copy the track
-' (503), a track that isn't PGS (404), or a request it refuses; "stopped"
-' for a session ended (410), which the player hears of itself, or a
-' refusal (403); "again" for anything else, asked again later: the network,
+' (503), a track it makes no pictures of (404; a server before VobSub's
+' and DVB's makes PGS's alone), or a request it refuses; "stopped" for a
+' session ended (410), which the player hears of itself, or a refusal
+' (403); "again" for anything else, asked again later: the network,
 ' a disk asleep, a transcoder out of reach, a session gone for a moment.
 ' Burning them in would need what is missing there too.
 function picAnswerKind(answer as object) as string
@@ -306,7 +308,7 @@ function picAnswerKind(answer as object) as string
     message = ""
     body = httpObject(answer.data)
     if body <> invalid then message = LCase(httpString(body.message))
-    if status = 404 and (message = "unknown file" or message = "unknown playlist file" or message = "no pgs subtitle track has this index") then return "unavailable"
+    if status = 404 and (message = "unknown file" or message = "unknown playlist file" or message = "no pgs subtitle track has this index" or message = "no picture subtitle track has this index") then return "unavailable"
     if status = 503 and Instr(1, message, "can't copy subtitle tracks") > 0 then return "unavailable"
     return "again"
 end function

@@ -17,12 +17,12 @@ sub test_caps_of_a_4k_hdr_roku_with_a_receiver()
     tkEqual(caps.audio_codecs, ["aac", "mp3", "ac3", "eac3", "flac", "alac", "opus", "vorbis", "pcm_s16le", "pcm_s24le", "pcm_s16be", "pcm_s24be", "dts"])
     tkEqual(caps.audio_channels, 6)
     tkEqual(caps.hls, { master_playlist: true, segments: ["ts"], variants: true })
-    tkEqual(caps.subtitle_codecs, ["hdmv_pgs_subtitle"], "PGS drawn by the app; VobSub and DVB burned in")
+    tkEqual(caps.subtitle_codecs, ["hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle"], "PGS, VobSub and DVB drawn by the app")
     tkTrue(caps.picture_subtitles_sideload, "next to a stream too")
     tkEqual(caps.display, { width: 3840, height: 2160, refresh_rates: [60] })
     tkEqual(caps.device, { form: "tv", model: "Roku Ultra" })
-    ' Once the server turned out not to make PGS's pictures: none listed,
-    ' so PGS asked for is burned in even where the file plays as it is.
+    ' Once the server turned out not to make the pictures: none listed, so
+    ' pictures asked for are burned in even where the file plays as it is.
     plain = capsBuild(fakeUltra(), false)
     tkFalse(plain.DoesExist("subtitle_codecs"))
     tkFalse(plain.DoesExist("picture_subtitles_sideload"))
@@ -38,7 +38,7 @@ sub test_caps_lines_say_what_diagnostics_shows()
         audio_decode: ["aac", "mp3", "ac3"],
         audio_passthrough: ["eac3", "dts"],
         audio_channels: 6,
-        subtitle_codecs: ["hdmv_pgs_subtitle"],
+        subtitle_codecs: ["hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle"],
         picture_subtitles_sideload: true,
         containers: ["mp4", "mkv"]
     }
@@ -50,7 +50,7 @@ sub test_caps_lines_say_what_diagnostics_shows()
         "Audio decoded: aac, mp3, ac3",
         "Sent to the receiver: eac3, dts",
         "Sound: Surround (5.1)",
-        "Picture subtitles: PGS drawn here, VobSub and DVB burned in",
+        "Picture subtitles: PGS, VobSub and DVB drawn here",
         "Containers: mp4, mkv",
         "Streams: HLS, in several sizes"
     ])
