@@ -14,11 +14,18 @@ sub init()
     m.actions.buttons = ["Enter an address", "Search this network"]
     m.saved = []
     m.found = []
+    ' Those a sweep found, kept as the broadcast's list comes again.
+    m.swept = []
     m.rows = []
     ' Saved servers that didn't answer as Pley ({ url: true }), and the row
     ' being connected to.
     m.unreachable = {}
     m.connecting = ""
+    ' The latest choice, a row or an address typed, by number, and whether
+    ' a server is being used: only the latest choice's answer leads on, as
+    ' the session is that server's.
+    m.choice = 0
+    m.using = false
     m.started = false
     m.searching = false
     m.sweeping = false
@@ -192,16 +199,31 @@ sub setStatus(text as string, problem as boolean)
     end if
 end sub
 
+' One server is used at a time: a second OK before the first one's answer
+' would have that answer lead on from a session already on the second
+' server, past its PIN.
 sub onServerSelected(event as object)
+    if m.using then return
     row = m.rows[event.getData()]
+    m.choice = m.choice + 1
     m.connecting = row.url
     render()
-    uiRequest({ op: "useServer", url: row.url, name: row.name, id: row.id }, "onServerUsed")
+    useServer(row.url, row.name, row.id)
+end sub
+
+sub useServer(url as string, name as string, id as string)
+    m.using = true
+    uiRequest({ op: "useServer", url: url, name: name, id: id, choice: m.choice }, "onServerUsed")
 end sub
 
 sub onServerUsed(event as object)
     answer = event.getData()
+    m.using = false
     m.connecting = ""
+    if event.getRoSGNode().spec.choice <> m.choice
+        render()
+        return
+    end if
     if not answer.ok
         render()
         setStatus(answer.message, true)
@@ -253,11 +275,15 @@ sub onAddressButton(event as object)
     m.dialog = invalid
     if event.getData() <> 0 or address = "" then return
     m.address = address
+    if m.using then return
+    m.choice = m.choice + 1
     setStatus("Checking " + address + "…", false)
-    uiRequest({ op: "checkServer", address: address }, "onChecked")
+    uiRequest({ op: "checkServer", address: address, choice: m.choice }, "onChecked")
 end sub
 
+' A check that answers once a row or another address was chosen is let go.
 sub onChecked(event as object)
+    if m.using or event.getRoSGNode().spec.choice <> m.choice then return
     answer = event.getData()
     if not answer.ok
         setStatus("", false)
@@ -266,7 +292,7 @@ sub onChecked(event as object)
     end if
     server = answer.data
     setStatus("Connecting to " + server.name + "…", false)
-    uiRequest({ op: "useServer", url: server.url, name: server.name, id: "" }, "onServerUsed")
+    useServer(server.url, server.name, "")
 end sub
 
 sub askForget(row as object)
