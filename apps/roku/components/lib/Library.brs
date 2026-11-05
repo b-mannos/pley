@@ -16,6 +16,20 @@ function libTabLabel(which as string) as string
     return "Library"
 end function
 
+' The row of a library's collections that ends its Recommended tab, as on
+' Android TV: { key, title, tiles }, the first 20 of tiles (the
+' Collections tab's), then See all, which opens that tab; invalid with
+' none.
+function libCollectionsRow(tiles as object) as dynamic
+    if tiles.Count() = 0 then return invalid
+    shown = []
+    for each tile in tiles
+        if shown.Count() < 20 then shown.Push(tile)
+    end for
+    shown.Push({ title: "See all", subtitle: "", image: "", wide: false, square: false, progress: 0.0, watched: false, itemId: 0, kind: "more", opens: "collections" })
+    return { key: "collections", title: "Collections", tiles: shown }
+end function
+
 ' The sorts a library of kind offers, in order: [{ id, label }].
 function libSorts(kind as string) as object
     all = [

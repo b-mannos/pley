@@ -161,6 +161,8 @@ left on, kept on the Roku for each server, profile and library.
   Sorted by bitrate, its bitrate and size take the year's place under the
   poster ("42 Mbps · 23.4 GB"). Otherwise, and in rows, collections,
   playlists and search, posters have no quality badges.
+- **Recommended** is the library's rows, then, as on Android TV, its
+  collections (the first 20), whose See all opens the Collections tab.
 - **See all** ends the rows of a library's newest, newly released and top
   rated titles, on Home and on a library's Recommended tab. It shows the
   library's Library tab in the row's order (date added, release date or

@@ -40,10 +40,16 @@ sub init()
     m.alpha = invalid
     m.alphaMaking = invalid
     m.jumpTo = -1
-    ' The other tabs, once loaded (invalid until then).
+    ' The other tabs, once loaded (invalid until then), whether the
+    ' collections are being asked, and Recommended's rows' keys and sizes,
+    ' and whether they end with the collections yet.
     m.collections = invalid
+    m.collectionsAsked = false
     m.recommended = invalid
     m.recommendedKeys = []
+    m.rowSizes = []
+    m.rowHeights = []
+    m.collectionsRow = false
     ' What the titles can be filtered by, once the server said
     ' (lib/Library.brs's libFilters); whether it's being asked, and the
     ' filter whose choices wait for it.
@@ -203,12 +209,14 @@ sub showTab(wanted as string)
     else if wanted = "collections"
         if m.collections = invalid
             showMessage("Loading…")
-            uiRequest({ method: "GET", path: "/api/libraries/" + urlValue(m.library.id) + "/collections", build: "collections" }, "onCollections")
+            askCollections()
         else
             m.grid.content = m.collections
             showContent()
         end if
     else
+        ' Its rows end with the collections (addCollectionsRow).
+        askCollections()
         if m.recommended = invalid
             showMessage("Loading…")
             uiRequest({ method: "GET", path: "/api/libraries/" + urlValue(m.library.id) + "/hubs", build: "rows" }, "onRecommended")
@@ -313,7 +321,16 @@ sub showCount()
     end if
 end sub
 
+' The library's collections, for the Collections tab and the end of
+' Recommended, asked once at a time; a music library has none.
+sub askCollections()
+    if m.collections <> invalid or m.collectionsAsked or m.library.kind = "music" then return
+    m.collectionsAsked = true
+    uiRequest({ method: "GET", path: "/api/libraries/" + urlValue(m.library.id) + "/collections", build: "collections" }, "onCollections")
+end sub
+
 sub onCollections(event as object)
+    m.collectionsAsked = false
     answer = event.getData()
     if not answer.ok
         if not uiFailed(answer) and m.view.tab = "collections" then showMessage(answer.message)
@@ -321,6 +338,8 @@ sub onCollections(event as object)
     end if
     m.collections = event.getRoSGNode().content
     if m.collections = invalid then m.collections = CreateObject("roSGNode", "ContentNode")
+    addCollectionsRow()
+    if m.view.tab = "recommended" and m.recommended <> invalid then showContent()
     if m.view.tab <> "collections" then return
     m.grid.content = m.collections
     showCount()
@@ -335,22 +354,48 @@ sub onRecommended(event as object)
     end if
     content = event.getRoSGNode().content
     if content = invalid then content = CreateObject("roSGNode", "ContentNode")
-    sizes = []
-    heights = []
+    m.rowSizes = []
+    m.rowHeights = []
     m.recommendedKeys = []
     for each row in answer.data.rows
         m.recommendedKeys.Push(row.key)
         shape = contentRowSize(row.wide, row.square)
-        sizes.Push(shape.size)
-        heights.Push(shape.height)
+        m.rowSizes.Push(shape.size)
+        m.rowHeights.Push(shape.height)
     end for
     m.recommended = content
-    if sizes.Count() > 0
-        m.rows.rowItemSize = sizes
-        m.rows.rowHeights = heights
+    m.collectionsRow = false
+    if m.rowSizes.Count() > 0
+        m.rows.rowItemSize = m.rowSizes
+        m.rows.rowHeights = m.rowHeights
         m.rows.content = content
     end if
+    addCollectionsRow()
     if m.view.tab = "recommended" then showContent()
+end sub
+
+' The collections end the Recommended tab once both came, as on Android
+' TV (libCollectionsRow): copies of the Collections tab's tiles, whose
+' nodes are that grid's. With no other rows, they are its only one.
+sub addCollectionsRow()
+    if m.recommended = invalid or m.collections = invalid or m.collectionsRow then return
+    tiles = []
+    for each node in m.collections.getChildren(20, 0)
+        tiles.Push({ title: node.title, subtitle: node.subtitle, image: node.image, wide: false, progress: 0.0, watched: false, itemId: node.itemId, kind: node.kind })
+    end for
+    row = libCollectionsRow(tiles)
+    if row = invalid then return
+    m.collectionsRow = true
+    shape = contentRowSize(false, false)
+    m.rowSizes.Push(shape.size)
+    m.rowHeights.Push(shape.height)
+    m.recommendedKeys.Push(row.key)
+    m.rows.rowItemSize = m.rowSizes
+    m.rows.rowHeights = m.rowHeights
+    rowNode = m.recommended.createChild("ContentNode")
+    rowNode.title = row.title
+    nodesAppend(rowNode, row.tiles)
+    if m.rows.content = invalid or not m.rows.content.isSameNode(m.recommended) then m.rows.content = m.recommended
 end sub
 
 ' --- The Library tab ---
@@ -440,12 +485,18 @@ sub onSelected(event as object)
 end sub
 
 ' A title opens; See all shows the Library tab in its row's order, which
-' isn't kept, the focus in the titles once they come.
+' isn't kept, the focus in the titles once they come; the collections'
+' See all, the Collections tab.
 sub onRowTile(event as object)
     position = event.getData()
     row = m.rows.content.getChild(position[0])
     if row = invalid then return
     tile = row.getChild(position[1])
+    if tile <> invalid and tile.kind = "more" and tile.hasField("opens")
+        m.focusContent = true
+        showTab("collections")
+        return
+    end if
     if tile <> invalid and tile.kind = "more" and tile.hasField("sort")
         m.view = libSeeAllView(tile.sort, m.library.kind)
         m.seeAll = true

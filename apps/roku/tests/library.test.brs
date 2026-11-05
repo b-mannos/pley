@@ -7,6 +7,24 @@ sub test_library_tabs_by_kind()
     tkEqual(libTabLabel("library"), "Library")
 end sub
 
+sub test_library_recommended_ends_with_collections()
+    tkInvalid(libCollectionsRow([]), "no collections, no row")
+    tiles = []
+    for i = 1 to 25
+        tiles.Push({ title: "Collection " + i.ToStr(), itemId: i, kind: "collection" })
+    end for
+    row = libCollectionsRow(tiles)
+    tkEqual(row.key, "collections")
+    tkEqual(row.title, "Collections")
+    tkEqual(row.tiles.Count(), 21, "the first 20, then See all")
+    tkEqual(row.tiles[19].itemId, 20)
+    last = row.tiles[20]
+    tkEqual(last.kind, "more")
+    tkEqual(last.title, "See all")
+    tkEqual(last.opens, "collections", "which opens the Collections tab")
+    tkEqual(libCollectionsRow([tiles[0]]).tiles.Count(), 2, "See all after one too")
+end sub
+
 sub test_library_sorts_by_kind()
     ids = function(sorts as object) as object
         out = []
