@@ -252,6 +252,11 @@ sub test_live_cards_and_list_items()
     tkEqual(liveListItem(channels[2], 1500, false).line, "")
 end sub
 
+sub test_live_favourite_refused()
+    tkEqual(liveFavoriteFailed("Live TV isn't open to this account."), "The favourite wasn't saved: Live TV isn't open to this account.")
+    tkEqual(liveFavoriteFailed(invalid), "The favourite wasn't saved.", "without the server's words")
+end sub
+
 sub test_live_guide_programmes()
     kept = {}
     liveGuideKeep(kept, { "1": [{ start: 0, stop: 100, title: "A" }, { start: 100, stop: 200, title: "B" }] })

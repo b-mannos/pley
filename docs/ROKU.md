@@ -78,7 +78,9 @@ yet, Scanning your libraries…, or Nothing here yet.
 | Options (\*) | The player | Roku's own options: subtitles and audio tracks |
 | OK | Skip intro, Skip credits | Skips; fast forward and rewind move 10 s |
 | Options (\*) | Live TV | A programme's details (a card's: what's on), Watch, Add to or remove from favourites |
-| Options (\*) | The live player | Add to or remove from favourites |
+| OK, Options (\*) | The live player | The channel list, at the right |
+| OK held | The live player | What's on, with Channels and Add to or remove from favourites |
+| Options (\*) | The live player's channel list | Adds the channel in focus to the favourites or removes it |
 | Replay | Live TV, the live player's channel list | Search (Roku remotes have no search key for apps) |
 
 ### A title's page
@@ -393,8 +395,7 @@ Live TV works as in the [Android app](ANDROID.md#live-tv). On Roku
   favourite.
 - **Channels:** the other tab, as cards with what's on and what's next.
 - **What's on moves on** each 15 s: the programme above the guide, the
-  cards in view and the player's banner and list show how far along it
-  is. Once a programme listed as on now has ended, the cards in view are
+  cards in view and the player's bar and list show how far along it is. Once a programme listed as on now has ended, the cards in view are
   asked for again, and in the player the channel playing
   (`GET /api/live/channels/{id}`), each at most once a minute. The guide's
   programmes come six hours ahead, so the guide itself needs nothing new.
@@ -404,13 +405,23 @@ Live TV works as in the [Android app](ANDROID.md#live-tv). On Roku
   Live TV.
 - **The player** tunes with `POST …/watch`, waits for the server's live HLS
   playlist (up to 50 s), then plays it with `Live = true`. Up and Down
-  change channel, tuning 0.7 s after the last press. Left opens the
-  channel list; Right or OK show the banner. Options (\*) puts the channel
-  in the favourites or takes it out, in the list the channel in focus,
-  else the one playing, the banner showing its star. Leaving, or changing
-  channel, sends `DELETE /api/live/sessions/{session}`.
-- **The channel list** opens on the category Up and Down go through, at
-  the channel playing. Left in it lists the categories as Live TV does
+  change channel, tuning 0.7 s after the last press: a Roku starts its
+  Video node again for each channel, so a run of presses tunes only the
+  channel it stops on, where Android tunes each at once. OK (as it is let
+  go) and Options (\*), Roku's menu key, open the channel list, as
+  Android's OK, Menu and Guide do. Options (\*) doesn't change the
+  favourite by itself: OK held (half a second) shows a bar of what's on
+  and next with Channels and Add to (or Remove from) favourites, which
+  changes in place; the bar goes 6 s after it was last touched, or with
+  Back. Left and Right do nothing. Roku remotes have no Info key, so
+  what's on shows only in that bar, never by itself as a channel starts.
+  The favourite's star changes at once, and goes back if the server
+  refuses, a toast saying so. Leaving, or changing channel, sends
+  `DELETE /api/live/sessions/{session}`.
+- **The channel list** opens at the right, on the category Up and Down go
+  through, at the channel playing. Options (\*) in it adds the channel in
+  focus to the favourites or removes it. Left in it lists the categories
+  as Live TV does
   (OK on one lists its channels instead, Back goes back), and Replay
   searches every channel (Back leaves the search). A channel chosen from
   another category, or a search, makes Up and Down go through that one.

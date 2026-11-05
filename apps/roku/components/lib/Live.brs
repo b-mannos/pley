@@ -615,6 +615,14 @@ function liveListItem(channel as object, now as integer, twelve as boolean) as o
     return { channelId: channel.id, number: channel.number, title: channel.name, image: channel.logo, line: line, progress: progress, favorite: channel.favorite, current: false }
 end function
 
+' What the toast says when the server refused a favourite (its star put
+' back), as on Android: "The favourite wasn't saved: …".
+function liveFavoriteFailed(message as dynamic) as string
+    words = httpSentence(message)
+    if words = "" then return "The favourite wasn't saved."
+    return "The favourite wasn't saved: " + words
+end function
+
 ' --- The guide ---
 
 ' Programmes of GET /api/live/guide added to kept ({ "<channel id>": {

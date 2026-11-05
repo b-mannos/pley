@@ -33,7 +33,7 @@ sub init()
     m.bannerTrack = m.top.findNode("bannerTrack")
     m.bannerFill = m.top.findNode("bannerFill")
     m.bannerNext = m.top.findNode("bannerNext")
-    m.bannerHint = m.top.findNode("bannerHint")
+    m.controls = m.top.findNode("controls")
     m.star = m.top.findNode("star")
     m.list = m.top.findNode("list")
     m.listTitle = m.top.findNode("listTitle")
@@ -46,13 +46,11 @@ sub init()
     m.noticeTitle = m.top.findNode("noticeTitle")
     m.noticeText = m.top.findNode("noticeText")
     m.noticeButtons = m.top.findNode("noticeButtons")
-    m.toast = m.top.findNode("toast")
-    m.toastText = m.top.findNode("toastText")
     m.bannerTimer = m.top.findNode("bannerTimer")
+    m.okTimer = m.top.findNode("okTimer")
     m.zapTimer = m.top.findNode("zapTimer")
     m.clock = m.top.findNode("clock")
     m.pictureTimer = m.top.findNode("pictureTimer")
-    m.toastTimer = m.top.findNode("toastTimer")
     m.retryTimer = m.top.findNode("retryTimer")
     m.stallTimer = m.top.findNode("stallTimer")
     m.stallTimer.observeField("fire", "onStall")
@@ -65,6 +63,11 @@ sub init()
     end for
     m.twelve = CreateObject("roDeviceInfo").GetClockFormat() <> "24h"
     m.started = false
+    ' OK went down with nothing over the picture, timed by okTimer: let go
+    ' first, it opens the channel list; still down, it was held and shows
+    ' the bar, whose OK the rest of that press isn't (okHeld).
+    m.okTiming = false
+    m.okHeld = false
     ' The channel shown (Live.brs's liveChannel), and the one up and down
     ' lead to before it is tuned.
     m.channel = invalid
@@ -133,10 +136,13 @@ sub init()
     m.categoryList.observeField("itemSelected", "onCategorySelected")
     m.categoryList.observeField("itemFocused", "onCategoryFocused")
     m.bannerTimer.observeField("fire", "onBannerTimer")
+    m.okTimer.observeField("fire", "onOkHeld")
+    m.controls.observeField("chosen", "onControl")
+    ' Moving between them counts as a touch: the bar stays.
+    m.controls.observeField("focusIndex", "pokeBanner")
     m.zapTimer.observeField("fire", "onZapTimer")
     m.clock.observeField("fire", "onClock")
     m.pictureTimer.observeField("fire", "onPictureTimer")
-    m.toastTimer.observeField("fire", "onToastTimer")
     m.retryTimer.observeField("fire", "onRetryTimer")
     m.cardLogo.observeField("loadStatus", "onLogos")
     m.bannerLogo.observeField("loadStatus", "onLogos")
@@ -237,7 +243,7 @@ sub onPage(event as object)
         if m.channel <> invalid then at = liveIndexOf(page.channels, m.channel.id)
         if at >= 0
             m.channel = page.channels[at]
-            if m.banner.visible then showBanner(false)
+            if m.banner.visible then drawBanner()
         end if
         ' The step waited for this page: it goes on only from where it
         ' started, and while watching goes on, so it can't undo a channel
@@ -279,6 +285,7 @@ end sub
 ' playing, as on Android: another chosen in it last time, or a search,
 ' isn't kept.
 sub openList()
+    forgetOk()
     hideBanner()
     m.listSearched = false
     if m.listCategory <> m.category
@@ -522,17 +529,17 @@ end sub
 
 ' A channel in or out of the favourites (PUT or DELETE
 ' /api/live/channels/{id}/favorite): its star changes at once wherever it
-' shows, and goes back if the server refuses.
+' shows, and goes back if the server refuses, saying so, as on Android.
 sub toggleFavorite(channel as object)
     favorite = not channel.favorite
     markFavorite(channel.id, favorite)
     method = "DELETE"
     if favorite then method = "PUT"
-    uiRequest({ method: method, path: "/api/live/channels/" + urlValue(channel.id) + "/favorite", channelId: channel.id, favorite: favorite, name: channel.name }, "onFavorite")
+    uiRequest({ method: method, path: "/api/live/channels/" + urlValue(channel.id) + "/favorite", channelId: channel.id, favorite: favorite }, "onFavorite")
 end sub
 
 ' The channel's star: on the channel playing (or the one Up or Down leads
-' to), in the pages held and their rows, and on the banner.
+' to), in the pages held and their rows, and on the bar.
 sub markFavorite(id as integer, favorite as boolean)
     for each channel in [m.channel, m.zapTo]
         if channel <> invalid and channel.id = id then channel.favorite = favorite
@@ -548,22 +555,15 @@ sub markFavorite(id as integer, favorite as boolean)
             end if
         end if
     end for
-    if m.banner.visible then showBanner(false)
+    if m.banner.visible then drawBanner()
 end sub
 
 sub onFavorite(event as object)
     answer = event.getData()
+    if answer.ok then return
     spec = event.getRoSGNode().spec
-    if not answer.ok
-        markFavorite(spec.channelId, not spec.favorite)
-        if not uiFailed(answer) then showToast(answer.message)
-        return
-    end if
-    if spec.favorite
-        showToast(spec.name + " is in your favourites")
-    else
-        showToast(spec.name + " is out of your favourites")
-    end if
+    markFavorite(spec.channelId, not spec.favorite)
+    if not uiFailed(answer) then uiToast(liveFavoriteFailed(answer.message), true)
 end sub
 
 ' --- Tuning ---
@@ -682,7 +682,7 @@ sub onWatch(event as object)
     fresh = liveChannel(answer.data.channel, m.global.session.server, liveLogoWidth(), m.category)
     if fresh <> invalid and fresh.id = m.channel.id then m.channel = fresh
     showCard(m.channel, "")
-    if m.banner.visible then showBanner(false)
+    if m.banner.visible then drawBanner()
     ' The playlist once, waited for: the server answers it once the
     ' channel's first segments are made, or says why not.
     uiRequest({ method: "GET", path: m.playlist, timeoutMs: 50000, attempt: m.attempt }, "onPlaylist")
@@ -919,12 +919,10 @@ sub onLogos()
     m.bannerInitials.visible = m.bannerLogo.uri = "" or m.bannerLogo.loadStatus = "failed"
 end sub
 
-' The banner: the channel, what's on with when and how long it has left,
-' how far along, what's next, and the Live chip. With hides, it goes
-' after 5 s.
-sub showBanner(hides as boolean)
-    channel = m.zapTo
-    if channel = invalid then channel = m.channel
+' The bar: the channel, what's on with when and how long it has left, how
+' far along, what's next, the Live chip, and Channels and the favourite.
+sub drawBanner()
+    channel = bannerChannel()
     if channel = invalid then return
     now = nowSeconds()
     on = liveOnNow(channel, now)
@@ -954,27 +952,90 @@ sub showBanner(hides as boolean)
     if coming <> invalid then m.bannerNext.text = "Next   " + liveClock(coming.start, m.twelve) + "   " + coming.title
     m.star.text = ""
     if channel.favorite then m.star.text = "★ Favourite"
-    m.bannerHint.text = "Up and down: channels   ·   Left: " + m.categoryName + "   ·   Options (*): favourite   ·   OK: close"
-    if m.list.visible or m.notice.visible then return
+    favorite = "Add to favourites"
+    if channel.favorite then favorite = "Remove from favourites"
+    ' Drawn again only when the favourite's words change: the chips are
+    ' made anew each time.
+    chips = m.controls.chips
+    if chips = invalid or chips.Count() <> 2 or chips[1].label <> favorite then m.controls.chips = [{ label: "Channels", width: 0 }, { label: favorite, width: 0 }]
+end sub
+
+' The channel the bar is of: the one Up or Down leads to, else the one
+' playing.
+function bannerChannel() as dynamic
+    if m.zapTo <> invalid then return m.zapTo
+    return m.channel
+end function
+
+' OK held: the bar, Channels in focus, as Android's long press shows its
+' controls.
+sub showControls()
+    if bannerChannel() = invalid or m.list.visible or m.notice.visible then return
+    drawBanner()
+    m.controls.focusIndex = 0
     m.banner.visible = true
-    m.bannerTimer.control = "stop"
-    if hides then m.bannerTimer.control = "start"
+    m.controls.setFocus(true)
+    pokeBanner()
 end sub
 
 sub hideBanner()
     m.bannerTimer.control = "stop"
+    if not m.banner.visible then return
     m.banner.visible = false
+    ' The bar gives the focus back to the picture.
+    if m.controls.isInFocusChain() then m.top.setFocus(true)
 end sub
 
+' A touch: the bar goes 6 s after the last.
+sub pokeBanner()
+    if not m.banner.visible then return
+    m.bannerTimer.control = "stop"
+    m.bannerTimer.control = "start"
+end sub
+
+' Left alone, the bar goes once the channel plays; while it tunes, it
+' waits.
 sub onBannerTimer()
-    if m.zapTo = invalid then hideBanner()
+    if m.played and m.zapTo = invalid
+        hideBanner()
+    else
+        pokeBanner()
+    end if
+end sub
+
+' Channels opens the list; the favourite changes in place, the bar
+' staying.
+sub onControl(event as object)
+    if event.getData() = 0
+        openList()
+        return
+    end if
+    channel = bannerChannel()
+    if channel <> invalid then toggleFavorite(channel)
+    pokeBanner()
+end sub
+
+' What covers the picture now (the list, what went wrong) takes the OK
+' going down: let go, it opens nothing more.
+sub forgetOk()
+    m.okTiming = false
+    m.okTimer.control = "stop"
+end sub
+
+' OK still down: it was held. The bar shows, and the rest of the press is
+' its own.
+sub onOkHeld()
+    if not m.okTiming then return
+    m.okTiming = false
+    m.okHeld = true
+    showControls()
 end sub
 
 ' Each 15 s: what's on moves on, on the banner and in the list; once the
 ' programme listed as on now has ended, the channel playing is asked for
 ' again (GET /api/live/channels/{id}), at most once a minute.
 sub onClock()
-    if m.banner.visible then showBanner(false)
+    if m.banner.visible then drawBanner()
     if m.list.visible then redrawList()
     if m.channel = invalid or not liveNowEnded([m.channel], 0, 1, nowSeconds()) then return
     ms = m.span.TotalMilliseconds()
@@ -995,7 +1056,7 @@ sub onChannelFresh(event as object)
             if at >= 0 then page.channels[at] = fresh
         end if
     end for
-    if m.banner.visible then showBanner(false)
+    if m.banner.visible then drawBanner()
     if m.list.visible then redrawList()
     ' Radio shows what's on in its card.
     if m.played and m.card.visible and m.zapTo = invalid then showCard(m.channel, "radio")
@@ -1016,17 +1077,6 @@ sub redrawList()
     end for
 end sub
 
-sub showToast(text as string)
-    m.toastText.text = text
-    m.toast.visible = true
-    m.toastTimer.control = "stop"
-    m.toastTimer.control = "start"
-end sub
-
-sub onToastTimer()
-    m.toast.visible = false
-end sub
-
 ' A watching that didn't start or stopped: what the server said, with Try
 ' again where it may help (Watch again when it stopped), Other channels,
 ' and Back.
@@ -1037,6 +1087,7 @@ sub trouble(problem as object)
     m.card.visible = false
     m.tuning.control = "stop"
     showWaiting(false)
+    forgetOk()
     hideBanner()
     m.noticeTitle.text = problem.title
     m.noticeText.text = problem.lines
@@ -1091,24 +1142,42 @@ sub finish()
     abandonWatch()
     leave()
     m.video.control = "stop"
-    for each timer in [m.bannerTimer, m.zapTimer, m.clock, m.pictureTimer, m.toastTimer, m.stallTimer, m.retryTimer]
+    for each timer in [m.bannerTimer, m.okTimer, m.zapTimer, m.clock, m.pictureTimer, m.stallTimer, m.retryTimer]
         timer.control = "stop"
     end for
+    m.okTiming = false
     if m.channel <> invalid then m.top.getScene().liveChannel = m.channel.id
     if m.started then m.global.session.unobserveFieldScoped("accessToken")
 end sub
 
-' Up and down change channel (Up: the next number); Left opens the
-' category's channels, Right and OK show what's on (it never shows by
-' itself as a channel starts), and the Options key (*) puts the channel in
-' the favourites or takes it out, the banner showing its star; play,
-' rewind, fast forward and Replay do nothing. In the list:
-' the Options key adds to or takes out of the favourites, up and down past
-' its ends go to the page before or after, Left opens the categories
+' With nothing over the picture, as on Android TV: up and down change
+' channel (Up: the next number); OK, as it is let go, and the Options key
+' (*), Roku's menu key, open the channel list at the right; OK held shows
+' the bar of what's on with Channels and the favourite, which goes 6 s
+' after it was last touched (Back hides it sooner). Left and Right do
+' nothing, nor do play, rewind, fast forward and Replay: live is live.
+' What's on never shows by itself as a channel starts, and Roku remotes
+' have no Info key: it shows in that bar. In the list: the Options key
+' puts the channel in focus in the favourites or takes it out, up and down
+' past its ends go to the page before or after, Left opens the categories
 ' (Back and Right close them), Replay searches, Back leaves a search for
-' the category before, and Back and Right close it. Back with the banner
-' showing hides it; otherwise it leaves (the scene).
+' the category before, and Back and Right close it. Over what went wrong,
+' the Options key opens the list too. Otherwise Back leaves (the scene).
 function onKeyEvent(key as string, press as boolean) as boolean
+    if key = "OK" and not press
+        ' The rest of an OK held is the bar's.
+        if m.okHeld
+            m.okHeld = false
+            return true
+        end if
+        if m.okTiming
+            m.okTiming = false
+            m.okTimer.control = "stop"
+            openList()
+            return true
+        end if
+        return false
+    end if
     if not press then return false
     if m.list.visible and m.categoryList.visible
         if key = "back" or key = "right" then closeCategories()
@@ -1145,7 +1214,20 @@ function onKeyEvent(key as string, press as boolean) as boolean
         end if
         return true
     end if
+    if key = "options"
+        openList()
+        return true
+    end if
     if m.notice.visible then return false
+    ' The bar has the focus: its chips take Left, Right and OK.
+    if m.banner.visible
+        if key = "back"
+            hideBanner()
+        else
+            pokeBanner()
+        end if
+        return true
+    end if
     if key = "up"
         zap(1)
         return true
@@ -1154,32 +1236,14 @@ function onKeyEvent(key as string, press as boolean) as boolean
         zap(-1)
         return true
     end if
-    if key = "left"
-        openList()
+    if key = "OK"
+        if not m.okTiming
+            m.okTiming = true
+            m.okTimer.control = "start"
+        end if
         return true
     end if
     ' Live is live: no pause, rewind or skip.
-    if key = "play" or key = "rewind" or key = "fastforward" or key = "replay" then return true
-    if key = "options"
-        channel = m.zapTo
-        if channel = invalid then channel = m.channel
-        if channel <> invalid
-            toggleFavorite(channel)
-            showBanner(true)
-        end if
-        return true
-    end if
-    if key = "right" or key = "OK"
-        if m.banner.visible
-            hideBanner()
-        else
-            showBanner(true)
-        end if
-        return true
-    end if
-    if key = "back" and m.banner.visible and m.zapTo = invalid
-        hideBanner()
-        return true
-    end if
+    if key = "left" or key = "right" or key = "play" or key = "rewind" or key = "fastforward" or key = "replay" then return true
     return false
 end function
