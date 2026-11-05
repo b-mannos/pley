@@ -45,6 +45,8 @@ sub init()
     m.defaults = invalid
     m.refused = false
     m.saving = 0
+    ' The latest save of the defaults, by number (saveDefaults).
+    m.saveSeq = 0
     ' The household's profiles ([{ id, name }]), for "Always start as".
     m.household = []
     ' The choices the panel shows, and whose they are.
@@ -446,14 +448,17 @@ sub onChoice(event as object)
 end sub
 
 ' Shows defaults at once and saves them; the server's answer is the
-' profile, a refusal puts back what was.
+' profile, a refusal puts back what was. Each save sends every default, so
+' only the latest one's refusal puts its before back: an earlier one's
+' would undo a later save.
 sub saveDefaults(defaults as object)
     if tracksSame(defaults, m.defaults) then return
     before = m.defaults
     m.defaults = defaults
     showRows()
     m.saving = m.saving + 1
-    uiRequest({ method: "PUT", path: "/api/me/track-defaults", jsonText: FormatJson(tracksDefaultsBody(defaults)), before: before }, "onSaved")
+    m.saveSeq = m.saveSeq + 1
+    uiRequest({ method: "PUT", path: "/api/me/track-defaults", jsonText: FormatJson(tracksDefaultsBody(defaults)), before: before, seq: m.saveSeq }, "onSaved")
 end sub
 
 sub onSaved(event as object)
@@ -464,7 +469,9 @@ sub onSaved(event as object)
         if m.saving = 0 then useProfile(answer.data)
         return
     end if
-    m.defaults = event.getRoSGNode().spec.before
+    spec = event.getRoSGNode().spec
+    if spec.seq <> m.saveSeq then return
+    m.defaults = spec.before
     if answer.error = "signed_out"
         showRows()
         return
