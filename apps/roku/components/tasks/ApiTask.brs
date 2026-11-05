@@ -397,7 +397,14 @@ sub apiCallAnswered(job as object, status as integer, body as string, headers as
         return
     end if
     answer = httpAnswer(status, body)
-    if job.server = m.server then apiReached(answer.error <> "network")
+    if job.server = m.server
+        ' Signed in with a proof, only an answer to what went with the
+        ' token (so once the server proved itself) says it's back: one
+        ' anything at its address could give doesn't.
+        answered = answer.error <> "network"
+        proving = m.tokens <> invalid and m.tokens.proof <> invalid
+        if not answered or job.auth or not proving then apiReached(answered)
+    end if
     if job.network <> "" then aqNetworkKeep(m.networkKept, job.network, answer, m.clock.TotalMilliseconds())
     if httpTrue(job.me) then apiKnowProfile(job, answer)
     if answer.ok and job.play and apiAbandoned(job.request)
