@@ -12,9 +12,9 @@ end sub
 sub onContent()
     episode = m.top.itemContent
     if episode = invalid then return
-    m.title.text = episode.title
-    m.subtitle.text = episode.subtitle
-    m.summary.text = episode.summary
+    typeSet(m.title, episode.title)
+    typeSet(m.subtitle, episode.subtitle)
+    typeSet(m.summary, episode.summary)
     ' The scene's agent carries the token; it changes with each refresh.
     m.thumb.setHttpAgent(m.top.getScene().getHttpAgent())
     m.thumb.uri = episode.image

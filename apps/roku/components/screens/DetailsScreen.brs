@@ -103,7 +103,7 @@ end sub
 sub onDetail(event as object)
     answer = event.getData()
     if not answer.ok or answer.data = invalid
-        if m.detail = invalid and not uiFailed(answer) then m.message.text = answer.message
+        if m.detail = invalid and not uiFailed(answer) then typeSet(m.message, answer.message)
         return
     end if
     first = m.item = invalid
@@ -131,19 +131,19 @@ sub showDetail()
     if m.item = invalid then return
     m.detail = contentDetail(m.item, m.global.session.server, m.onDeck)
     m.message.visible = false
-    m.heading.text = m.detail.heading
-    m.line.text = m.detail.line
-    m.genres.text = m.detail.genres
-    m.credits.text = m.detail.credits
-    m.tagline.text = m.detail.tagline
+    typeSet(m.heading, m.detail.heading)
+    typeSet(m.line, m.detail.line)
+    typeSet(m.genres, m.detail.genres)
+    typeSet(m.credits, m.detail.credits)
+    typeSet(m.tagline, m.detail.tagline)
     ' Seven buttons take a line from the summary (three, as on Android TV),
     ' and so does the credits line: under a heading of two lines they would
     ' reach the rows' title. More's Details has the whole of it.
     m.summary.maxLines = 4
     if m.detail.buttons.Count() > 6 then m.summary.maxLines = 3
     if m.detail.credits <> "" then m.summary.maxLines = m.summary.maxLines - 1
-    m.summary.text = m.detail.summary
-    m.note.text = m.detail.note
+    typeSet(m.summary, m.detail.summary)
+    typeSet(m.note, m.detail.note)
     layoutText()
     agent = m.top.getScene().getHttpAgent()
     if m.backdrop.uri <> m.detail.backdrop
@@ -250,11 +250,11 @@ sub showRows()
         row = m.rowNodes[key]
         content.appendChild(row.node)
         if row.wide
-            sizes.Push([400, 300])
+            sizes.Push([contentTileCell(400), 320])
         else
-            sizes.Push([220, 410])
+            sizes.Push([contentTileCell(220), 430])
         end if
-        heights.Push(sizes.Peek()[1] + 60)
+        heights.Push(sizes.Peek()[1] + 76)
     end for
     m.rowKeys = keys
     m.rows.rowItemSize = sizes
@@ -266,16 +266,16 @@ sub showRows()
     m.rows.visible = true
 end sub
 
-' The page slides up to the rows as they take the focus, the backdrop
-' shaded under them all, and back down.
+' The page slides up to the rows as they take the focus, the page's colour
+' coming up over the backdrop, and back down.
 sub focusRows(onRows as boolean)
     if onRows
         m.page.translation = [0, -820]
-        m.shade.width = 1920
+        m.shade.translation = [0, -200]
         m.rows.setFocus(true)
     else
         m.page.translation = [0, 0]
-        m.shade.width = 1260
+        m.shade.translation = [0, 520]
         if m.buttons.visible
             m.buttons.setFocus(true)
         else
@@ -332,8 +332,8 @@ sub showItemRequest()
     else
         m.stage.color = reqToneColor(stage.tone)
         m.stage.progress = stage.progress
-        m.stage.text = stage.text
-        m.stageLine.text = stage.line
+        typeSet(m.stage, stage.text)
+        typeSet(m.stageLine, stage.line)
         m.stage.visible = true
         m.stageLine.visible = stage.line <> ""
     end if
@@ -431,7 +431,7 @@ sub showMenu(kind as string, title as string, labels as object)
     end for
     m.panelKind = kind
     m.panelBack = ""
-    m.panelTitle.text = title
+    typeSet(m.panelTitle, title)
     m.menu.content = nodesContent(items)
     if at > 0 and at < items.Count() then m.menu.jumpToItem = at
     m.choices.visible = false
@@ -451,12 +451,11 @@ sub showChoices(kind as string, title as string, labels as object, values as obj
     m.panelKind = kind
     m.panelBack = back
     m.panelValues = values
-    m.panelTitle.text = title
+    typeSet(m.panelTitle, title)
     ' A version's line is long: smaller letters keep it whole.
-    size = "Medium"
-    if kind = "version" then size = "Small"
-    m.choices.font = "font:" + size + "SystemFont"
-    m.choices.focusedFont = "font:" + size + "BoldSystemFont"
+    size = 34
+    if kind = "version" then size = 30
+    typeListFonts(m.choices, labels, size)
     m.choices.content = nodesContent(items)
     m.choices.checkedItem = current
     if current > 0 then m.choices.jumpToItem = current
@@ -473,7 +472,7 @@ sub showInfo()
     m.panelKind = "info"
     m.panelBack = "more"
     m.panelTitle.text = "Media info"
-    m.info.text = mediaInfoText(m.item)
+    typeSet(m.info, mediaInfoText(m.item))
     m.menu.visible = false
     m.choices.visible = false
     m.info.visible = true
@@ -488,7 +487,7 @@ sub showAbout()
     m.panelKind = "info"
     m.panelBack = "more"
     m.panelTitle.text = "Details"
-    m.info.text = contentAbout(m.item, CreateObject("roDateTime").AsSeconds(), fmtZoneSeconds())
+    typeSet(m.info, contentAbout(m.item, CreateObject("roDateTime").AsSeconds(), fmtZoneSeconds()))
     m.menu.visible = false
     m.choices.visible = false
     m.info.visible = true

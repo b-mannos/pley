@@ -814,7 +814,7 @@ sub castSay(text as string)
     top = 72
     if m.stack.Count() > 0 and m.stack.Peek().subtype() = "PlayerScreen" then top = 232
     m.castToast.translation = [460, top]
-    m.castToastText.text = text
+    typeSet(m.castToastText, text)
     m.castToast.visible = true
     m.castToastTimer.control = "stop"
     m.castToastTimer.control = "start"

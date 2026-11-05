@@ -306,14 +306,14 @@ async function waitFor(pattern, since, what, { ms = 30000, settles = true } = {}
 }
 
 // brs-node drops a key now and then: menu entries are reached from the
-// top of the menu (twelve entries at most, Settings the last, which 11
-// reaches whatever the menu holds) and checked by the request they lead
-// to.
+// top of the rail, the profile's avatar (thirteen entries at most, Settings
+// the last, which 12 reaches whatever the rail holds), index counting from
+// Search, and checked by the request they lead to.
 async function openFromMenu(index, pattern, what, then = async () => {}) {
   for (let attempt = 0; attempt < 3; attempt++) {
     await press("left", 3);
-    await press("up", 11);
-    await press("down", index);
+    await press("up", 12);
+    await press("down", index + 1);
     const since = mark();
     await press("select");
     await then();
@@ -1264,8 +1264,8 @@ async function walk() {
   await sleep(1500);
   fixture.down = true;
   await press("left", 3);
-  await press("up", 11);
-  await press("down", 5); // Movies, after Search, Home, Discover, Your requests and Live TV
+  await press("up", 12);
+  await press("down", 6); // Movies, after the avatar, Search, Home, Discover, Your requests and Live TV
   await press("select");
   await sleep(3000);
   shoot("unreachable");

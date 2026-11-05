@@ -31,7 +31,7 @@ end sub
 sub onLibraries(event as object)
     answer = event.getData()
     if not answer.ok
-        if not uiFailed(answer) then m.message.text = answer.message
+        if not uiFailed(answer) then typeSet(m.message, answer.message)
         return
     end if
     place(orderLibraries(answer.data))
@@ -137,7 +137,7 @@ sub onSaved(event as object)
         ' A library came or went since they were listed: as they are now.
         uiGet("/api/libraries", "onLibraries")
     else
-        m.message.text = answer.message
+        typeSet(m.message, answer.message)
         place(m.before)
     end if
 end sub

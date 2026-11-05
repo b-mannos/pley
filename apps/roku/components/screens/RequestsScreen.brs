@@ -104,7 +104,7 @@ end sub
 sub showPage(view as string)
     summary = reqSummaryOf(m.top.requestSummary)
     m.manage = summary.manage = true
-    m.heading.text = reqPageName(summary)
+    typeSet(m.heading, reqPageName(summary))
     m.tabKeys = []
     for each entry in reqTabs(m.manage)
         m.tabKeys.Push(entry.key)
@@ -204,7 +204,7 @@ sub showCount()
     if not m.manage and summary.signInAgain = "approvals"
         m.count.text = "Sign in again to approve and decline here."
     else if m.total > 0
-        m.count.text = reqCount(m.total, "request", "requests")
+        typeSet(m.count, reqCount(m.total, "request", "requests"))
     else
         m.count.text = ""
     end if
@@ -273,7 +273,7 @@ end sub
 sub showList()
     showCount()
     if m.list.content.getChildCount() = 0
-        m.message.text = reqEmptyText(m.view, not m.manage or m.view = "mine", hasFilters())
+        typeSet(m.message, reqEmptyText(m.view, not m.manage or m.view = "mine", hasFilters()))
         m.message.visible = true
         m.hint.visible = false
         if m.list.isInFocusChain() or m.top.hasFocus() then m.tabs.setFocus(true)
@@ -528,7 +528,7 @@ sub showChoices(kind as string, title as string, labels as object, values as obj
     m.panelKind = kind
     m.values = values
     m.choiceLabels = labels
-    m.panelTitle.text = title
+    typeSet(m.panelTitle, title)
     items = []
     for each label in labels
         items.Push({ title: label })
@@ -603,7 +603,7 @@ sub onSummary()
         return
     end if
     if m.problemShown <> invalid then return
-    m.heading.text = reqPageName(summary)
+    typeSet(m.heading, reqPageName(summary))
     showTabs()
     showCount()
 end sub
@@ -622,8 +622,8 @@ sub showProblem(problem as object)
     m.hint.visible = false
     m.panel.visible = false
     m.count.text = ""
-    m.problemTitle.text = problem.title
-    m.problemText.text = problem.text
+    typeSet(m.problemTitle, problem.title)
+    typeSet(m.problemText, problem.text)
     buttons = []
     if problem.signIn then buttons.Push("Sign in")
     if problem.retry then buttons.Push("Try again")

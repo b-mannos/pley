@@ -105,7 +105,7 @@ sub showProfiles()
 end sub
 
 sub showMessage(text as string, buttons as object)
-    m.message.text = text
+    typeSet(m.message, text)
     m.buttons.buttons = buttons
     m.buttons.visible = buttons.Count() > 0
     if buttons.Count() > 0 and m.top.isInFocusChain() then m.buttons.setFocus(true)
@@ -189,7 +189,7 @@ sub switchTo(profile as object, pin as string)
     m.busy = true
     m.picked = profile
     m.sentPin = pin <> ""
-    m.message.text = "Switching to " + profile.title + "…"
+    typeSet(m.message, "Switching to " + profile.title + "…")
     uiRequest({ op: "switchProfile", profile: profile.itemId, pin: pin }, "onSwitched")
 end sub
 
@@ -202,7 +202,7 @@ sub onSwitched(event as object)
         return
     end if
     if answer.ok
-        m.message.text = "The server couldn't switch to " + m.picked.title + "."
+        typeSet(m.message, "The server couldn't switch to " + m.picked.title + ".")
         return
     end if
     m.message.text = ""
@@ -217,7 +217,7 @@ sub onSwitched(event as object)
     else if answer.error = "browser"
         askSignIn(m.picked)
     else
-        m.message.text = answer.message
+        typeSet(m.message, answer.message)
     end if
 end sub
 

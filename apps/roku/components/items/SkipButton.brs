@@ -3,7 +3,7 @@ sub init()
 end sub
 
 sub onText()
-    m.label.text = m.top.text
+    typeSet(m.label, m.top.text)
 end sub
 
 ' Keys this button doesn't take go up to its parent, the Video node, and on

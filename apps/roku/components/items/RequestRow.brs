@@ -13,10 +13,10 @@ end sub
 sub onContent()
     request = m.top.itemContent
     if request = invalid then return
-    m.title.text = request.title
-    m.subtitle.text = request.subtitle
-    m.who.text = request.who
-    m.line.text = request.line
+    typeSet(m.title, request.title)
+    typeSet(m.subtitle, request.subtitle)
+    typeSet(m.who, request.who)
+    typeSet(m.line, request.line)
     ' The mark of news pushes the title along.
     news = request.unseen = true
     m.unseen.visible = news
@@ -29,7 +29,7 @@ sub onContent()
     end if
     m.stage.color = request.stageColor
     m.stage.progress = request.progress
-    m.stage.text = request.stageText
+    typeSet(m.stage, request.stageText)
     ' The scene's agent carries the token; it changes with each refresh.
     m.poster.setHttpAgent(m.top.getScene().getHttpAgent())
     m.poster.uri = request.image

@@ -78,9 +78,9 @@ end sub
 sub onTrack()
     track = m.global.music.track
     if track = invalid then return
-    m.title.text = track.title
-    m.artist.text = track.artist
-    m.album.text = track.album
+    typeSet(m.title, track.title)
+    typeSet(m.artist, track.artist)
+    typeSet(m.album, track.album)
     if m.cover.uri <> track.image
         agent = m.top.getScene().getHttpAgent()
         m.cover.setHttpAgent(agent)
@@ -98,7 +98,7 @@ end sub
 sub onAt()
     music = m.global.music
     at = music.at
-    m.queue.text = "Track " + urlValue(at + 1) + " of " + urlValue(music.queueSize)
+    typeSet(m.queue, "Track " + urlValue(at + 1) + " of " + urlValue(music.queueSize))
     if music.queueId <> m.queueId
         m.queueId = music.queueId
         m.tracks = music.queue
@@ -184,9 +184,9 @@ sub onPosition()
     position = music.positionMs
     duration = music.durationMs
     m.fill.width = Int(m.track.width * fmtProgress(position, duration))
-    m.elapsed.text = fmtClock(position)
+    typeSet(m.elapsed, fmtClock(position))
     m.left.text = ""
-    if duration > 0 then m.left.text = "-" + fmtClock(duration - position)
+    if duration > 0 then typeSet(m.left, "-" + fmtClock(duration - position))
 end sub
 
 ' The sleep timer: its button says what is left. Keep listening takes the
@@ -205,10 +205,10 @@ end sub
 sub showStatus()
     music = m.global.music
     if m.noticing
-        m.message.text = "Pausing in " + urlValue(music.sleep.secondsLeft) + " s"
+        typeSet(m.message, "Pausing in " + urlValue(music.sleep.secondsLeft) + " s")
         m.message.color = "0xA1A9B6FF"
     else
-        m.message.text = music.message
+        typeSet(m.message, music.message)
         m.message.color = "0xEB6B70FF"
     end if
 end sub

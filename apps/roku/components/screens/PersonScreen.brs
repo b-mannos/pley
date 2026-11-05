@@ -30,8 +30,8 @@ sub onActive()
     end if
     m.started = true
     uiChangesSince()
-    m.name.text = httpSentence(m.top.params.title)
-    m.initials.text = pageInitials(m.name.text)
+    typeSet(m.name, httpSentence(m.top.params.title))
+    typeSet(m.initials, pageInitials(m.name.text))
     m.top.setFocus(true)
     uiRequest({ method: "GET", path: "/api/people/" + urlValue(m.top.params.id), build: "person" }, "onPerson")
 end sub
@@ -45,14 +45,14 @@ sub onPerson(event as object)
     answer = event.getData()
     if not answer.ok or answer.data = invalid
         if uiFailed(answer) then return
-        m.message.text = answer.message
+        typeSet(m.message, answer.message)
         if answer.status = 404 then m.message.text = "Person not found. No one by that link has anything in your libraries."
         return
     end if
     person = answer.data
-    m.name.text = person.name
-    m.initials.text = person.initials
-    m.line.text = person.line
+    typeSet(m.name, person.name)
+    typeSet(m.initials, person.initials)
+    typeSet(m.line, person.line)
     if person.photo <> ""
         m.photo.setHttpAgent(m.top.getScene().getHttpAgent())
         m.photo.uri = person.photo
@@ -63,6 +63,7 @@ sub onPerson(event as object)
     end if
     m.message.visible = false
     m.rows.content = event.getRoSGNode().content
+    typeRowLabels(m.rows)
     m.rows.visible = true
     ' Only while this screen has the focus: a dialog over it keeps it.
     if m.top.hasFocus() then m.rows.setFocus(true)

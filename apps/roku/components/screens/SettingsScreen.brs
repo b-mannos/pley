@@ -49,10 +49,10 @@ end sub
 sub onActive()
     if not m.top.active then return
     session = m.global.session
-    m.server.text = session.serverName + " (" + urlDisplayAddress(session.server) + ")"
-    m.device.text = session.device
-    m.version.text = session.appVersion
-    m.web.text = webAddress()
+    typeSet(m.server, session.serverName + " (" + urlDisplayAddress(session.server) + ")")
+    typeSet(m.device, session.device)
+    typeSet(m.version, session.appVersion)
+    typeSet(m.web, webAddress())
     if m.panel.visible
         m.choices.setFocus(true)
     else
@@ -79,7 +79,7 @@ end function
 sub onMe(event as object)
     answer = event.getData()
     if answer.ok and answer.data <> invalid
-        m.profile.text = httpSentence(answer.data.name)
+        typeSet(m.profile, httpSentence(answer.data.name))
         ' A choice still on its way stays as chosen.
         if m.saving = 0 then useProfile(answer.data)
     else if answer.error = "network"
@@ -203,7 +203,7 @@ sub openChoices(kind as string)
         return
     end if
     if m.refused
-        m.message.text = "Change these on the web, at " + webAddress() + "."
+        typeSet(m.message, "Change these on the web, at " + webAddress() + ".")
         return
     end if
     m.message.text = ""
@@ -237,7 +237,7 @@ sub showChoices(kind as string, choice as object)
     for each label in m.choice.labels
         items.Push({ title: label })
     end for
-    m.panelTitle.text = m.choice.title
+    typeSet(m.panelTitle, m.choice.title)
     m.choices.content = nodesContent(items)
     m.choices.checkedItem = m.choice.current
     at = m.choice.current
@@ -261,7 +261,7 @@ end sub
 sub choiceHint(at as integer)
     text = ""
     if m.choice <> invalid and at >= 0 and at < m.choice.hints.Count() then text = m.choice.hints[at]
-    m.panelHint.text = text
+    typeSet(m.panelHint, text)
 end sub
 
 sub onChoice(event as object)
@@ -316,9 +316,9 @@ sub onSaved(event as object)
     end if
     if tracksRefused(answer.status)
         m.refused = true
-        m.message.text = "This server doesn't let the app change these: change them on the web, at " + webAddress() + "."
+        typeSet(m.message, "This server doesn't let the app change these: change them on the web, at " + webAddress() + ".")
     else
-        m.message.text = answer.message
+        typeSet(m.message, answer.message)
     end if
     showRows()
 end sub

@@ -148,18 +148,18 @@ sub showDetail()
     if m.detail = invalid then return
     m.shown = reqTitlePage(m.detail, reqSummaryOf(m.top.requestSummary), m.global.session.server, CreateObject("roDateTime").AsSeconds(), fmtZoneSeconds())
     m.message.visible = false
-    m.heading.text = m.shown.title
-    m.line.text = m.shown.line
-    m.genres.text = m.shown.genres
-    m.tagline.text = m.shown.tagline
-    m.overview.text = m.shown.overview
-    m.note.text = m.shown.note
+    typeSet(m.heading, m.shown.title)
+    typeSet(m.line, m.shown.line)
+    typeSet(m.genres, m.shown.genres)
+    typeSet(m.tagline, m.shown.tagline)
+    typeSet(m.overview, m.shown.overview)
+    typeSet(m.note, m.shown.note)
     stage = m.shown.stage
     if stage <> invalid
         m.stage.color = reqToneColor(stage.tone)
         m.stage.progress = stage.progress
-        m.stage.text = stage.text
-        m.stageLine.text = stage.line
+        typeSet(m.stage, stage.text)
+        typeSet(m.stageLine, stage.line)
     else
         m.stage.text = ""
         m.stageLine.text = ""
@@ -244,8 +244,8 @@ sub showRows(content as dynamic)
     sizes = []
     heights = []
     for i = 0 to content.getChildCount() - 1
-        sizes.Push([220, 410])
-        heights.Push(470)
+        sizes.Push([contentTileCell(220), 430])
+        heights.Push(506)
     end for
     m.rows.rowItemSize = sizes
     m.rows.rowHeights = heights
@@ -274,16 +274,16 @@ function tileChanged(tile as object, fresh as object) as boolean
     return false
 end function
 
-' The page slides up to the rows as they take the focus, the backdrop
-' shaded under them all, and back down.
+' The page slides up to the rows as they take the focus, the page's colour
+' coming up over the backdrop, and back down.
 sub focusRows(onRows as boolean)
     if onRows
         m.page.translation = [0, -820]
-        m.shade.width = 1920
+        m.shade.translation = [0, -200]
         m.rows.setFocus(true)
     else
         m.page.translation = [0, 0]
-        m.shade.width = 1260
+        m.shade.translation = [0, 520]
         if m.buttons.visible
             m.buttons.setFocus(true)
         else
@@ -419,8 +419,8 @@ sub showProblem(problem as object)
     m.column.visible = false
     m.credit.visible = false
     m.rows.visible = false
-    m.problemTitle.text = problem.title
-    m.problemText.text = problem.text
+    typeSet(m.problemTitle, problem.title)
+    typeSet(m.problemText, problem.text)
     buttons = []
     if problem.signIn then buttons.Push("Sign in")
     if problem.retry then buttons.Push("Try again")

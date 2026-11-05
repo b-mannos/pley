@@ -44,7 +44,7 @@ sub onActive()
     end if
     m.started = true
     uiChangesSince()
-    m.title.text = httpSentence(m.top.params.title)
+    typeSet(m.title, httpSentence(m.top.params.title))
     m.top.setFocus(true)
     load()
 end sub
@@ -56,7 +56,7 @@ end sub
 sub onPlaylists(event as object)
     answer = event.getData()
     if not answer.ok
-        if m.shown < 0 and not uiFailed(answer) then m.message.text = answer.message
+        if m.shown < 0 and not uiFailed(answer) then typeSet(m.message, answer.message)
         return
     end if
     m.shown = answer.data.shown

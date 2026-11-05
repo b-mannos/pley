@@ -8,12 +8,20 @@
         <field id="gridHasFocus" type="boolean" value="true" onChange="onFocus" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/items/ProfileTile.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
     <children>
         <Rectangle id="ring" translation="[-8, -8]" width="236" height="236" color="0xEBEBEBFF" visible="false" />
         <Rectangle id="face" width="220" height="220" color="0x2E3440FF" />
-        <Label id="initial" width="220" height="220" horizAlign="center" vertAlign="center" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
+        <Label id="initial" width="220" height="220" horizAlign="center" vertAlign="center" color="0xEBEBEBFF">
+            <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="56" />
+        </Label>
         <Poster id="picture" width="220" height="220" loadWidth="220" loadHeight="220" loadDisplayMode="scaleToZoom" />
-        <Label id="name" translation="[-20, 240]" width="260" horizAlign="center" color="0xA1A9B6FF" font="font:MediumSystemFont" />
-        <Label id="needs" translation="[-20, 290]" width="260" horizAlign="center" color="0x8B95A5FF" font="font:SmallestSystemFont" />
+        <Label id="name" translation="[-20, 240]" width="260" horizAlign="center" color="0xA1A9B6FF">
+            <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="34" />
+        </Label>
+        <Label id="needs" translation="[-20, 290]" width="260" horizAlign="center" color="0x8B95A5FF">
+            <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+        </Label>
     </children>
 </component>

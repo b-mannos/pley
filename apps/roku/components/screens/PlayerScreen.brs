@@ -758,7 +758,7 @@ sub onBitrate(event as object)
 end sub
 
 sub showToast(text as string)
-    m.toastText.text = text
+    typeSet(m.toastText, text)
     m.toast.visible = true
     m.toastTimer.control = "stop"
     m.toastTimer.control = "start"
@@ -774,8 +774,8 @@ sub showBanner()
     m.bannerDue = false
     banner = playerBanner(m.item)
     if banner.title = "" then return
-    m.bannerTitle.text = banner.title
-    m.bannerLine.text = banner.line
+    typeSet(m.bannerTitle, banner.title)
+    typeSet(m.bannerLine, banner.line)
     m.banner.visible = true
     m.bannerTimer.control = "stop"
     m.bannerTimer.control = "start"
@@ -821,7 +821,7 @@ end function
 sub openSync()
     hideSkip()
     m.syncWas = m.syncMs
-    m.syncValue.text = syncLabel(m.syncMs)
+    typeSet(m.syncValue, syncLabel(m.syncMs))
     m.sync.visible = true
     m.syncButtons.focusButton = 0
     m.syncButtons.setFocus(true)
@@ -829,7 +829,7 @@ end sub
 
 sub stepSync(byMs as integer)
     m.syncMs = syncClamp(m.syncMs + byMs)
-    m.syncValue.text = syncLabel(m.syncMs)
+    typeSet(m.syncValue, syncLabel(m.syncMs))
     ' Pictures drawn here move at once.
     drawPictures()
 end sub
@@ -1052,7 +1052,7 @@ sub updateSkip()
     if key <> m.skipKey
         m.skipKey = key
         m.skipDismissed = false
-        if marker <> invalid then m.skip.text = playerSkipLabel(marker)
+        if marker <> invalid then typeSet(m.skip, playerSkipLabel(marker))
     end if
     m.skipMarker = marker
     shown = marker <> invalid and not m.skipDismissed and m.video.state = "playing" and not m.upNext.visible and not m.notice.visible and not m.sync.visible and not m.menu.visible
@@ -1394,8 +1394,8 @@ sub notice(title as string, text as string, buttons as object)
     closeMenu()
     hideSkip()
     hideUpNext()
-    m.noticeTitle.text = title
-    m.noticeText.text = text
+    typeSet(m.noticeTitle, title)
+    typeSet(m.noticeText, text)
     m.noticeButtons.buttons = buttons
     m.notice.visible = true
     m.noticeButtons.setFocus(true)
@@ -1423,8 +1423,8 @@ sub showUpNext()
     closeMenu()
     hideSkip()
     m.upNextShown = true
-    m.nextTitle.text = m.next.title
-    m.nextLine.text = m.next.line
+    typeSet(m.nextTitle, m.next.title)
+    typeSet(m.nextLine, m.next.line)
     m.nextImage.setHttpAgent(m.top.getScene().getHttpAgent())
     m.nextImage.uri = m.next.image
     m.upNext.visible = true
@@ -1434,7 +1434,7 @@ sub showUpNext()
     m.countdown.text = ""
     if not playerAutoplay(playbackSection()) then return
     m.countdownLeft = playerUpNextSeconds()
-    m.countdown.text = "Next in " + m.countdownLeft.ToStr() + " s"
+    typeSet(m.countdown, "Next in " + m.countdownLeft.ToStr() + " s")
     m.countdownTimer.control = "start"
 end sub
 
@@ -1448,7 +1448,7 @@ sub onCountdown()
     if m.countdownLeft <= 0
         playNext()
     else
-        m.countdown.text = "Next in " + m.countdownLeft.ToStr() + " s"
+        typeSet(m.countdown, "Next in " + m.countdownLeft.ToStr() + " s")
     end if
 end sub
 
@@ -1804,7 +1804,7 @@ end sub
 sub onMenuChoiceFocused()
     if m.menuKind <> "quality" then return
     at = m.menuChoices.itemFocused
-    if at >= 0 and at < m.menuValues.Count() then m.menuHint.text = aqHint(m.menuValues[at])
+    if at >= 0 and at < m.menuValues.Count() then typeSet(m.menuHint, aqHint(m.menuValues[at]))
 end sub
 
 ' A quality is kept as the Roku's (Settings shows it) and the title opens
@@ -1899,7 +1899,7 @@ sub onSleepTick()
         hideSleepNotice()
         return
     end if
-    m.sleepText.text = "Pausing in " + urlValue(state.secondsLeft) + " s"
+    typeSet(m.sleepText, "Pausing in " + urlValue(state.secondsLeft) + " s")
     if not m.sleepNotice.visible
         m.sleepNotice.visible = true
         ' The button takes the focus while nothing else is up.
@@ -1965,7 +1965,7 @@ sub showDetails(live as dynamic)
     end for
     if m.pictureIndex >= 0 then lines.Push("Subtitles: Drawn by Pley")
     if m.watch <> invalid and aqLowered(m.watch) then lines.Push("Quality: " + qualityShown() + " · Lowered for your connection")
-    m.menuText.text = lines.Join(Chr(10))
+    typeSet(m.menuText, lines.Join(Chr(10)))
 end sub
 
 ' --- Picture subtitles drawn here (Pictures.brs) ---
@@ -2157,7 +2157,7 @@ sub openFindLanguages()
 end sub
 
 sub showMenuText(text as string)
-    m.menuText.text = text
+    typeSet(m.menuText, text)
     m.menuList.visible = false
     m.menuChoices.visible = false
     m.menuText.visible = true
@@ -2195,9 +2195,9 @@ sub onMenuEntryFocused()
     if m.menuKind <> "found" then return
     at = m.menuList.itemFocused - 1
     if at >= 0 and at < m.found.Count()
-        m.menuHint.text = m.found[at].hint
+        typeSet(m.menuHint, m.found[at].hint)
     else if m.found.Count() = 0
-        m.menuHint.text = ssNothingFound(m.findLanguage)
+        typeSet(m.menuHint, ssNothingFound(m.findLanguage))
     else
         m.menuHint.text = "The language the search looks in."
     end if

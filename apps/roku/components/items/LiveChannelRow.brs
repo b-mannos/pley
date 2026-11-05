@@ -26,10 +26,10 @@ sub onContent()
     m.progress = 0.0
     if item.hasField("progress") then m.progress = item.progress
     m.current = item.hasField("current") and item.current = true
-    m.number.text = item.number
-    m.title.text = item.title
-    m.line.text = item.line
-    m.initials.text = Left(item.title, 3)
+    typeSet(m.number, item.number)
+    typeSet(m.title, item.title)
+    typeSet(m.line, item.line)
+    typeSet(m.initials, Left(item.title, 3))
     m.star.visible = item.favorite = true
     m.logo.setHttpAgent(m.top.getScene().getHttpAgent())
     onLayout()
@@ -63,8 +63,7 @@ sub onLayout()
     m.fill.width = Int(textWidth * m.progress)
     m.track.visible = m.progress > 0
     m.fill.visible = m.progress > 0
-    m.star.translation = [w - 48, 0]
-    m.star.height = h
+    m.star.translation = [w - 44, Int((h - 32) / 2)]
 end sub
 
 sub onFocus()

@@ -48,7 +48,7 @@ sub onPage(event as object)
     m.loading = false
     answer = event.getData()
     if not answer.ok
-        if m.content.getChildCount() = 0 and not uiFailed(answer) then m.message.text = answer.message
+        if m.content.getChildCount() = 0 and not uiFailed(answer) then typeSet(m.message, answer.message)
         return
     end if
     m.total = answer.data.total
@@ -69,7 +69,7 @@ sub showCount()
     if m.total = 1
         m.count.text = "1 play"
     else if m.total >= 0
-        m.count.text = urlValue(m.total) + " plays"
+        typeSet(m.count, urlValue(m.total) + " plays")
     end if
 end sub
 

@@ -332,25 +332,28 @@ sub showRows()
     content = CreateObject("roSGNode", "ContentNode")
     sizes = []
     heights = []
+    spacings = []
     m.rowKeys = []
     for each entry in shown
         content.appendChild(entry.node)
         shape = searchRowSize(entry.key)
         sizes.Push(shape.size)
         heights.Push(shape.height)
+        spacings.Push([shape.spacing, 0])
         m.rowKeys.Push(entry.key)
     end for
     m.rows.rowItemSize = sizes
     m.rows.rowHeights = heights
+    m.rows.rowItemSpacing = spacings
     m.rows.content = content
     if noneHere
         m.message.translation = [780, 170]
-        m.message.text = line
+        typeSet(m.message, line)
         m.message.visible = true
-        m.rows.translation = [780, 240]
+        m.rows.translation = [764, 240]
     else
         m.message.visible = false
-        m.rows.translation = [780, 170]
+        m.rows.translation = [764, 170]
     end if
     m.rows.visible = true
     for i = 0 to m.rowKeys.Count() - 1
@@ -395,7 +398,7 @@ end sub
 
 sub showMessage(text as string)
     m.message.translation = [780, 200]
-    m.message.text = text
+    typeSet(m.message, text)
     m.message.visible = true
 end sub
 

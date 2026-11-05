@@ -87,7 +87,7 @@ sub onActive()
         m.started = true
         uiChangesSince()
         m.library = m.top.params.library
-        m.title.text = m.library.name
+        typeSet(m.title, m.library.name)
         session = m.global.session
         m.viewKey = libViewKey(session.server, session.profileId, m.library.id)
         m.view = libLoadView(viewSection(), m.viewKey, m.library.kind)
@@ -234,7 +234,7 @@ sub showMessage(text as string)
     m.grid.visible = false
     m.rows.visible = false
     showLetters()
-    m.message.text = text
+    typeSet(m.message, text)
     m.message.visible = true
     if not m.panel.visible and m.top.isInFocusChain() and not m.viewChips.isInFocusChain() then m.tabs.setFocus(true)
 end sub
@@ -249,13 +249,13 @@ end sub
 
 sub showCount()
     if m.view.tab = "library" and m.total >= 0
-        m.countLabel.text = fmtCount(m.total, m.library.kind)
+        typeSet(m.countLabel, fmtCount(m.total, m.library.kind))
     else if m.view.tab = "collections" and m.collections <> invalid
         n = m.collections.getChildCount()
-        m.countLabel.text = urlValue(n) + " collections"
+        typeSet(m.countLabel, urlValue(n) + " collections")
         if n = 1 then m.countLabel.text = "1 collection"
     else
-        m.countLabel.text = fmtCount(m.library.itemCount, m.library.kind)
+        typeSet(m.countLabel, fmtCount(m.library.itemCount, m.library.kind))
     end if
 end sub
 
@@ -295,6 +295,7 @@ sub onRecommended(event as object)
         m.rows.rowItemSize = sizes
         m.rows.rowHeights = heights
         m.rows.content = content
+        typeRowLabels(m.rows)
     end if
     if m.view.tab = "recommended" then showContent()
 end sub
@@ -637,7 +638,7 @@ sub onFilters(event as object)
     answer = event.getData()
     if not answer.ok or answer.data = invalid
         ' Only the Filter panel waits for it: another panel's hint stays its own.
-        if not uiFailed(answer) and m.panel.visible and m.panelKind = "filters" then m.panelHint.text = answer.message
+        if not uiFailed(answer) and m.panel.visible and m.panelKind = "filters" then typeSet(m.panelHint, answer.message)
         return
     end if
     m.filters = libFilters(answer.data)
@@ -681,7 +682,7 @@ end sub
 sub showChoices(kind as string, title as string, labels as object, values as object, current as integer, hint as string)
     m.panelKind = kind
     m.values = values
-    m.panelTitle.text = title
+    typeSet(m.panelTitle, title)
     items = []
     for each label in labels
         items.Push({ title: label })
@@ -689,7 +690,7 @@ sub showChoices(kind as string, title as string, labels as object, values as obj
     m.choices.content = nodesContent(items)
     m.choices.checkedItem = current
     m.choices.jumpToItem = current
-    m.panelHint.text = hint
+    typeSet(m.panelHint, hint)
     m.menu.visible = false
     m.choices.visible = true
     m.panel.visible = true

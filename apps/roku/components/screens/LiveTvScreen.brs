@@ -75,7 +75,7 @@ sub init()
     m.refreshedAt = -1
     m.retry.buttons = ["Try again"]
     m.retry.observeField("buttonSelected", "onRetry")
-    m.tabs.chips = [{ label: "Guide", width: 208 }, { label: "Channels", width: 208 }]
+    m.tabs.chips = [{ label: "Guide", width: 228, icon: "calendar-days" }, { label: "Channels", width: 228, icon: "layout-grid" }]
     m.tabs.observeField("chosen", "onTabChosen")
     m.rail.observeField("itemSelected", "onRailSelected")
     m.rail.observeField("itemFocused", "onRailFocused")
@@ -189,7 +189,7 @@ sub buildRail()
     m.railFocused = at
     m.rail.content = nodesContent(liveRailItems(m.railEntries, m.open, m.view.category))
     m.rail.jumpToItem = at
-    m.searchRow.content = nodesContent([{ title: liveSearchLabel(m.query), countText: "", mark: "", inner: false, heading: false, current: searching() }])
+    m.searchRow.content = nodesContent([{ title: liveSearchLabel(m.query), countText: "", mark: "", inner: false, heading: false, current: searching(), icon: "search" }])
 end sub
 
 ' Rewind and fast forward in the rail: a screen of categories back or on.
@@ -369,7 +369,7 @@ end sub
 ' The category's channels from the start, or from the page around channel
 ' around (one watched).
 sub showCategory(around as integer)
-    m.categoryLabel.text = liveCategoryName(m.view.category, m.groups)
+    typeSet(m.categoryLabel, liveCategoryName(m.view.category, m.groups))
     m.failedAt = -1
     m.page = invalid
     m.cardChannels = []
@@ -417,7 +417,7 @@ sub showMessage(text as string)
     m.cards.visible = false
     m.retry.visible = false
     m.hint.text = ""
-    m.message.text = text
+    typeSet(m.message, text)
     m.message.visible = true
     if focused then m.rail.setFocus(true)
 end sub
@@ -597,7 +597,7 @@ sub showCount()
     if total = 1 then text = "1 channel"
     range = liveRange(offset, shown, total)
     if range <> "" then text = text + "   ·   " + range
-    m.count.text = text
+    typeSet(m.count, text)
 end sub
 
 ' Scrolled near what is fetched: the next six hours, for the channels
@@ -667,12 +667,12 @@ sub showProgram()
     if focused = invalid then return
     channel = focused.channel
     program = focused.program
-    m.infoChannel.text = liveTitle(channel)
+    typeSet(m.infoChannel, liveTitle(channel))
     ' The scene's agent carries the token; it changes with each refresh.
     m.infoLogo.setHttpAgent(m.top.getScene().getHttpAgent())
     m.infoLogo.uri = channel.logo
     if program = invalid or program.id = "gap"
-        m.infoTitle.text = channel.name
+        typeSet(m.infoTitle, channel.name)
         m.infoMeta.text = "No guide information"
         if not channel.hasGuide then m.infoMeta.text = "This channel has no guide"
         m.infoText.text = ""
@@ -690,9 +690,9 @@ sub showProgram()
     end if
     if program.shortDescriptionLine1 <> "" then meta.Push(program.shortDescriptionLine1)
     if program.shortDescriptionLine2 <> "" then meta.Push(program.shortDescriptionLine2)
-    m.infoTitle.text = program.title
-    m.infoMeta.text = meta.Join("   ·   ")
-    m.infoText.text = program.description
+    typeSet(m.infoTitle, program.title)
+    typeSet(m.infoMeta, meta.Join("   ·   "))
+    typeSet(m.infoText, program.description)
 end sub
 
 function programTimes(program as object) as object

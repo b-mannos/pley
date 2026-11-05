@@ -10,8 +10,8 @@ end sub
 sub onActive()
     if not m.top.active then return
     session = m.global.session
-    m.title.text = "Can't reach " + session.serverName
-    m.text.text = "Pley for Roku can't reach the server at " + urlDisplayAddress(session.server) + ". Check that it's on, and that this TV is on the same network as the server."
+    typeSet(m.title, "Can't reach " + session.serverName)
+    typeSet(m.text, "Pley for Roku can't reach the server at " + urlDisplayAddress(session.server) + ". Check that it's on, and that this TV is on the same network as the server.")
     m.buttons.setFocus(true)
     uiLaunched()
 end sub

@@ -25,11 +25,11 @@ sub onContent()
     if item = invalid then return
     m.progress = 0.0
     if item.hasField("progress") then m.progress = item.progress
-    m.title.text = item.title
-    m.fallback.text = item.title
-    m.line.text = item.line
-    m.nextLine.text = item.nextLine
-    m.number.text = item.number
+    typeSet(m.title, item.title)
+    typeSet(m.fallback, item.title)
+    typeSet(m.line, item.line)
+    typeSet(m.nextLine, item.nextLine)
+    typeSet(m.number, item.number)
     m.star.visible = item.favorite = true
     m.logo.setHttpAgent(m.top.getScene().getHttpAgent())
     onLayout()
@@ -84,10 +84,10 @@ end sub
 sub onFocus()
     focused = m.top.itemHasFocus and m.top.rowHasFocus and m.top.rowListHasFocus and m.top.gridHasFocus
     if focused
-        m.frame.color = "0x38BDF8FF"
+        m.frame.blendColor = "0x38BDF8FF"
         m.title.color = "0x7DD3FCFF"
     else
-        m.frame.color = "0x262B35FF"
+        m.frame.blendColor = "0x262B35FF"
         m.title.color = "0xEBEBEBFF"
     end if
 end sub

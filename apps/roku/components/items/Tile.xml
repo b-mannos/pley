@@ -1,9 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- A title in a RowList row or a MarkupGrid: its poster (a 16:9 picture
-     for Continue Watching, a square for music), how far along it is or a
-     mark once watched, a badge (a TMDB title's "In library", "Requested"),
-     a library's quality badges ("4K", "DV") at the poster's foot, and two
-     lines under it. -->
+     for Continue Watching, a square for music) in a well with rounded
+     corners, how far along it is or a mark once watched, a badge (a TMDB
+     title's "In library", "Requested"), a library's quality badges ("4K",
+     "DV") at the poster's foot, and two lines under it. Focused, the
+     picture grows to 1.05 with a ring around it, and the title turns bold,
+     as on Android TV. The tile is drawn inside its cell with the room that
+     takes around it (Content.brs's contentTileCell): a Roku crops a list's
+     items at its edges. -->
 <component name="Tile" extends="Group">
     <interface>
         <field id="itemContent" type="node" onChange="onContent" />
@@ -16,23 +20,54 @@
         <field id="gridHasFocus" type="boolean" value="true" onChange="onFocus" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/items/Tile.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
     <children>
-        <Rectangle id="frame" color="0x262B35FF" />
-        <Label id="fallback" color="0xA1A9B6FF" horizAlign="center" vertAlign="center" wrap="true" maxLines="4" font="font:SmallestBoldSystemFont" />
-        <Poster id="poster" loadDisplayMode="scaleToZoom" />
-        <Rectangle id="track" color="0x16191ECC" visible="false" />
-        <Rectangle id="fill" color="0x38BDF8FF" visible="false" />
-        <Poster id="watched" uri="pkg:/images/watched.png" width="40" height="40" visible="false" />
-        <Rectangle id="badgeBack" height="34" visible="false" />
-        <Label id="badge" height="34" vertAlign="center" color="0x16191EFF" font="font:TinySystemFont" visible="false" />
-        <!-- A title has two quality badges at most: "4K" and its dynamic
-             range. Dark under light words, as the other apps draw them on
-             pictures. -->
-        <Rectangle id="qualityBack0" height="34" color="0x0B0D10CC" visible="false" />
-        <Label id="quality0" height="34" vertAlign="center" color="0xEBEBEBFF" font="font:TinySystemFont" visible="false" />
-        <Rectangle id="qualityBack1" height="34" color="0x0B0D10CC" visible="false" />
-        <Label id="quality1" height="34" vertAlign="center" color="0xEBEBEBFF" font="font:TinySystemFont" visible="false" />
-        <Label id="title" color="0xEBEBEBFF" font="font:SmallestBoldSystemFont" />
-        <Label id="subtitle" color="0xA1A9B6FF" font="font:TinySystemFont" />
+        <Group id="body">
+            <!-- The picture and what is on it, which grows to 1.05 with the
+                 focus and gets Android TV's ring around it. -->
+            <Group id="card">
+                <!-- The well, while the picture loads, or when there is none. -->
+                <Poster id="frame" uri="pkg:/images/tile.9.png" blendColor="0x262B35FF" />
+                <Label id="fallback" color="0xA1A9B6FF" horizAlign="center" vertAlign="center" wrap="true" maxLines="4">
+                    <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="26" />
+                </Label>
+                <Poster id="poster" loadDisplayMode="scaleToZoom" />
+                <Rectangle id="track" color="0x000000AA" visible="false" />
+                <Rectangle id="fill" color="0x38BDF8FF" visible="false" />
+                <Poster id="watched" uri="pkg:/images/watched.png" width="40" height="40" visible="false" />
+                <Rectangle id="badgeBack" height="34" visible="false" />
+                <Label id="badge" height="34" vertAlign="center" color="0x16191EFF" visible="false">
+                    <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="22" />
+                </Label>
+                <!-- A title has two quality badges at most: "4K" and its dynamic
+                     range. Dark under light words, as the other apps draw them
+                     on pictures. -->
+                <Rectangle id="qualityBack0" height="34" color="0x0B0D10CC" visible="false" />
+                <Label id="quality0" height="34" vertAlign="center" color="0xEBEBEBFF" visible="false">
+                    <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="22" />
+                </Label>
+                <Rectangle id="qualityBack1" height="34" color="0x0B0D10CC" visible="false" />
+                <Label id="quality1" height="34" vertAlign="center" color="0xEBEBEBFF" visible="false">
+                    <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="22" />
+                </Label>
+                <!-- The page's colour outside the corners rounds them. -->
+                <Poster id="corners" uri="pkg:/images/tile-corners.9.png" blendColor="0x16191EFF" />
+                <Poster id="ring" uri="pkg:/images/tile-ring.9.png" blendColor="0x7DD3FCFF" opacity="0" />
+            </Group>
+            <Label id="title" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+            </Label>
+            <Label id="subtitle" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="24" />
+            </Label>
+        </Group>
+        <!-- The focus look coming (150 ms, eased out) or going (120 ms, eased
+             in), as Android TV's: only the card's scale and the ring's
+             opacity change, which a Roku draws without laying anything out. -->
+        <Animation id="look" duration="0.15" easeFunction="outCubic" optional="true">
+            <Vector2DFieldInterpolator id="lookScale" key="[0.0, 1.0]" keyValue="[[1.0, 1.0], [1.05, 1.05]]" fieldToInterp="card.scale" />
+            <FloatFieldInterpolator id="lookRing" key="[0.0, 1.0]" keyValue="[0.0, 1.0]" fieldToInterp="ring.opacity" />
+        </Animation>
     </children>
 </component>

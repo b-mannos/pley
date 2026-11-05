@@ -39,7 +39,7 @@ sub onActive()
     end if
     if not m.started
         m.started = true
-        m.title.text = httpSentence(m.top.params.title)
+        typeSet(m.title, httpSentence(m.top.params.title))
         uiChangesSince()
         m.top.setFocus(true)
     else
@@ -60,12 +60,12 @@ end sub
 sub onPlaylist(event as object)
     answer = event.getData()
     if not answer.ok
-        if m.playlist = invalid and not uiFailed(answer) then m.message.text = answer.message
+        if m.playlist = invalid and not uiFailed(answer) then typeSet(m.message, answer.message)
         return
     end if
     m.playlist = answer.data
-    m.title.text = m.playlist.title
-    m.line.text = m.playlist.line
+    typeSet(m.title, m.playlist.title)
+    typeSet(m.line, m.playlist.line)
     keep = m.entries.itemFocused
     m.entries.content = event.getRoSGNode().content
     if keep > 0 and keep < m.playlist.shown then m.entries.jumpToItem = keep

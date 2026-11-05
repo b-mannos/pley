@@ -10,8 +10,8 @@ end sub
 sub onContent()
     season = m.top.itemContent
     if season = invalid then return
-    m.name.text = season.title
-    m.state.text = season.line
+    typeSet(m.name, season.title)
+    typeSet(m.state, season.line)
     m.tick.visible = season.ticked = true
     m.body.opacity = 1.0
     if season.askable <> true then m.body.opacity = 0.45

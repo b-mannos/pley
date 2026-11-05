@@ -51,6 +51,8 @@
     </interface>
     <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Nav.brs" />
@@ -71,8 +73,10 @@
         <!-- "Playing from …" as a cast starts, over the screen on top, as
              the players' notices look (castSay places it). -->
         <Group id="castToast" visible="false">
-            <Rectangle width="1000" height="96" color="0x16191EE6" />
-            <Label id="castToastText" width="1000" height="96" horizAlign="center" vertAlign="center" color="0xEBEBEBFF" font="font:SmallSystemFont" />
+            <Poster uri="pkg:/images/pill.9.png" width="1000" height="96" blendColor="0x16191EFF" opacity="0.9" />
+            <Label id="castToastText" width="1000" height="96" horizAlign="center" vertAlign="center" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+            </Label>
         </Group>
         <Timer id="castToastTimer" duration="4" />
         <!-- While a notice waits: whether the remote has rested and the

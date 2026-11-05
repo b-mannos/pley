@@ -11,34 +11,60 @@
     </interface>
     <script type="text/brightscript" uri="pkg:/components/screens/LinkScreen.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Nav.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Auth.brs" />
     <children>
-        <Label id="wordmark" translation="[96, 72]" text="Pley" color="0x38BDF8FF" font="font:ExtraLargeBoldSystemFont" />
-        <Label id="title" translation="[96, 180]" width="1500" text="Sign in to Pley" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
-        <Label id="server" translation="[96, 262]" width="1500" color="0xA1A9B6FF" font="font:SmallerSystemFont" />
-        <Label id="intro" translation="[96, 306]" width="1500" color="0xEB6B70FF" visible="false" font="font:SmallerSystemFont" />
+        <Label id="wordmark" translation="[96, 72]" text="Pley" color="0x38BDF8FF">
+            <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="56" />
+        </Label>
+        <Label id="title" translation="[96, 180]" width="1500" text="Sign in to Pley" color="0xEBEBEBFF">
+            <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="56" />
+        </Label>
+        <Label id="server" translation="[96, 262]" width="1500" color="0xA1A9B6FF">
+            <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="30" />
+        </Label>
+        <Label id="intro" translation="[96, 306]" width="1500" color="0xEB6B70FF" visible="false">
+            <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="30" />
+        </Label>
         <!-- Shown when the server requires two-step sign-in (older servers
              don't say): here, or below the intro when that shows, with the
              steps, the status and the buttons a line lower. -->
-        <Label id="twoStep" translation="[96, 306]" width="1500" color="0xA1A9B6FF" visible="false" font="font:SmallerSystemFont" />
+        <Label id="twoStep" translation="[96, 306]" width="1500" color="0xA1A9B6FF" visible="false">
+            <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="30" />
+        </Label>
         <Group id="steps">
-            <Label translation="[96, 380]" text="On your phone or computer, go to" color="0xEBEBEBFF" font="font:MediumSystemFont" />
-            <Label id="url" translation="[96, 432]" width="1248" maxLines="2" color="0x7DD3FCFF" font="font:ExtraLargeBoldSystemFont" />
-            <Label translation="[96, 530]" text="and enter this code" color="0xEBEBEBFF" font="font:MediumSystemFont" />
+            <Label translation="[96, 380]" text="On your phone or computer, go to" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="34" />
+            </Label>
+            <Label id="url" translation="[96, 432]" width="1248" maxLines="2" color="0x7DD3FCFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="56" />
+            </Label>
+            <Label translation="[96, 530]" text="and enter this code" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="34" />
+            </Label>
             <Rectangle id="codeBox" translation="[96, 586]" width="760" height="150" color="0x262B35FF" />
-            <Label id="code" translation="[96, 586]" width="760" height="150" horizAlign="center" vertAlign="center" text="…" color="0xEBEBEBFF" font="font:LargestSystemFont" />
-            <Label translation="[96, 760]" width="1248" text="Your phone must be on this TV's network, or able to reach the server's address." color="0x8B95A5FF" font="font:SmallestSystemFont" />
+            <Label id="code" translation="[96, 586]" width="760" height="150" horizAlign="center" vertAlign="center" text="…" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="90" />
+            </Label>
+            <Label translation="[96, 760]" width="1248" text="Your phone must be on this TV's network, or able to reach the server's address." color="0x8B95A5FF">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+            </Label>
             <!-- Shown once it has loaded: older servers don't draw one. -->
             <Group id="qrBox" translation="[1384, 380]" visible="false">
-                <Label width="440" horizAlign="center" text="Or scan this" color="0xEBEBEBFF" font="font:MediumSystemFont" />
+                <Label width="440" horizAlign="center" text="Or scan this" color="0xEBEBEBFF">
+                    <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="34" />
+                </Label>
                 <Poster id="qr" translation="[0, 52]" width="440" height="440" loadDisplayMode="scaleToFit" />
             </Group>
         </Group>
-        <Label id="status" translation="[96, 830]" width="1248" color="0xA1A9B6FF" font="font:MediumSystemFont" />
-        <ButtonGroup id="actions" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[96, 900]" layoutDirection="horiz" minWidth="380" />
+        <Label id="status" translation="[96, 830]" width="1248" color="0xA1A9B6FF">
+            <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="34" />
+        </Label>
+        <Buttons id="actions" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[96, 900]" layoutDirection="horiz" minWidth="380" />
         <Timer id="leave" duration="1.2" />
     </children>
 </component>

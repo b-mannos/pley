@@ -12,7 +12,9 @@
     "preview": "node scripts/preview.mjs",
     "package": "bsc --create-package --out-file out/pley-roku.zip",
     "images": "python scripts/make_images.py",
-    "bench": "node scripts/bench.mjs"
+    "bench": "node scripts/bench.mjs",
+    "icons": "node scripts/icons.mjs",
+    "fonts": "node scripts/fonts.mjs"
   },
   "devDependencies": {
     "@rokucommunity/bslint": "0.8.46",

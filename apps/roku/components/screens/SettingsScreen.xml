@@ -15,6 +15,8 @@
     </interface>
     <script type="text/brightscript" uri="pkg:/components/screens/SettingsScreen.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Nav.brs" />
@@ -27,31 +29,66 @@
     <script type="text/brightscript" uri="pkg:/components/lib/Auth.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Profiles.brs" />
     <children>
-        <Label translation="[96, 56]" text="Settings" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
-        <Label translation="[96, 170]" text="Server" color="0x8B95A5FF" font="font:SmallestSystemFont" />
-        <Label id="server" translation="[96, 206]" width="840" color="0xEBEBEBFF" font="font:MediumSystemFont" />
-        <Label translation="[96, 280]" text="Signed in as" color="0x8B95A5FF" font="font:SmallestSystemFont" />
-        <Label id="profile" translation="[96, 316]" width="840" color="0xEBEBEBFF" text="…" font="font:MediumSystemFont" />
-        <Label translation="[1000, 170]" text="This Roku" color="0x8B95A5FF" font="font:SmallestSystemFont" />
-        <Label id="device" translation="[1000, 206]" width="824" color="0xEBEBEBFF" font="font:MediumSystemFont" />
-        <Label translation="[1000, 280]" text="Pley for Roku" color="0x8B95A5FF" font="font:SmallestSystemFont" />
-        <Label id="version" translation="[1000, 316]" width="824" color="0xEBEBEBFF" font="font:MediumSystemFont" />
+        <Label translation="[96, 56]" text="Settings" color="0xEBEBEBFF">
+            <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="56" />
+        </Label>
+        <Label translation="[96, 170]" text="Server" color="0x8B95A5FF">
+            <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+        </Label>
+        <Label id="server" translation="[96, 206]" width="840" color="0xEBEBEBFF">
+            <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="34" />
+        </Label>
+        <Label translation="[96, 280]" text="Signed in as" color="0x8B95A5FF">
+            <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+        </Label>
+        <Label id="profile" translation="[96, 316]" width="840" color="0xEBEBEBFF" text="…">
+            <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="34" />
+        </Label>
+        <Label translation="[1000, 170]" text="This Roku" color="0x8B95A5FF">
+            <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+        </Label>
+        <Label id="device" translation="[1000, 206]" width="824" color="0xEBEBEBFF">
+            <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="34" />
+        </Label>
+        <Label translation="[1000, 280]" text="Pley for Roku" color="0x8B95A5FF">
+            <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+        </Label>
+        <Label id="version" translation="[1000, 316]" width="824" color="0xEBEBEBFF">
+            <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="34" />
+        </Label>
         <!-- Discover's titles and pictures come from TMDB. -->
-        <Label translation="[1000, 372]" width="824" wrap="true" maxLines="2" text="This product uses the TMDB API but is not endorsed or certified by TMDB." color="0x8B95A5FF" font="font:SmallestSystemFont" />
-        <ButtonGroup id="buttons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[96, 400]" minWidth="840" maxWidth="840" />
+        <Label translation="[1000, 372]" width="824" wrap="true" maxLines="2" text="This product uses the TMDB API but is not endorsed or certified by TMDB." color="0x8B95A5FF">
+            <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+        </Label>
+        <Buttons id="buttons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[96, 400]" minWidth="840" maxWidth="840" />
         <!-- What the other TVs' "Manage your account on the web" says: Roku
              has no QR code of its own, so the address alone. -->
-        <Label translation="[1000, 460]" text="Manage your account on the web" color="0x8B95A5FF" font="font:SmallestSystemFont" />
-        <Label id="web" translation="[1000, 496]" width="824" color="0x7DD3FCFF" font="font:MediumSystemFont" />
-        <Label translation="[1000, 552]" width="824" wrap="true" maxLines="2" text="Name, picture, password, PIN, two-step, devices and apps, from a phone or computer on the same network." color="0x8B95A5FF" font="font:SmallestSystemFont" />
-        <Label id="message" translation="[1000, 650]" width="824" wrap="true" maxLines="4" color="0xA1A9B6FF" font="font:SmallSystemFont" />
-        <ButtonGroup id="about" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[1000, 850]" minWidth="600" maxWidth="824" />
+        <Label translation="[1000, 460]" text="Manage your account on the web" color="0x8B95A5FF">
+            <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+        </Label>
+        <Label id="web" translation="[1000, 496]" width="824" color="0x7DD3FCFF">
+            <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="34" />
+        </Label>
+        <Label translation="[1000, 552]" width="824" wrap="true" maxLines="2" text="Name, picture, password, PIN, two-step, devices and apps, from a phone or computer on the same network." color="0x8B95A5FF">
+            <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+        </Label>
+        <Label id="message" translation="[1000, 650]" width="824" wrap="true" maxLines="4" color="0xA1A9B6FF">
+            <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+        </Label>
+        <Buttons id="about" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[1000, 850]" minWidth="600" maxWidth="824" />
         <!-- The choices of one row, over the right half. -->
         <Group id="panel" visible="false">
             <Rectangle translation="[1000, 0]" width="920" height="1080" color="0x1E222AFF" />
-            <Label id="panelTitle" translation="[1056, 56]" width="808" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
-            <RadioButtonList id="choices" translation="[1056, 150]" itemSize="[808, 64]" numRows="11" color="0xEBEBEBFF" focusedColor="0x16191EFF" focusBitmapBlendColor="0x38BDF8FF" vertFocusAnimationStyle="floatingFocus" font="font:MediumSystemFont" focusedFont="font:MediumBoldSystemFont" />
-            <Label id="panelHint" translation="[1056, 900]" width="808" wrap="true" maxLines="3" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+            <Label id="panelTitle" translation="[1056, 56]" width="808" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="44" />
+            </Label>
+            <RadioButtonList id="choices" translation="[1056, 150]" itemSize="[808, 64]" numRows="11" color="0xEBEBEBFF" focusedColor="0x16191EFF" focusBitmapBlendColor="0x38BDF8FF" vertFocusAnimationStyle="floatingFocus">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="34" />
+                <Font role="focusedFont" uri="pkg:/fonts/roboto-700.ttf" size="36" />
+            </RadioButtonList>
+            <Label id="panelHint" translation="[1056, 900]" width="808" wrap="true" maxLines="3" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+            </Label>
         </Group>
     </children>
 </component>

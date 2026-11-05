@@ -26,6 +26,8 @@
     </interface>
     <script type="text/brightscript" uri="pkg:/components/screens/LivePlayerScreen.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Nav.brs" />
@@ -43,52 +45,86 @@
         <Group id="card" visible="false">
             <Rectangle width="1920" height="1080" color="0x000000FF" />
             <Rectangle translation="[780, 280]" width="360" height="180" color="0x262B35FF" />
-            <Label id="cardInitials" translation="[780, 280]" width="360" height="180" horizAlign="center" vertAlign="center" wrap="true" maxLines="2" color="0xA1A9B6FF" font="font:MediumBoldSystemFont" />
+            <Label id="cardInitials" translation="[780, 280]" width="360" height="180" horizAlign="center" vertAlign="center" wrap="true" maxLines="2" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="36" />
+            </Label>
             <Poster id="cardLogo" translation="[808, 300]" width="304" height="140" loadWidth="304" loadHeight="140" loadDisplayMode="scaleToFit" />
             <BusySpinner id="tuning" translation="[928, 492]" />
-            <Label id="cardTitle" translation="[160, 580]" width="1600" horizAlign="center" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
-            <Label id="cardLine" translation="[160, 646]" width="1600" horizAlign="center" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+            <Label id="cardTitle" translation="[160, 580]" width="1600" horizAlign="center" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="44" />
+            </Label>
+            <Label id="cardLine" translation="[160, 646]" width="1600" horizAlign="center" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+            </Label>
         </Group>
         <!-- What's on, when asked for (OK or Right, or the Options key as
              it changes the favourite, whose star shows here). -->
         <Group id="banner" visible="false">
             <Rectangle translation="[0, 720]" width="1920" height="360" color="0x16191EE6" />
             <Rectangle translation="[96, 792]" width="240" height="120" color="0x2E3440FF" />
-            <Label id="bannerInitials" translation="[96, 792]" width="240" height="120" horizAlign="center" vertAlign="center" wrap="true" maxLines="2" color="0xA1A9B6FF" font="font:SmallestBoldSystemFont" />
+            <Label id="bannerInitials" translation="[96, 792]" width="240" height="120" horizAlign="center" vertAlign="center" wrap="true" maxLines="2" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="26" />
+            </Label>
             <Poster id="bannerLogo" translation="[112, 802]" width="208" height="100" loadWidth="208" loadHeight="100" loadDisplayMode="scaleToFit" />
-            <Label id="bannerChannel" translation="[384, 784]" width="1100" color="0xA1A9B6FF" font="font:SmallBoldSystemFont" />
-            <Label id="bannerTitle" translation="[384, 822]" width="1100" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
-            <Label id="bannerMeta" translation="[384, 884]" width="1100" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+            <Label id="bannerChannel" translation="[384, 784]" width="1100" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="32" />
+            </Label>
+            <Label id="bannerTitle" translation="[384, 822]" width="1100" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="44" />
+            </Label>
+            <Label id="bannerMeta" translation="[384, 884]" width="1100" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+            </Label>
             <Rectangle id="bannerTrack" translation="[384, 926]" width="1100" height="6" color="0x2E3440FF" />
             <Rectangle id="bannerFill" translation="[384, 926]" width="0" height="6" color="0x38BDF8FF" />
-            <Label id="bannerNext" translation="[384, 948]" width="1100" color="0x8B95A5FF" font="font:SmallestSystemFont" />
+            <Label id="bannerNext" translation="[384, 948]" width="1100" color="0x8B95A5FF">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+            </Label>
             <!-- The Live chip: live is all there is. -->
             <Rectangle translation="[1648, 790]" width="176" height="52" color="0xEB6B70FF" />
-            <Label translation="[1648, 790]" width="176" height="52" horizAlign="center" vertAlign="center" text="LIVE" color="0xEBEBEBFF" font="font:SmallBoldSystemFont" />
-            <Label id="star" translation="[1648, 856]" width="176" horizAlign="center" color="0x38BDF8FF" font="font:SmallestBoldSystemFont" />
-            <Label id="bannerHint" translation="[96, 1012]" width="1728" color="0x8B95A5FF" font="font:TinySystemFont" />
+            <Label translation="[1648, 790]" width="176" height="52" horizAlign="center" vertAlign="center" text="LIVE" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="32" />
+            </Label>
+            <Label id="star" translation="[1648, 856]" width="176" color="0x38BDF8FF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="26" />
+            </Label>
+            <Label id="bannerHint" translation="[96, 1012]" width="1728" color="0x8B95A5FF">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="24" />
+            </Label>
         </Group>
         <!-- What went wrong, and what can be done. -->
         <Group id="notice" visible="false">
             <Rectangle width="1920" height="1080" color="0x16191EF2" />
-            <Label id="noticeTitle" translation="[96, 340]" width="1728" wrap="true" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
-            <Label id="noticeText" translation="[96, 430]" width="1500" wrap="true" maxLines="6" color="0xA1A9B6FF" font="font:SmallSystemFont" />
-            <ButtonGroup id="noticeButtons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[96, 700]" minWidth="400" />
+            <Label id="noticeTitle" translation="[96, 340]" width="1728" wrap="true" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="56" />
+            </Label>
+            <Label id="noticeText" translation="[96, 430]" width="1500" wrap="true" maxLines="6" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+            </Label>
+            <Buttons id="noticeButtons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[96, 700]" minWidth="400" />
         </Group>
         <!-- The category's channels, at the left over the video. -->
         <Group id="list" visible="false">
             <Rectangle width="800" height="1080" color="0x16191EF2" />
-            <Label id="listTitle" translation="[64, 56]" width="672" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
-            <Label id="listRange" translation="[64, 120]" width="672" color="0x8B95A5FF" font="font:SmallestSystemFont" />
+            <Label id="listTitle" translation="[64, 56]" width="672" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="44" />
+            </Label>
+            <Label id="listRange" translation="[64, 120]" width="672" color="0x8B95A5FF">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+            </Label>
             <MarkupList id="channelList" translation="[40, 176]" itemComponentName="LiveChannelRow" itemSize="[720, 100]" itemSpacing="[0, 4]" numRows="8" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" />
             <!-- Left in the list: another category to list. -->
             <MarkupList id="categoryList" translation="[40, 176]" itemComponentName="LiveRailItem" itemSize="[720, 56]" itemSpacing="[0, 4]" numRows="14" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" visible="false" />
             <!-- Two lines: what the channels do, then the categories and search. -->
-            <Label id="listHint" translation="[64, 1010]" width="672" wrap="true" maxLines="2" color="0x8B95A5FF" font="font:TinySystemFont" />
+            <Label id="listHint" translation="[64, 1010]" width="672" wrap="true" maxLines="2" color="0x8B95A5FF">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="24" />
+            </Label>
         </Group>
         <Group id="toast" visible="false">
             <Rectangle translation="[460, 72]" width="1000" height="96" color="0x16191EE6" />
-            <Label id="toastText" translation="[460, 72]" width="1000" height="96" horizAlign="center" vertAlign="center" color="0xEBEBEBFF" font="font:SmallSystemFont" />
+            <Label id="toastText" translation="[460, 72]" width="1000" height="96" horizAlign="center" vertAlign="center" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+            </Label>
         </Group>
         <!-- The banner goes after a while; up and down wait for more
              presses before tuning; what's on moves on; a channel without

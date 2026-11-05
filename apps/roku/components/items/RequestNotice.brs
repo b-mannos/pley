@@ -21,7 +21,7 @@ sub onNotice()
     if notice = invalid or notice.text = invalid then return
     poster = ""
     if GetInterface(notice.poster, "ifString") <> invalid then poster = notice.poster
-    m.text.text = notice.text
+    typeSet(m.text, notice.text)
     withPoster = poster <> ""
     m.frame.visible = withPoster
     m.poster.visible = withPoster

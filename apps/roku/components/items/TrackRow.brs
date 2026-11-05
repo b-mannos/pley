@@ -20,16 +20,16 @@ sub onContent()
     if m.heading <> invalid
         m.heading.visible = m.isHeading
         m.heading.text = ""
-        if m.isHeading then m.heading.text = track.title
+        if m.isHeading then typeSet(m.heading, track.title)
     end if
     m.isCurrent = track.hasField("current") and track.current = true
-    m.title.font = "font:SmallSystemFont"
-    if m.isCurrent then m.title.font = "font:SmallBoldSystemFont"
+    weight = 400
+    if m.isCurrent then weight = 700
     m.background.visible = not m.isHeading
     m.title.visible = not m.isHeading
-    m.title.text = track.title
-    m.subtitle.text = track.subtitle
-    m.duration.text = track.duration
+    typeSet(m.title, track.title, typeFont(weight, 32))
+    typeSet(m.subtitle, track.subtitle)
+    typeSet(m.duration, track.duration)
     onFocus()
 end sub
 

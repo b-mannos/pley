@@ -11,9 +11,9 @@ sub onContent()
     profile = m.top.itemContent
     if profile = invalid then return
     m.face.color = profile.color
-    m.initial.text = profile.initial
-    m.name.text = profile.title
-    m.needs.text = profile.subtitle
+    typeSet(m.initial, profile.initial)
+    typeSet(m.name, profile.title)
+    typeSet(m.needs, profile.subtitle)
     ' The scene's agent carries the token, which a household's pictures need.
     m.picture.setHttpAgent(m.top.getScene().getHttpAgent())
     m.picture.uri = profile.image

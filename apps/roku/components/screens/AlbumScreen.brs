@@ -50,7 +50,7 @@ sub onActive()
         return
     end if
     m.started = true
-    m.title.text = httpSentence(m.top.params.title)
+    typeSet(m.title, httpSentence(m.top.params.title))
     m.top.setFocus(true)
     path = "/api/items/" + urlValue(m.top.params.id)
     uiGet(path, "onAlbum")
@@ -66,11 +66,11 @@ end sub
 sub onAlbum(event as object)
     answer = event.getData()
     if not answer.ok or answer.data = invalid
-        if not uiFailed(answer) then m.message.text = answer.message
+        if not uiFailed(answer) then typeSet(m.message, answer.message)
         return
     end if
     m.album = answer.data
-    m.title.text = httpSentence(m.album.title)
+    typeSet(m.title, httpSentence(m.album.title))
     showLine()
     showButtons()
     image = contentTileImage(m.album, m.global.session.server, false, 420)
@@ -82,13 +82,13 @@ sub onAlbum(event as object)
 end sub
 
 sub showLine()
-    if m.album <> invalid then m.line.text = musicAlbumLine(m.album, m.queue)
+    if m.album <> invalid then typeSet(m.line, musicAlbumLine(m.album, m.queue))
 end sub
 
 sub onTracks(event as object)
     answer = event.getData()
     if not answer.ok
-        if not uiFailed(answer) then m.message.text = answer.message
+        if not uiFailed(answer) then typeSet(m.message, answer.message)
         return
     end if
     m.queue = answer.data.queue

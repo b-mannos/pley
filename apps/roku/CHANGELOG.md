@@ -65,6 +65,15 @@ describes how they are made.
 
 ### Changed
 
+- The app has the Android TV app's look: its text is in Roboto at Android
+  TV's sizes, Home's menu is a rail of icons, the profile's avatar at its
+  top, that opens with its names as the focus comes to it, and the hero's
+  buttons are a Resume pill and round icon buttons. Tiles have rounded
+  corners and grow with a ring as they take the focus, rows slide under a
+  focus that stays at their left edge, buttons and tabs are rounded pills,
+  and backdrops fade into the page. Live TV's tabs and lists have icons.
+  Titles in scripts Roboto's files lack are drawn in Roku's own font.
+- Settings' Licences lists Lucide's icons and the Roboto font.
 - Requests: a sign-in from before the app could ask says "Sign in again to ask for movies
   and shows" without a second line, and its button reads Sign in.
 - Up Next waits at the end of an episode once cancelled, or when the next

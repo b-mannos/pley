@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- An entry of Home's rail, as Android TV's (TvRail.kt): its icon, alone
+     while the focus is in the page, the current entry in the text colour
+     with an accent mark beside it and the others muted. With the focus in
+     the rail it opens: its name fades in as it slides into place, the
+     current entry on a raised pill, the focused one on the accent pill at
+     1.05. A number after the name (the requests waiting), red while some
+     failed; closed, a dot on the icon. The first entry is the profile's
+     avatar, its picture or its initial on its colour, with its name and
+     "Switch profile" beside it once open. -->
+<component name="RailItem" extends="Group">
+    <interface>
+        <field id="itemContent" type="node" onChange="onContent" />
+        <field id="itemHasFocus" type="boolean" onChange="onFocus" />
+        <field id="listHasFocus" type="boolean" value="false" onChange="onOpen" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/items/RailItem.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
+    <children>
+        <Group id="cell" scaleRotateCenter="[256, 40]">
+            <!-- Open, grown from the closed entry's width as the rail opens. -->
+            <Poster id="pill" uri="pkg:/images/pill.9.png" width="512" height="80" scaleRotateCenter="[0, 40]" opacity="0" />
+            <Rectangle id="mark" translation="[0, 20]" width="8" height="40" color="0x38BDF8FF" visible="false" />
+            <Poster id="icon" translation="[36, 20]" width="40" height="40" loadWidth="40" loadHeight="40" blendColor="0xA1A9B6FF" />
+            <!-- The avatar's: a disc of the profile's colour with its initial,
+                 its picture over them, made round. -->
+            <Group id="avatar" translation="[24, 8]" visible="false">
+                <Poster id="disc" uri="pkg:/images/round.png" width="64" height="64" blendColor="0x2E3440FF" />
+                <Label id="initial" width="64" height="64" horizAlign="center" vertAlign="center" color="0xEBEBEBFF">
+                    <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="28" />
+                </Label>
+            </Group>
+            <Label id="hint" translation="[48, 42]" width="380" text="Switch profile" color="0xA1A9B6FF" opacity="0" visible="false">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="24" />
+            </Label>
+            <Poster id="dot" translation="[66, 16]" width="14" height="14" uri="pkg:/images/round.png" visible="false" />
+            <Label id="name" translation="[48, 0]" width="300" height="80" vertAlign="center" color="0xA1A9B6FF" opacity="0">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="28" />
+            </Label>
+            <Rectangle id="countBack" translation="[0, 22]" height="36" opacity="0" visible="false" />
+            <Label id="count" translation="[0, 22]" height="36" horizAlign="center" vertAlign="center" color="0x16191EFF" opacity="0" visible="false">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="22" />
+            </Label>
+        </Group>
+        <!-- Opening and closing with the rail: 200 ms, eased out. -->
+        <Animation id="opening" duration="0.2" easeFunction="outCubic" optional="true">
+            <Vector2DFieldInterpolator id="openPill" key="[0.0, 1.0]" keyValue="[[0.22, 1.0], [1.0, 1.0]]" fieldToInterp="pill.scale" />
+            <FloatFieldInterpolator id="openPillFade" key="[0.0, 1.0]" keyValue="[0.0, 1.0]" fieldToInterp="pill.opacity" />
+            <Vector2DFieldInterpolator id="openName" key="[0.0, 1.0]" keyValue="[[48.0, 0.0], [96.0, 0.0]]" fieldToInterp="name.translation" />
+            <FloatFieldInterpolator id="openNameFade" key="[0.0, 1.0]" keyValue="[0.0, 1.0]" fieldToInterp="name.opacity" />
+            <FloatFieldInterpolator id="openCount" key="[0.0, 1.0]" keyValue="[0.0, 1.0]" fieldToInterp="countBack.opacity" />
+            <FloatFieldInterpolator id="openCountText" key="[0.0, 1.0]" keyValue="[0.0, 1.0]" fieldToInterp="count.opacity" />
+            <Vector2DFieldInterpolator id="openHint" key="[0.0, 1.0]" keyValue="[[48.0, 42.0], [112.0, 42.0]]" fieldToInterp="hint.translation" />
+            <FloatFieldInterpolator id="openHintFade" key="[0.0, 1.0]" keyValue="[0.0, 1.0]" fieldToInterp="hint.opacity" />
+        </Animation>
+        <!-- The focus look: 150 ms in, eased out; 120 ms out, eased in. -->
+        <Animation id="look" duration="0.15" easeFunction="outCubic" optional="true">
+            <Vector2DFieldInterpolator id="lookScale" key="[0.0, 1.0]" keyValue="[[1.0, 1.0], [1.05, 1.05]]" fieldToInterp="cell.scale" />
+        </Animation>
+    </children>
+</component>

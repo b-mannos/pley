@@ -65,7 +65,7 @@ sub onShow(event as object)
     answer = event.getData()
     if not answer.ok or answer.data = invalid then return
     show = answer.data
-    m.title.text = httpSentence(show.title)
+    typeSet(m.title, httpSentence(show.title))
     parts = []
     year = httpNumber(show.year, 0)
     if year > 0 then parts.Push(urlValue(year))
@@ -75,7 +75,7 @@ sub onShow(event as object)
     else if seasons > 1
         parts.Push(urlValue(seasons) + " seasons")
     end if
-    m.meta.text = parts.Join(" · ")
+    typeSet(m.meta, parts.Join(" · "))
     m.backdrop.setHttpAgent(m.top.getScene().getHttpAgent())
     m.backdrop.uri = urlImage(m.global.session.server, show.backdrop_url, contentBackdropWidth())
 end sub
@@ -83,7 +83,7 @@ end sub
 sub onSeasons(event as object)
     answer = event.getData()
     if not answer.ok
-        if not uiFailed(answer) then m.message.text = answer.message
+        if not uiFailed(answer) then typeSet(m.message, answer.message)
         return
     end if
     content = event.getRoSGNode().content
@@ -132,7 +132,7 @@ sub onEpisodes(event as object)
     answer = event.getData()
     if not answer.ok
         if not uiFailed(answer)
-            m.message.text = answer.message
+            typeSet(m.message, answer.message)
             m.message.visible = true
         end if
         return

@@ -49,11 +49,11 @@ sub test_search_asks_for_and_keeps_every_result()
 end sub
 
 sub test_search_row_sizes()
-    tkEqual(searchRowSize("movie"), { size: [196, 370], height: 430 })
-    tkEqual(searchRowSize("person"), { size: [196, 370], height: 430 })
-    tkEqual(searchRowSize("channel"), { size: [220, 240], height: 300 })
-    tkEqual(searchRowSize("episode"), { size: [300, 250], height: 310 })
-    tkEqual(searchRowSize("track"), { size: [196, 280], height: 340 })
+    tkEqual(searchRowSize("movie"), { size: [227, 390], height: 466, spacing: 0 })
+    tkEqual(searchRowSize("person"), { size: [227, 390], height: 466, spacing: 0 })
+    tkEqual(searchRowSize("channel"), { size: [220, 240], height: 316, spacing: 24 }, "a channel's card, which doesn't grow")
+    tkEqual(searchRowSize("episode"), { size: [336, 270], height: 346, spacing: 0 })
+    tkEqual(searchRowSize("track"), { size: [227, 300], height: 376, spacing: 0 })
 end sub
 
 sub test_search_remembers_the_last_ten()

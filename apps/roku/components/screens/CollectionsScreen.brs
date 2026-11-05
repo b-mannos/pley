@@ -63,11 +63,12 @@ sub onCollections(event as object)
     end for
     if content.getChildCount() = 0
         m.message.text = "No collections yet."
-        if m.failed <> invalid then m.message.text = m.failed
+        if m.failed <> invalid then typeSet(m.message, m.failed)
         return
     end if
     m.message.visible = false
     m.rows.content = content
+    typeRowLabels(m.rows)
     m.rows.visible = true
     ' Only while this screen has the focus: a dialog over it keeps it.
     if m.top.hasFocus() then m.rows.setFocus(true)

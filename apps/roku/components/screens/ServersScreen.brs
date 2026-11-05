@@ -99,7 +99,7 @@ sub render()
 end sub
 
 sub setStatus(text as string, problem as boolean)
-    m.status.text = text
+    typeSet(m.status, text)
     if problem
         m.status.color = uiColors().danger
     else

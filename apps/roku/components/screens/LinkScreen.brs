@@ -32,7 +32,7 @@ sub onActive()
     if not m.started
         m.started = true
         session = m.global.session
-        m.server.text = "on " + session.serverName + " (" + urlDisplayAddress(session.server) + ")"
+        typeSet(m.server, "on " + session.serverName + " (" + urlDisplayAddress(session.server) + ")")
         reason = httpString(m.top.params.reason)
         if reason = "ended"
             m.intro.text = "The server ended this TV's sign-in: sign in again."
@@ -64,7 +64,7 @@ end sub
 sub onServerInfo(event as object)
     note = authTwoStepNote(event.getData())
     if note = "" or m.done then return
-    m.twoStep.text = note
+    typeSet(m.twoStep, note)
     if m.intro.visible
         m.twoStep.translation = [96, m.intro.translation[1] + 36]
         for each node in [m.steps, m.status, m.actions]
@@ -111,8 +111,8 @@ sub onCode(event as object)
         setButtons(["Try again", "Change server"])
         return
     end if
-    m.code.text = answer.data.userCode
-    m.url.text = answer.data.verificationUri
+    typeSet(m.code, answer.data.userCode)
+    typeSet(m.url, answer.data.verificationUri)
     fitAddress()
     showQr(answer.data.qr)
 end sub
@@ -122,8 +122,8 @@ end sub
 sub fitAddress()
     m.url.wrap = false
     m.url.width = 0
-    for each font in ["font:ExtraLargeBoldSystemFont", "font:LargeBoldSystemFont", "font:MediumBoldSystemFont", "font:SmallBoldSystemFont"]
-        m.url.font = font
+    for each size in [56, 44, 36, 32]
+        m.url.font = typeFont(700, size)
         if m.url.boundingRect().width <= 1248 then exit for
     end for
     m.url.width = 1248
@@ -227,7 +227,7 @@ sub onMe(event as object)
     answer = event.getData()
     if answer.ok and answer.data <> invalid
         name = httpSentence(answer.data.name)
-        if name <> "" then m.title.text = "Signed in as " + name
+        if name <> "" then typeSet(m.title, "Signed in as " + name)
     end if
     m.leave.control = "start"
 end sub
@@ -237,7 +237,7 @@ sub onLeave()
 end sub
 
 sub setStatus(text as string, problem as boolean)
-    m.status.text = text
+    typeSet(m.status, text)
     if problem
         m.status.color = uiColors().danger
     else

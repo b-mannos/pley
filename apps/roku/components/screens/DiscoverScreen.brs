@@ -91,7 +91,7 @@ sub showPage()
     m.problem.visible = false
     m.problemShown = invalid
     m.page.translation = [0, 0]
-    m.shade.width = 1260
+    m.shade.translation = [0, 440]
     m.signInOnly = summary.signInAgain = "requests"
     if m.signInOnly
         showProblem(reqSignInAgain())
@@ -132,10 +132,10 @@ end sub
 ' The rows under the hero, or at the top of the page without one.
 sub placeRows(withHero as boolean)
     if withHero
-        m.rows.translation = [96, 700]
+        m.rows.translation = [80, 700]
         m.slide = 560
     else
-        m.rows.translation = [96, 196]
+        m.rows.translation = [80, 196]
         m.slide = 56
     end if
     if m.rows.isInFocusChain() then m.page.translation = [0, -m.slide]
@@ -361,10 +361,10 @@ end sub
 sub drawHero()
     if m.heroTitle = invalid then return
     m.heroShown = reqHero(m.heroTitle, reqSummaryOf(m.top.requestSummary), m.global.session.server, CreateObject("roDateTime").AsSeconds())
-    m.heroName.text = m.heroShown.title
-    m.heroLine.text = m.heroShown.line
-    m.heroOverview.text = m.heroShown.overview
-    m.heroNote.text = m.heroShown.note
+    typeSet(m.heroName, m.heroShown.title)
+    typeSet(m.heroLine, m.heroShown.line)
+    typeSet(m.heroOverview, m.heroShown.overview)
+    typeSet(m.heroNote, m.heroShown.note)
     if FormatJson(m.heroButtons.buttons) <> FormatJson(m.heroShown.buttons) then m.heroButtons.buttons = m.heroShown.buttons
     if m.backdrop.uri <> m.heroShown.backdrop
         m.backdrop.setHttpAgent(m.top.getScene().getHttpAgent())
@@ -404,9 +404,9 @@ sub showProblem(problem as object)
     m.credit.visible = false
     m.backdrop.uri = ""
     m.page.translation = [0, 0]
-    m.shade.width = 1260
-    m.problemTitle.text = problem.title
-    m.problemText.text = problem.text
+    m.shade.translation = [0, 440]
+    typeSet(m.problemTitle, problem.title)
+    typeSet(m.problemText, problem.text)
     buttons = []
     if problem.signIn then buttons.Push("Sign in")
     if problem.retry then buttons.Push("Try again")
@@ -463,16 +463,16 @@ end sub
 
 ' --- The remote ---
 
-' The page slides up to the rows as they take the focus, the backdrop
-' shaded under them all, and back down.
+' The page slides up to the rows as they take the focus, the page's colour
+' coming up over the backdrop, and back down.
 sub focusRows(onRows as boolean)
     if onRows
         m.page.translation = [0, -m.slide]
-        m.shade.width = 1920
+        m.shade.translation = [0, -200]
         m.rows.setFocus(true)
     else
         m.page.translation = [0, 0]
-        m.shade.width = 1260
+        m.shade.translation = [0, 440]
         if m.hero.visible
             m.heroButtons.setFocus(true)
         else if m.chips.visible
