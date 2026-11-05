@@ -34,7 +34,7 @@
         </Label>
         <ChipRow id="tabs" translation="[96, 132]" />
         <ChipRow id="view" translation="[1024, 132]" visible="false" />
-        <MarkupGrid id="grid" translation="[80, 192]" itemComponentName="Tile" numColumns="7" numRows="2" itemSize="[252, 430]" itemSpacing="[0, 4]" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" visible="false" />
+        <MarkupGrid id="grid" translation="[80, 192]" itemComponentName="Tile" numColumns="7" numRows="2" itemSize="[242, 430]" itemSpacing="[0, 4]" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" visible="false" />
         <!-- The A to Z, right of the grid's last column. -->
         <LetterColumn id="letters" translation="[1812, 212]" visible="false" />
         <!-- A jump to a page that just came goes once the grid has taken
