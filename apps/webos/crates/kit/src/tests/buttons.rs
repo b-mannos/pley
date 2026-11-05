@@ -79,24 +79,6 @@ fn a_round_buttons_label_shows_under_it_only_while_focused() {
 }
 
 #[test]
-fn a_round_button_without_its_label_never_shows_it() {
-    let mut screen = |ui: &mut Ui| {
-        let star = ui.id("favourite");
-        RoundButton::new(Icon::Star, "Remove from favourites").show_label(false).show(
-            ui,
-            star,
-            Point::new(96.0, 300.0),
-        );
-    };
-    let mut h = Harness::new();
-    h.idle(&mut screen);
-    let f = settle(&mut h, &mut screen);
-    assert_eq!(f.focused, Some(Id::new("favourite")));
-    assert_eq!(scales(&f.list), vec![(1.08, Point::new(116.0, 320.0))]);
-    assert_eq!(text_at(&f.list, "Remove from favourites"), None);
-}
-
-#[test]
 fn left_from_a_bars_first_button_leaves_the_page_and_right_stops_at_its_end() {
     let failed = Cell::new(None);
     let mut screen = |ui: &mut Ui| {

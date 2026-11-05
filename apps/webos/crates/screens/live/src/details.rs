@@ -1,11 +1,10 @@
 //! A programme's details in the side panel (`ProgramPanel` in `TvLiveTvScreen.kt`): the channel,
 //! the programme's picture, title, episode, day and times with its badges, how far it is, what the
-//! guide says of it, then Watch and, beside it, the favourite at the foot: a star alone, filled for a
-//! favourite, as in the live player.
+//! guide says of it, then Watch and the favourite at the foot.
 
 use pley_base::{Icon, Point, Rect, TextOpts};
 use pley_core::model::{LiveChannel, LiveProgram};
-use pley_kit::{Badge, BadgeStyle, Button, RoundButton, bar_group};
+use pley_kit::{Badge, BadgeStyle, Button, bar_group};
 use pley_player::live::data::time_left;
 use pley_shell::AppCx;
 use pley_ui::theme::{self, radius};
@@ -42,20 +41,19 @@ pub fn show(
     clock: &Clock,
 ) -> Option<DetailsAction> {
     let now = clock.now;
-    // Watch and the favourite's star side by side at the foot, its words only heard: as a pill,
-    // Remove from favourites didn't fit beside Watch and went under it. Placed first, so the
-    // description stops above them.
+    // Watch and the favourite at the foot: side by side when they fit, else one over the other.
+    // Placed first, so the description stops above them.
     let airing = program.is_none_or(|p| p.airing_at(now));
     let watch = Button::pill(if airing { "Watch now" } else { "Watch channel" }).icon(Icon::Play);
     let favourite = if channel.favorite {
-        RoundButton::new(Icon::Star, "Remove from favourites")
+        Button::pill("Remove from favourites").icon(Icon::Star)
     } else {
-        RoundButton::new(Icon::StarOutline, "Add to favourites")
-    }
-    .on_art(false)
-    .show_label(false);
-    let ws = watch.size(ui);
-    let buttons_top = area.bottom() - ws.h;
+        Button::pill("Add to favourites").icon(Icon::StarOutline)
+    };
+    let (ws, fs) = (watch.size(ui), favourite.size(ui));
+    let gap = theme::BUTTON_GAP;
+    let side_by_side = ws.w + gap + fs.w <= area.w;
+    let buttons_top = if side_by_side { area.bottom() - ws.h } else { area.bottom() - ws.h - gap - fs.h };
 
     let mut y = area.y;
     let tile = Rect::new(area.x, y, 64.0, 38.0);
@@ -129,14 +127,23 @@ pub fn show(
     let (wid, fid) = (watch_id(id), id.with("favourite"));
     ui.initial_focus(wid);
     let top = buttons_top;
-    ui.group(id.with("buttons"), bar_group(), |ui| {
+    if side_by_side {
+        ui.group(id.with("buttons"), bar_group(), |ui| {
+            if watch.show(ui, wid, Point::new(area.x, top)).activated {
+                action = Some(DetailsAction::Watch);
+            }
+            if favourite.show(ui, fid, Point::new(area.x + ws.w + gap, top)).activated {
+                action = Some(DetailsAction::Favourite);
+            }
+        });
+    } else {
         if watch.show(ui, wid, Point::new(area.x, top)).activated {
             action = Some(DetailsAction::Watch);
         }
-        if favourite.show(ui, fid, Point::new(area.x + ws.w + theme::BUTTON_GAP, top)).activated {
+        if favourite.show(ui, fid, Point::new(area.x, top + ws.h + gap)).activated {
             action = Some(DetailsAction::Favourite);
         }
-    });
+    }
     action
 }
 

@@ -237,8 +237,7 @@ impl<'a> Button<'a> {
 /// The 40 dp "round" button (a rounded square, radius 6): From start, Mark as watched, More. Its
 /// label (`Tv.Caption`, Fg, one line, as wide as it needs) fades in 6 dp below it while it has focus
 /// (150 ms, kept with Reduce motion); rows of them keep [`theme::BUTTON_LABEL_ROOM`] under themselves
-/// so nothing jumps (`TvButtons.kt` `TvRoundButton`). Without its label (a star that says it all) it
-/// is the square alone.
+/// so nothing jumps (`TvButtons.kt` `TvRoundButton`).
 #[derive(Clone, Copy, Debug)]
 pub struct RoundButton<'a> {
     icon: Icon,
@@ -246,7 +245,6 @@ pub struct RoundButton<'a> {
     on_art: bool,
     enabled: bool,
     long_press: bool,
-    show_label: bool,
 }
 
 /// A round button's side.
@@ -257,7 +255,7 @@ pub const ROUND_LABEL_TOP: f32 = 46.0;
 impl<'a> RoundButton<'a> {
     /// A round button over art (Bg at 80 %), the usual place for one.
     pub fn new(icon: Icon, label: &'a str) -> RoundButton<'a> {
-        RoundButton { icon, label, on_art: true, enabled: true, long_press: false, show_label: true }
+        RoundButton { icon, label, on_art: true, enabled: true, long_press: false }
     }
 
     /// Off art it sits on Surface3 instead.
@@ -273,11 +271,6 @@ impl<'a> RoundButton<'a> {
     /// OK held 500 ms is a long press.
     pub fn long_press(self) -> RoundButton<'a> {
         RoundButton { long_press: true, ..self }
-    }
-
-    /// Its label never drawn when `false`, only read by Audio Guidance.
-    pub fn show_label(self, show_label: bool) -> RoundButton<'a> {
-        RoundButton { show_label, ..self }
     }
 
     /// The square's size (the label hangs below it).
@@ -298,11 +291,8 @@ impl<'a> RoundButton<'a> {
         let r = register(ui, id, rect, opts);
         let s = shade(ui, &look, &r);
         self.paint(ui, rect, &s);
-        if !self.show_label || self.label.is_empty() {
-            return r;
-        }
         let reveal = ui.animate(id.with("kit.label"), if r.focused { 1.0 } else { 0.0 }, Motion::REVEAL);
-        if reveal > 0.0 {
+        if reveal > 0.0 && !self.label.is_empty() {
             let layout = ui.layout(self.label, &theme::CAPTION, &free_line());
             let x = rect.center().x - layout.size.w / 2.0;
             ui.opacity(reveal, |ui| ui.draw_text(Point::new(x, at.y + ROUND_LABEL_TOP), layout, theme::FG));

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use common::TestApp;
-use pley_base::{Icon, Key, KeyEvent};
+use pley_base::{Key, KeyEvent};
 use pley_core::Store;
 use pley_core::model::LiveCategory;
 use pley_fixtures::ids;
@@ -169,20 +169,11 @@ fn menu_opens_the_details_and_the_favourite_changes_at_once() {
     let watch = app.id(&["details", "content", "watch"]);
     assert!(app.until(|a| a.focused() == Some(watch)), "the details' Watch now hasn't focus");
     assert!(app.shows("Watch now") && app.shows("ON NOW"));
-    // The favourite is a star beside Watch: on Watch's line, after it.
-    let star_beside_watch = |a: &TestApp, star: Icon| {
-        let play = a.icons(Icon::Play);
-        a.icons(star).iter().any(|s| play.iter().any(|p| s.y == p.y && s.x > p.right()))
-    };
-    // Channel 1 is one of Alex's favourites: the star filled.
-    assert!(star_beside_watch(&app, Icon::Star), "no filled star beside Watch");
-    app.press(Key::Right);
-    assert_eq!(app.focused(), Some(app.id(&["details", "content", "favourite"])));
-    // The star alone, focused too: its words are only heard.
-    app.advance(0.4);
-    assert!(!app.list.texts().any(|t| t.contains("favourites")), "the star's words show");
+    // Channel 1 is one of Alex's favourites.
+    assert!(app.shows("Remove from favourites"));
+    app.press(Key::Down);
     app.press(Key::Ok);
-    assert!(star_beside_watch(&app, Icon::StarOutline), "the star didn't change at once");
+    assert!(app.shows("Add to favourites"), "the button didn't change at once");
     assert!(app.until(|a| !a.server.writes("DELETE", "/api/live/channels/1/favorite").is_empty()));
     // Back closes the panel, focus back in the guide.
     app.press(Key::Back);

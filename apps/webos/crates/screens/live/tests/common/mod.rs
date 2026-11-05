@@ -7,7 +7,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use pley_base::{Cmd, DisplayList, Icon, Key, KeyEvent, Rect, Waker};
+use pley_base::{DisplayList, Key, KeyEvent, Waker};
 use pley_core::auth::{StoredTokens, TokenAnswerParsed, Tokens};
 use pley_core::{FakeDevice, Http, PlayerEngine, Store, Tasks};
 use pley_fixtures::{FixtureServer, Options, ids};
@@ -153,18 +153,6 @@ impl TestApp {
     /// Whether the last frame drew `text`.
     pub fn shows(&self, text: &str) -> bool {
         self.list.texts().any(|t| t == text)
-    }
-
-    /// Where the last frame drew `icon`.
-    pub fn icons(&self, icon: Icon) -> Vec<Rect> {
-        self.list
-            .cmds
-            .iter()
-            .filter_map(|c| match c {
-                Cmd::Icon { rect, icon: i, .. } if *i == icon => Some(*rect),
-                _ => None,
-            })
-            .collect()
     }
 
     /// Whether the last frame drew a text starting with `start`.
