@@ -387,7 +387,9 @@ Live TV works as in the [Android app](ANDROID.md#live-tv). On Roku
   restart.
 - **Search** (the entry over the categories, or Replay) is typed on
   Roku's keyboard; Clear in it, or Back, goes back to the category shown
-  before.
+  before. A channel watched from a search (here, in the player's list or
+  in the app's Search) makes Up and Down in the player go through every
+  channel, as on Android.
 - **Guide:** Roku's TimeGrid, 50 channels by two hours. Rewind and fast
   forward move two hours, Play goes back to now. OK on what's on watches
   the channel; on a later programme it shows its details, as Options (\*)
@@ -446,10 +448,10 @@ Live TV works as in the [Android app](ANDROID.md#live-tv). On Roku
 - **The channel list** opens at the right, on the category Up and Down go
   through, at the channel playing. Options (\*) in it adds the channel in
   focus to the favourites or removes it. Left in it lists the categories
-  as Live TV does
-  (OK on one lists its channels instead, Back goes back), and Replay
-  searches every channel (Back leaves the search). A channel chosen from
-  another category, or a search, makes Up and Down go through that one.
+  as Live TV does (OK on one lists its channels instead, Back goes back),
+  and Replay searches every channel (Back leaves the search). A channel
+  chosen from another category makes Up and Down go through that one;
+  from a search, through every channel.
 - **Failures:** a playlist the server doesn't give (a `503` while the
   provider sends nothing, or another failure of its), or a stream that
   breaks while its playlist is still there, tunes the channel again twice,

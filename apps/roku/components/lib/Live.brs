@@ -140,6 +140,14 @@ function liveCategoryName(category as string, groups as object) as string
     return name
 end function
 
+' The category Up and Down go through in the player once a channel of
+' category is watched: a search's results go through every channel, as
+' on Android.
+function liveZapCategory(category as string) as string
+    if Left(category, 7) = "search:" then return "all"
+    return category
+end function
+
 ' Whether a category still has channels: a group gone, or nothing marked
 ' any more, shows every channel.
 function liveCategoryValid(category as string, summary as object, groups as object) as string

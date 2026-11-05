@@ -921,9 +921,11 @@ end sub
 
 ' --- Watching and favourites ---
 
-' The player, with the category: up and down stay in it.
+' The player, with the category: up and down stay in it, or, from a
+' search, go through every channel.
 sub watch(channel as object)
-    uiNavigate({ to: "livePlayer", params: { channel: channel, category: m.view.category, categoryName: liveCategoryName(m.view.category, m.groups) } })
+    category = liveZapCategory(m.view.category)
+    uiNavigate({ to: "livePlayer", params: { channel: channel, category: category, categoryName: liveCategoryName(category, m.groups) } })
 end sub
 
 ' A programme of the guide (its ContentNode) as Live.brs keeps one ({

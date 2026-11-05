@@ -134,6 +134,12 @@ sub test_live_search()
     tkEqual(liveGroupsMatching(groups, "  "), [])
 end sub
 
+sub test_live_watching_from_a_search_zaps_through_every_channel()
+    tkEqual(liveZapCategory("search:bbc"), "all")
+    tkEqual(liveZapCategory("group:UK| Sport"), "group:UK| Sport")
+    tkEqual(liveZapCategory("favorites"), "favorites")
+end sub
+
 sub test_live_search_goes_back_to_the_category_before()
     before = liveBeforeSearch("group:UK| Sport", "all")
     tkEqual(before, "group:UK| Sport", "the category shown as the search began")

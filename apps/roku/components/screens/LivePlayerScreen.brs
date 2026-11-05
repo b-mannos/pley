@@ -8,7 +8,7 @@
 ' are off, and nothing pauses, rewinds or skips. Up and down
 ' change channel within the category the player was opened from (or the
 ' one a channel was last chosen in from the list, which can list another
-' category or a search), a page of it at a time (GET
+' category or a search; a search's, every channel), a page of it at a time (GET
 ' /api/live/browse?around=), round its ends. Leaving
 ' sends DELETE /api/live/sessions/{session}, so the connection goes at
 ' once, and Live TV opens back at the channel watched. The user's remote,
@@ -167,11 +167,12 @@ sub onActive()
     m.clock.control = "start"
     params = m.top.params
     category = httpString(params.category)
-    if category <> "" then m.category = category
+    ' From a search (Search's Live TV row, say): every channel.
+    if category <> "" then m.category = liveZapCategory(category)
     channel = params.channel
     if GetInterface(channel, "ifAssociativeArray") = invalid then return
     m.categoryName = httpString(params.categoryName)
-    if m.categoryName = "" then m.categoryName = liveCategoryName(m.category, [])
+    if m.categoryName = "" or Left(category, 7) = "search:" then m.categoryName = liveCategoryName(m.category, [])
     m.listCategory = m.category
     m.listName = m.categoryName
     m.listTitle.text = m.categoryName
@@ -353,9 +354,17 @@ sub onListSelected(event as object)
     at = event.getData()
     if at < 0 or at >= page.channels.Count() then return
     channel = page.channels[at]
-    ' Chosen in another category (or a search): up and down go through
-    ' that one from now on.
-    if m.listCategory <> m.category
+    ' Chosen in another category: up and down go through that one from
+    ' now on; chosen in a search, through every channel, as on Android,
+    ' around the channel chosen.
+    zapping = liveZapCategory(m.listCategory)
+    if zapping <> m.listCategory
+        m.category = zapping
+        m.categoryName = liveCategoryName(zapping, m.groups)
+        m.page = invalid
+        m.pageContent = invalid
+        askPage(zapping, 0, channel.id, "")
+    else if m.listCategory <> m.category
         m.category = m.listCategory
         m.categoryName = m.listName
         m.page = page
