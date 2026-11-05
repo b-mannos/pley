@@ -82,6 +82,11 @@ heard it for that profile, the start asks "Who's watching?".
 - Select opens, holding Select or Menu (☰) opens a title's actions in a
   panel over the page, which stays as it was, and Back goes back: to the
   page the rail opened as it was left, focus included.
+- **Typing** (Search, a playlist's name, a request, a server's address):
+  Select on a field opens the TV's keyboard, Gboard or Amazon's, whose
+  Done or Search acts on the words; Back closes it, keeping them, with
+  focus on the field. Amazon's keyboard shows the words in a box of its
+  own, which follows each key.
 - **The rail** lists, between the profile's avatar and Settings, Search,
   Home, Discover (or the requests), Live TV, the first six libraries in
   the server's order, **Libraries** when there are more (it lists them
@@ -510,7 +515,11 @@ categories or the tabs, in the guide not within 0.5 s of Left moving.
 
 Where the server takes requests ([API.md](API.md#requests)), people ask
 for movies and shows found on TMDB and administrators decide; Radarr and
-Sonarr fetch what is approved. On phones and tablets:
+Sonarr fetch what is approved. A poster in Discover, its grids or
+Search's Discover row opens the title's page, except that a title a
+library this account can open has whole opens its library page, where
+it plays; a show partly there opens its title's page, for Request more
+seasons. On phones and tablets:
 
 - **Ways in**: Search before typing (Discover), Search's Discover row
   after the libraries' results, and Me's rows: Discover, and Your requests

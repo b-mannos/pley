@@ -218,6 +218,9 @@ describes how they are made.
 - Diagnostics lists its facts in label and value columns under This TV
   and What it plays.
 - "Can't reach your server" says why, and offers Retry and Switch server.
+- A movie or show in Discover or Search's Discover row that a library has
+  whole opens its library page, where it plays, not a page with only Open
+  on it.
 
 ### Fixed
 

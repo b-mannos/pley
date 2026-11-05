@@ -809,7 +809,10 @@ words for one approved as it was asked.
   overview, or a request's stage beside the seasons asked for, who asked
   and when, and its stage's line. At the top, the way to the requests,
   with the menu's number of what waits there. TMDB is searched from
-  Search.
+  Search. A poster opens the title's page, or, when a library the account
+  can open has the title whole, the library's title, where it plays (a
+  show partly there opens its page, where more seasons can be asked
+  for).
 - **A TMDB title's page:** backdrop and poster, year, runtime or seasons,
   certification, rating; its network (a movie's studio) and genres;
   tagline and four lines of overview; one main action (Open, Request,
@@ -849,7 +852,8 @@ words for one approved as it was asked.
   account's own requests marks their news seen.
 - **Search** shows up to 20 titles the libraries lack, read from at most
   3 of TMDB's pages, in a **Discover** row after the libraries' own, for
-  those who may ask; OK opens a title's page. When TMDB isn't answering,
+  those who may ask; OK opens a title's page (the library's title, as in
+  Discover, for one a library has whole). When TMDB isn't answering,
   refuses the server's key or isn't open to the account, a tile says so,
   with Select to try again where that helps. TMDB is searched for the
   first 200 characters of the words. See all ends the row: a grid titled

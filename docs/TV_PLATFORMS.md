@@ -264,7 +264,9 @@ also what waits for them, in red while some failed.
   anime, each loaded as it comes near the screen, then Your requests;
   at the top, the way to the requests with their number. It has no
   search field: Search finds TMDB's titles. Posters say In library,
-  Partly in library, Requested or Declined. A list reads TMDB's pages
+  Partly in library, Requested or Declined. A title a library has
+  whole opens the library's page, here and in Search, since its page
+  would only offer Open. A list reads TMDB's pages
   until it has more than a screenful, 5 at most at a time, since an age
   limit can leave page after page empty: a row shows what they had, and
   a grid (See all, and Search's Discover row's) ends in Show more,
@@ -427,8 +429,9 @@ reopens at the same place.
 
 ## Releases
 
-The app is the `samsung` unit in [RELEASING.md](RELEASING.md). The package
-is signed with a Samsung certificate, so it is made by hand
+The app is the `samsung` unit in [RELEASING.md](RELEASING.md); the native
+app is `samsung-native` ([Installing a release](#installing-a-release)). The
+web app's package is signed with a Samsung certificate, so it is made by hand
 (`bun run tizen`); keep the author certificate, since every store update
 must be signed with it.
 
@@ -630,7 +633,8 @@ album, as Android TV's does. The rules are `Player/Cast.cs`.
   the TV was left on when it has one); `rail.json` pins the rail's
   entries (up to six libraries, then Libraries; nothing left out for
   Live TV or Now Playing) and how far they scroll for the entry focus is
-  on. Where the Android app is
+  on; `requests.json` pins where a Discover poster opens. Where the
+  Android app is
   stricter (a token answer without `token_type`, a device code without
   `expires_in`), the native app follows it, and its test says which
   fixture case it answers differently.
@@ -671,12 +675,29 @@ dotnet test apps/tizen-native/test/Pley.Tv.Core.Tests   # the Core's tests
 PLEY_TIZEN_PROFILE=<profile> bun run tizen-native        # apps/tizen-native/out/pley-tizen.tpk, signed
 tizen install -n pley-tizen.tpk -t <target> -- apps/tizen-native/out
 tizen run -p app.pley.tizen -t <target>
-bun scripts/check-nuget-licenses.mjs                     # the licences of the packages it ships with
+bun scripts/check-nuget-licenses.mjs                     # the licences of the packages it ships with, and NOTICES.txt
 ```
 
 `tizen run` brings the app to the front when it is running already; an
 install ends it, so installing again starts it afresh. It is named
 "Pley (native)" among the TV's apps.
+
+### Installing a release
+
+Pley's releases have the app's package, `pley-samsung-native-<version>.tpk`,
+as the .NET SDK builds it: signed with Tizen's default certificate, which
+no TV takes. Signed again with a certificate that lists the TV
+([Setting up](#setting-up)), it installs as a package built here does,
+with the Tizen SDK and no .NET SDK:
+
+```sh
+tizen package -t tpk -s <profile> -- pley-samsung-native-<version>.tpk
+tizen install -n pley-samsung-native-<version>.tpk -t <target> -- <its folder>
+```
+
+The release's build is `bun run tizen-native --unsigned`
+(`apps/tizen-native/out/pley-tizen-unsigned.tpk`). A .tpk is how Tizen
+installs a .NET app; a .wgt holds a web app, as the web Samsung app's does.
 
 ### Profiling
 

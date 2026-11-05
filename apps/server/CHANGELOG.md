@@ -11,6 +11,17 @@ describes how they are made.
 
 ### Added
 
+- Pley for Home Assistant can sign in with a code, as Pley's TV apps do.
+  It shows as Home Assistant in your signed-in apps and on a TV it plays
+  something on.
+- A new permission, activity, lets an app see what's playing and stop it.
+  On an administrator's account, Pley's own apps allowed it see what
+  everyone plays and stop it, as the dashboard does; other apps, and
+  everyone else's, see and stop only the profile's own.
+- In the desktop app the web app takes casts, as a TV does: your other
+  devices' Play on… lists it by its system ("Pley for Windows"), and what
+  they send it plays there with the tracks picked, saying where it came
+  from. A browser tab is still a remote only.
 - The server lets a user's devices control what plays on their other
   devices: it lists the user's own sessions with the device each plays
   on, Live TV channels included, and passes play, pause, seek, skip, next
@@ -69,6 +80,10 @@ describes how they are made.
 - When the server can't be reached, the web app and the desktop app say
   "Pley is offline", where they said "Can't reach the server.
   Reconnecting…". The desktop app's Downloads stays beside it.
+- In the web and desktop apps, a movie or show in Discover or Search's
+  Discover results that a library has whole opens its library page, where
+  it plays, not a page with only Open on it. A show partly there still
+  opens its Discover page, to ask for more seasons.
 
 ### Fixed
 
