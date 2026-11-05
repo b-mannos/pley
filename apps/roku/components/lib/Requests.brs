@@ -302,10 +302,10 @@ function reqProblem(answer as object, manage as boolean) as dynamic
     if code = "unavailable" then return { title: "Requests are off", text: "This server doesn't take requests for movies and shows.", retry: false, signIn: false }
     if code = "tmdb_key"
         text = "An administrator needs to check it."
-        if manage then text = "Fix it in Pley's web app, in Settings → Server."
+        if manage then text = "Fix it in the server's settings: Settings → Server, on the web."
         return { title: "TMDB refused this server's key", text: text, retry: false, signIn: false }
     end if
-    if code = "tmdb_down" then return { title: "TMDB isn't answering", text: "", retry: true, signIn: false }
+    if code = "tmdb_down" then return { title: "TMDB isn't answering", text: "Its details and pictures come back once it answers again.", retry: true, signIn: false }
     if code = "no_access" then return { title: "Requests aren't open to this account", text: "An administrator can let it ask for movies and shows.", retry: false, signIn: false }
     if code = "insufficient_scope" then return reqSignInAgain()
     return invalid
