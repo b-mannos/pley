@@ -22,12 +22,13 @@ use pley_base::{Fetch, FetchError, Waker};
 use pley_core::addresses::origin;
 use pley_core::auth::{AuthError, StoredTokens, Tokens};
 use pley_core::model::{AppProfile, Hub, Hubs, ItemDetail, Library, LiveCategory, LiveChannel, LiveSummary, Me};
-use pley_core::model::{RequestList, RequestQuery, RequestSummary, ScanPhase, ServerEvent, TitleKind};
+use pley_core::model::{RequestList, RequestQuery, RequestSummary, ScanPhase, ServerEvent, SwitchTicket, TitleKind};
 use pley_core::requests::title_key;
 use pley_core::store::{SavedServer, Snapshots, keys, snapshot_keys};
 use pley_core::{Api, ApiError, CapsOverrides, CapsReport, CastReceiver, Device, EventStream, Http, Promise, Settings};
 use pley_core::{Store, StreamNews, Tasks};
 
+use crate::cast::LAST_REPORTS_WAIT;
 use crate::cx::BackgroundSession;
 use crate::players::Players;
 use crate::request_state::{RequestNotice, RequestState, SUMMARY_POLL};
@@ -499,6 +500,25 @@ impl AppState {
             return Promise::resolved(Err(AuthError::Failed("no server is in use".into())));
         };
         self.tasks.spawn(move || tokens.switch_profile(profile, pin.as_deref()))
+    }
+
+    /// Asks the server to act as `profile`, the profile of a remote that cast to the TV, with the
+    /// cast's ticket, once the shell has ended what played: its last reports go out first, as the
+    /// profile it played as, for [`LAST_REPORTS_WAIT`] at most; what hasn't gone out by then is
+    /// dropped, never sent as the next profile ([`crate::players`]). On success the shell calls
+    /// [`AppState::switched`].
+    pub fn switch_for_cast(&self, profile: i64, ticket: SwitchTicket) -> Promise<Result<(), AuthError>> {
+        let Some(tokens) = self.tokens.clone() else {
+            return Promise::resolved(Err(AuthError::Failed("no server is in use".into())));
+        };
+        let (reporter, fence) = (self.players.reporter(), self.players.fence.clone());
+        self.tasks.spawn(move || {
+            if !reporter.flush(LAST_REPORTS_WAIT) {
+                log::info!("the last reports of what played didn't go out in time: they are dropped");
+            }
+            fence.close();
+            tokens.switch_profile_with_ticket(profile, ticket.as_str())
+        })
     }
 
     /// The app acts as `profile` now: what plays ends, what was shown for the profile before goes,

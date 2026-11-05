@@ -356,7 +356,8 @@ on ([API.md](API.md#casting)) while its event stream is open, so while
 the app shows and is signed in. The stream names it a receiver by its
 install id (the `client_id` its plays send), a TV (`device_kind=tv`)
 taking titles and playlists (`casts=item`) and, where the profile has Live
-TV, channels (`live`). Until the server first says whether it has, the TV
+TV, channels (`live`), and switching to the profile of a remote of another
+profile that casts to it (`switch`). Until the server first says whether it has, the TV
 takes channels too, and the stream opens again when Live TV comes or goes.
 It sends no name, so the server names it from its `User-Agent`, as it
 does its players. What a remote sends plays as the TV's own Play would,
@@ -387,6 +388,25 @@ one that comes while the app is hidden, signing in or asking who's
 watching, does nothing, so a remote never gets past a profile's PIN; of
 two sent close together, the later plays. The rules are
 `crates/shell/src/cast.rs`.
+
+A remote on another profile of the household casts to the TV too (the
+server lists it to the household's remotes with the profile it is on).
+Its cast carries the remote's profile (`profile_id`) and a ticket
+(`switch_ticket`): the TV switches to that profile first. What plays ends,
+and its last reports (where it stopped, and the end of its session) go out
+as the profile it played as, within 5 s: what hasn't gone out by then is
+dropped, never sent as the new profile. Then the TV switches, with the
+switch-profile grant and the ticket in place of a PIN, as a switch on
+"Who's watching?" does: Home shows as the new profile and the event stream
+opens again as its. Then the cast plays as above, once: it waits in the
+app, not on the stream. Any other cast heard until the switch is done is
+dropped; after it, casts play as above, the new profile's own too. A
+switch the server refuses (the ticket expired, was spent or isn't this
+TV's) says so and plays nothing; a cast from another
+profile without a ticket is ignored. Hidden as the switch ends, the TV
+switches all the same, as the server has, but plays nothing. "Who's
+watching?" still ignores casts, as in the other TV apps: there the person
+at the TV picks.
 
 ### Requests
 
@@ -734,7 +754,8 @@ The fake server listens on 127.0.0.1: a demo household with profiles
 draws itself, Live TV with a guide, the code sign-in approved at once
 (and the proofs that tell the server apart, keyed the same on every run),
 playback of the Android app's test media, subtitles, seek previews and
-the event stream, with the remote's commands and its casts to the TV.
+the event stream, with the remote's commands and its casts to the TV,
+from another profile with the ticket its switch-profile grant takes.
 
 ### The TV build
 

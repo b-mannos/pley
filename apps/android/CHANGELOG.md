@@ -8,6 +8,17 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Added
+
+- The phone's remote and Play on… list the devices of everyone in your
+  household too, each saying whose profile it is on ("On Sam's
+  profile"), never what it plays. Sending something there ends what
+  plays on that phone or TV, its place kept for its own profile, and
+  switches it to your profile before it plays, after your PIN when your
+  profile has one; one that can't says "Couldn't switch to the remote's
+  profile" and plays nothing. A phone or TV showing "Who's watching?"
+  ignores what is sent to it meanwhile: whoever is there is choosing.
+
 ### Changed
 
 - The phone's remote opens from a button in Home's top bar, beside your

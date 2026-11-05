@@ -10,6 +10,10 @@ describes how they are made.
 
 ### Added
 
+- Someone on another profile of the household plays something on the TV
+  from their phone or browser: the TV switches to their profile first
+  (their own device asked for its PIN), then plays it. A switch that fails
+  says so and plays nothing.
 - What your phone or browser does to the film or episode on the TV is
   said there for 2 s at the top right ("Paused", "+30 s", "Jumped to
   12:34", "Audio: French"), without bringing up the player's controls; a

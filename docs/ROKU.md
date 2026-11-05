@@ -513,7 +513,8 @@ the commands), the Roku is one of the devices the profile's remotes play
 things on ([API.md](API.md#casting)): the stream names it a receiver by
 the `client_id` its players send, a TV with the name its players give,
 taking titles and playlists (`casts=item`) and channels while Home's menu
-has Live TV (`live`), and opens again when Live TV comes or goes. What a
+has Live TV (`live`), and switching to the profile of a remote of another
+profile that casts to it (`switch`), and opens again when Live TV comes or goes. What a
 remote sends plays as the Roku's own Play would, in place of what plays:
 
 - a movie or an episode in the player, from the place sent, else where
@@ -539,6 +540,25 @@ watching, does nothing (a cast never gets past a profile's PIN), and of
 two sent close together the later plays. The rules are
 `components/lib/Cast.brs`; the scene (`components/MainScene.brs`)
 fetches what a cast needs and plays it.
+
+A remote on another profile of the household casts here too
+([API.md](API.md#casting)): its cast names that profile (`profile_id`)
+and carries a ticket (`switch_ticket`), and the Roku switches to the
+remote's profile before it plays, with the switch-profile grant and the
+ticket in place of a PIN (the remote gave its PIN, if it has one). What
+plays stops first, and the switch waits for its last progress, its
+stopped report and its session's end to reach the server as the profile
+that watched it, within 5 s: what hasn't gone by then is dropped, never
+sent as the remote's profile. Once switched, the Roku keeps the new
+sign-in as a switch from "Who's watching?" does, starts again from Home
+as that profile, and the cast plays over it, once. A switch the server
+refuses (the ticket expired or was used: `ticket_spent`) or that fails
+says "Couldn't switch to the remote's profile" for 4 s, and nothing
+plays. A cast naming another profile without a ticket does nothing, and
+any other cast that comes while the Roku switches is dropped; once
+switched, casts play as ever, the new profile's own too. "Who's
+watching?" still takes no casts: the person at the TV is choosing who
+watches.
 
 ### Requests and Discover
 
@@ -688,6 +708,10 @@ Rules the code keeps:
   pictures of PGS subtitles and their list, fetched without the token.
 - Refreshes run one at a time per server, and the new token pair is saved
   before use (a refresh token works once).
+- A request goes with the tokens of the profile it was made for, or not
+  at all: one waiting for a refresh or a proof, or refused while a profile
+  switch was under way, is dropped once the switch has changed the
+  profile, never sent with the new profile's pair.
 - The User-Agent is `pleyRoku/<version> (Roku OS <version>; <model>)`; the
   server's `/link` page shows it.
 - The event stream (`GET /api/events`) works with `http://` servers only:

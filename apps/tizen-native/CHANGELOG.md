@@ -8,6 +8,13 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Added
+
+- Someone else in your household can cast to the TV from their phone or
+  browser while it is on your profile: the TV switches to their profile
+  (their phone or browser asks their PIN, not the TV) and plays what they
+  sent. A switch that fails says so and plays nothing.
+
 ### Changed
 
 - The TV starts straight into Home as the profile it was left on when it

@@ -8,6 +8,12 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Added
+
+- Sent from a device on another profile of your household, Kodi switches
+  to that profile first, and plays it as that profile. Needs a server from
+  the same release.
+
 ### Changed
 
 - Pley's window opens straight on Home as the profile Kodi was left on

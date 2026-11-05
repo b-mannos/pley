@@ -8,6 +8,14 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Added
+
+- "Play on…" from someone else's profile in your household plays on the
+  Roku as their profile: the Roku switches to it first, without asking
+  its PIN (the phone or browser did). What was playing stops first, and
+  where it got to is saved for the profile that was watching. When the
+  switch can't be made, the Roku says so and plays nothing.
+
 ### Changed
 
 - The Roku starts straight into Home as the profile it was left on when it

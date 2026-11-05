@@ -11,6 +11,16 @@ describes how they are made.
 
 ### Added
 
+- Your remote lists the TVs and other devices of everyone in your
+  household, not only those on your profile, each with the profile it is
+  on. Sending one something switches it to your profile first, so it plays
+  as you, after your PIN when your profile has one.
+- The web app's Play on… lists your household's devices too, and asks for
+  your PIN in its menu's place when your profile has one. The desktop app
+  switches to the profile of the remote that sends it something, as a TV
+  does, and says so when it can't. An administrator's remote sends only to
+  Pley's apps, never to a browser or the desktop app, which would stay
+  signed in with the administrator's rights.
 - Pley reads the NFO files Kodi, Jellyfin, Emby, Radarr, Sonarr,
   tinyMediaManager and MediaElch keep next to movies, shows, seasons and
   episodes. Their ids decide what a title is matched to, and their titles,
