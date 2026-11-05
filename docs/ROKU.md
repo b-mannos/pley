@@ -422,6 +422,9 @@ Live TV works as in the [Android app](ANDROID.md#live-tv). On Roku
   but Roku's documentation doesn't say from which Roku OS it is there (the
   app runs from Roku OS 9), and brs-node, which the smoke run and the
   preview use, doesn't draw it.
+- **Badges:** LIVE, else NEW, is a label of its own before the
+  programme's title, above the guide and in the player's bar, as on
+  Android; the rating stays in the line under the title.
 - **Channels:** the other tab, as cards with what's on and what's next.
 - **Favourites:** a channel's star changes at once, on its card and in
   the guide, and goes back if the server refuses, a toast saying so, as

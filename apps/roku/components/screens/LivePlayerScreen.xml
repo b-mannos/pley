@@ -60,7 +60,9 @@
             <Label id="bannerInitials" translation="[96, 712]" width="240" height="120" horizAlign="center" vertAlign="center" wrap="true" maxLines="2" color="0xA1A9B6FF" font="font:SmallestBoldSystemFont" />
             <Poster id="bannerLogo" translation="[112, 722]" width="208" height="100" loadWidth="208" loadHeight="100" loadDisplayMode="scaleToFit" />
             <Label id="bannerChannel" translation="[384, 704]" width="1100" color="0xA1A9B6FF" font="font:SmallBoldSystemFont" />
-            <Label id="bannerTitle" translation="[384, 742]" width="1100" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
+            <!-- LIVE or NEW, before the title (placeBadge). -->
+            <Label id="bannerBadge" translation="[384, 742]" height="56" vertAlign="center" font="font:SmallestBoldSystemFont" />
+            <Label id="bannerTitle" translation="[384, 742]" width="1100" height="56" vertAlign="center" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
             <Label id="bannerMeta" translation="[384, 804]" width="1100" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
             <Rectangle id="bannerTrack" translation="[384, 846]" width="1100" height="6" color="0x2E3440FF" />
             <Rectangle id="bannerFill" translation="[384, 846]" width="0" height="6" color="0x38BDF8FF" />

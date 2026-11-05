@@ -381,8 +381,8 @@ end function
 ' --- Channels ---
 
 ' A programme as the screens keep it: { start, ends, title, line,
-' description, badges, live, isNew, rating, image (its picture's path on
-' the server, or "") }, or invalid for none (or one that ends before it
+' description, live, isNew, rating, image (its picture's path on the
+' server, or "") }, or invalid for none (or one that ends before it
 ' starts).
 function liveProgram(raw as dynamic) as dynamic
     p = httpObject(raw)
@@ -397,23 +397,27 @@ function liveProgram(raw as dynamic) as dynamic
     if episode <> "" then line.Push(episode)
     subtitle = httpSentence(p.subtitle)
     if subtitle <> "" and subtitle <> title then line.Push(subtitle)
-    badges = []
-    if httpTrue(p.is_live) then badges.Push("Live")
-    if httpTrue(p.is_new) then badges.Push("New")
-    rating = httpClean(p.rating, 24, false)
-    if rating <> "" then badges.Push(rating)
     return {
         start: start,
         ends: ends,
         title: title,
         line: line.Join(" · "),
         description: httpClean(p.description, 600, false),
-        badges: badges.Join(" · "),
         live: httpTrue(p.is_live),
         isNew: httpTrue(p.is_new),
-        rating: rating,
+        rating: httpClean(p.rating, 24, false),
         image: liveProgramImage(p.image)
     }
+end function
+
+' The label before a programme's title, above the guide and in the
+' player's bar, as Android's: "LIVE", else "NEW", else "" (p as
+' liveProgram keeps one, or invalid).
+function liveBadge(p as dynamic) as string
+    if p = invalid then return ""
+    if p.live = true then return "LIVE"
+    if p.isNew = true then return "NEW"
+    return ""
 end function
 
 ' A programme's picture: its path on the server (GET
@@ -800,7 +804,6 @@ function liveGuideRows(channels as object, kept as object, from as integer, upto
                 playDuration: p.ends - p.start,
                 description: p.description,
                 shortDescriptionLine1: p.line,
-                shortDescriptionLine2: p.badges,
                 isLive: p.live,
                 isNew: p.isNew,
                 rating: p.rating,
@@ -841,7 +844,7 @@ function liveGuideGaps(from as integer, upto as integer, title as string) as obj
 end function
 
 function liveGuideGap(from as integer, upto as integer, title as string) as object
-    return { id: "gap", title: title, playStart: from, playDuration: upto - from, description: "", shortDescriptionLine1: "", shortDescriptionLine2: "", isLive: false, isNew: false, rating: "", picture: "" }
+    return { id: "gap", title: title, playStart: from, playDuration: upto - from, description: "", shortDescriptionLine1: "", isLive: false, isNew: false, rating: "", picture: "" }
 end function
 
 ' The part of the guide to fetch for the time shown (left edge and the

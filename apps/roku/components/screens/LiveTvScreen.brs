@@ -18,6 +18,7 @@ sub init()
     m.info = m.top.findNode("info")
     m.infoLogo = m.top.findNode("infoLogo")
     m.infoChannel = m.top.findNode("infoChannel")
+    m.infoBadge = m.top.findNode("infoBadge")
     m.infoTitle = m.top.findNode("infoTitle")
     m.infoMeta = m.top.findNode("infoMeta")
     m.infoText = m.top.findNode("infoText")
@@ -712,8 +713,9 @@ function focusedGuide() as dynamic
     return { channel: m.page.channels[channelAt], program: program }
 end function
 
-' Above the guide: the channel, the programme's title, when it is on
-' (and how long it has left, on now), its episode and what it is.
+' Above the guide: the channel, the programme's title (LIVE or NEW before
+' it, as on Android), when it is on (and how long it has left, on now),
+' its episode and rating, and what it is.
 sub showProgram()
     focused = focusedGuide()
     if focused = invalid then return
@@ -723,7 +725,9 @@ sub showProgram()
     ' The scene's agent carries the token; it changes with each refresh.
     m.infoLogo.setHttpAgent(m.top.getScene().getHttpAgent())
     m.infoLogo.uri = channel.logo
-    if program = invalid or program.id = "gap"
+    p = programOf(program)
+    if p = invalid
+        placeBadge(m.infoBadge, m.infoTitle, "", 1020)
         m.infoTitle.text = channel.name
         m.infoMeta.text = "No information for this time"
         if not channel.hasGuide then m.infoMeta.text = "No guide for this channel"
@@ -731,7 +735,6 @@ sub showProgram()
         return
     end if
     now = nowSeconds()
-    p = programTimes(program)
     meta = []
     if p.start <= now and p.ends > now
         meta.Push("On now")
@@ -740,11 +743,31 @@ sub showProgram()
     else
         meta.Push(daySpan(p, now))
     end if
-    if program.shortDescriptionLine1 <> "" then meta.Push(program.shortDescriptionLine1)
-    if program.shortDescriptionLine2 <> "" then meta.Push(program.shortDescriptionLine2)
-    m.infoTitle.text = program.title
+    if p.line <> "" then meta.Push(p.line)
+    if p.rating <> "" then meta.Push(p.rating)
+    placeBadge(m.infoBadge, m.infoTitle, liveBadge(p), 1020)
+    m.infoTitle.text = p.title
     m.infoMeta.text = meta.Join("   ·   ")
-    m.infoText.text = program.description
+    m.infoText.text = p.description
+end sub
+
+' A programme's LIVE or NEW (text, "" for neither) in badge, a small
+' label of its own before its title, which takes the rest of width.
+sub placeBadge(badge as object, title as object, text as string, width as integer)
+    x = badge.translation[0]
+    y = title.translation[1]
+    badge.text = text
+    badge.visible = text <> ""
+    if text = ""
+        title.translation = [x, y]
+        title.width = width
+        return
+    end if
+    badge.color = "0x7DD3FCFF"
+    if text = "LIVE" then badge.color = "0xEB6B70FF"
+    room = Int(badge.boundingRect().width) + 16
+    title.translation = [x + room, y]
+    title.width = width - room
 end sub
 
 function programTimes(program as object) as object

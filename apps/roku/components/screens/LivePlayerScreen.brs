@@ -29,6 +29,7 @@ sub init()
     m.bannerInitials = m.top.findNode("bannerInitials")
     m.bannerLogo = m.top.findNode("bannerLogo")
     m.bannerChannel = m.top.findNode("bannerChannel")
+    m.bannerBadge = m.top.findNode("bannerBadge")
     m.bannerTitle = m.top.findNode("bannerTitle")
     m.bannerMeta = m.top.findNode("bannerMeta")
     m.bannerTrack = m.top.findNode("bannerTrack")
@@ -951,8 +952,9 @@ sub onLogos()
     m.noticeInitials.visible = m.noticeLogo.uri = "" or m.noticeLogo.loadStatus = "failed"
 end sub
 
-' The bar: the channel, what's on with when and how long it has left, how
-' far along, what's next, the Live chip, and Channels and the favourite.
+' The bar: the channel, what's on (LIVE or NEW before it, as on Android)
+' with when and how long it has left, how far along, what's next, the
+' Live chip, and Channels and the favourite.
 sub drawBanner()
     channel = bannerChannel()
     if channel = invalid then return
@@ -964,11 +966,12 @@ sub drawBanner()
     m.bannerLogo.setHttpAgent(m.top.getScene().getHttpAgent())
     m.bannerLogo.uri = channel.logo
     onLogos()
+    placeBadge(m.bannerBadge, m.bannerTitle, liveBadge(on), 1100)
     if on <> invalid
         m.bannerTitle.text = on.title
         meta = [liveSpan(on, m.twelve), liveTimeLeft(on, now)]
         if on.line <> "" then meta.Push(on.line)
-        if on.badges <> "" then meta.Push(on.badges)
+        if on.rating <> "" then meta.Push(on.rating)
         m.bannerMeta.text = meta.Join("   ·   ")
         m.bannerFill.width = Int(1100 * liveProgress(on, now))
         m.bannerTrack.visible = true
@@ -990,6 +993,25 @@ sub drawBanner()
     ' made anew each time.
     chips = m.controls.chips
     if chips = invalid or chips.Count() <> 2 or chips[1].label <> favorite then m.controls.chips = [{ label: "Channels", width: 0 }, { label: favorite, width: 0 }]
+end sub
+
+' A programme's LIVE or NEW (text, "" for neither) in badge, a small
+' label of its own before its title, which takes the rest of width.
+sub placeBadge(badge as object, title as object, text as string, width as integer)
+    x = badge.translation[0]
+    y = title.translation[1]
+    badge.text = text
+    badge.visible = text <> ""
+    if text = ""
+        title.translation = [x, y]
+        title.width = width
+        return
+    end if
+    badge.color = "0x7DD3FCFF"
+    if text = "LIVE" then badge.color = "0xEB6B70FF"
+    room = Int(badge.boundingRect().width) + 16
+    title.translation = [x + room, y]
+    title.width = width - room
 end sub
 
 ' The channel the bar is of: the one Up or Down leads to, else the one
