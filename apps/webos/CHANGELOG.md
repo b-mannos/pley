@@ -14,6 +14,8 @@ describes how they are made.
   saved from last time with focus on the newest, without "Can't reach your
   server" showing for a moment first and leaving focus on a play further
   down.
+- Marking a title watched no longer goes back to unwatched for a moment
+  when the page was being refreshed as you marked it.
 
 ## [0.1.7] - 2026-11-06
 

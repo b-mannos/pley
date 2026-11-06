@@ -37,6 +37,8 @@ pub struct Resource<T> {
     fresh: bool,
     error: Option<ApiError>,
     asked_at: Option<f64>,
+    /// When the server was asked for the answer shown, once it gave one.
+    answer_asked_at: Option<f64>,
     stale: bool,
     failed_before: bool,
     generation: Option<u64>,
@@ -62,6 +64,7 @@ where
             fresh: false,
             error: None,
             asked_at: None,
+            answer_asked_at: None,
             stale: false,
             failed_before: false,
             generation: None,
@@ -98,6 +101,7 @@ where
         self.fresh = false;
         self.error = None;
         self.asked_at = None;
+        self.answer_asked_at = None;
         self.stale = false;
         self.failed_before = false;
         self.snapshot_done = false;
@@ -151,6 +155,8 @@ where
                 self.save(cx, &value);
                 self.value = Some(value);
                 self.fresh = true;
+                // No other ask starts while one is under way: `asked_at` is still this one's.
+                self.answer_asked_at = self.asked_at;
                 self.error = None;
             }
             Err(e) if e.cancelled() => return false,
@@ -210,6 +216,13 @@ where
     /// Whether the server gave the answer in this launch.
     pub fn fresh(&self) -> bool {
         self.fresh
+    }
+
+    /// Whether what shows is the server's answer to an ask made at `t` ([`AppCx::now`]) or later.
+    /// [`Resource::invalidate`] lets an ask already under way finish, so the next answer may be
+    /// from before it.
+    pub fn answered_since(&self, t: f64) -> bool {
+        self.answer_asked_at.is_some_and(|asked| asked >= t)
     }
 
     /// Why the last ask failed.

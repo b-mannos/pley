@@ -30,6 +30,16 @@ pub struct TestApp {
 impl TestApp {
     /// The app signed in to a new fake server as Alex, on Home (or wherever it starts).
     pub fn start() -> TestApp {
+        TestApp::start_on(Tasks::new(Waker::noop()))
+    }
+
+    /// As [`TestApp::start`], with `threads` for requests: enough that a write isn't held behind
+    /// answers the server is slow to give, as when another device or a refresh asked them.
+    pub fn start_with_threads(threads: usize) -> TestApp {
+        TestApp::start_on(Tasks::with_threads(threads, Waker::noop()))
+    }
+
+    fn start_on(tasks: Tasks) -> TestApp {
         let server = FixtureServer::start_with(Options { scan_every: None, ..Options::default() }).unwrap();
         let device =
             Arc::new(FakeDevice::new(|| Box::new(SimEngine::new(SimClock::system()).0) as Box<dyn PlayerEngine>));
@@ -41,7 +51,7 @@ impl TestApp {
         sign_in(&server, ids::ALEX, &store, &http);
         let mut registry = Registry::new();
         registry.add(pley_item::screen).tile_actions(pley_item::tile_actions);
-        let mut state = AppState::new(device, store, http, Tasks::new(Waker::noop()));
+        let mut state = AppState::new(device, store, http, tasks);
         let mut ui = UiState::new();
         let mut shell = Shell::new(registry);
         let route = state.start_route();
