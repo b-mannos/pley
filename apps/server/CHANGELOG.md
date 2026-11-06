@@ -11,6 +11,9 @@ describes how they are made.
 
 ### Added
 
+- Jellyfin apps that show seek-bar previews, such as Findroid and
+  Streamyfin, show Pley's as you scrub: the same previews Pley's own players
+  use. Jellyfin for Android TV doesn't show them.
 - The web and desktop apps' remote offers Skip Intro and Skip Credits while
   what a device plays is in an intro or the credits, as its player would;
   `GET /api/sessions` gives each session's intro and credits. Its back
