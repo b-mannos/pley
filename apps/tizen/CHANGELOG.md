@@ -10,6 +10,10 @@ describes how they are made.
 
 ### Added
 
+- A globe at the bottom right of Choose your server and the address
+  screen, and at the top right of the sign-in code, picks the TV's language before anyone signs in:
+  Automatic (the TV's own), English, Français or Español. The TV keeps the
+  choice, and a profile set to Automatic uses it.
 - Someone else in your household can cast to the TV from their phone or
   browser while it is on your profile: the TV switches to their profile
   (their phone or browser asks their PIN, not the TV) and plays what they
@@ -54,6 +58,10 @@ describes how they are made.
 
 ### Added
 
+- Pley for Samsung TV is in French and Spanish as well as English: the
+  account's language, else the TV's, else the server's. Settings → Profile
+  → Language picks the account's, on all its devices, and the app changes
+  to it at once.
 - Your phone or browser changes the quality of a film or episode playing
   on the TV, as the player's Quality menu does (the pick is kept for the
   next ones), and sees which is picked. A film or episode sent from a

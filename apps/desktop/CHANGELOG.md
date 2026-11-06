@@ -8,6 +8,12 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Added
+
+- The app's own pages, choosing a server and the downloads it keeps, are in
+  French and Spanish as well as English, in the computer's language: their
+  messages too, such as why a server didn't answer or a download failed.
+
 ## [0.1.3] - 2026-11-05
 
 ### Added

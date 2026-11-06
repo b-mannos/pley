@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { ArrowLeft, Delete, Lock } from "lucide-react";
 import { errorMessage, isApiError } from "@/api/client";
 import type { User } from "@/api/types";
+import { t as translate } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { Avatar } from "./Avatar";
 import { Button, Spinner } from "./ui";
@@ -10,7 +12,7 @@ const PAD = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "back", "0", "ok"] as 
 
 /** What a pad says of a PIN not taken: the server explains 403 (wrong, locked) and 429 (too many tries). */
 export function pinError(err: unknown): string {
-  return isApiError(err, 0) ? "Can't reach the server" : errorMessage(err);
+  return isApiError(err, 0) ? translate("profiles.cantReach", { ns: "pages" }) : errorMessage(err);
 }
 
 /**
@@ -26,9 +28,9 @@ export function PinPad({
   error,
   onSubmit,
   onCancel,
-  prompt = "Enter the profile PIN",
-  submitLabel = "Switch",
-  cancelLabel = "Back to profiles",
+  prompt,
+  submitLabel,
+  cancelLabel,
   cancelIcon = <ArrowLeft className="size-4" />,
   small,
 }: {
@@ -41,14 +43,17 @@ export function PinPad({
   /** Called with the PIN once it has at least 4 digits. */
   onSubmit: (pin: string) => void;
   onCancel: () => void;
+  /** What the pad asks for: "Enter the profile PIN" by default. */
   prompt?: string;
-  /** What OK does, for screen readers. */
+  /** What OK does, for screen readers: "Switch" by default. */
   submitLabel?: string;
+  /** "Back to profiles" by default. */
   cancelLabel?: string;
   cancelIcon?: ReactNode;
   /** Smaller keys, for a pad in a menu's place rather than a page of its own. */
   small?: boolean;
 }) {
+  const { t } = useTranslation("pages");
   const [pin, setPinState] = useState("");
   // Keys can arrive faster than renders (quick typing, password managers):
   // the ref always holds what was typed so far.
@@ -95,9 +100,9 @@ export function PinPad({
         </>
       ) : null}
       <div className={cn("flex items-center gap-1.5 text-sm text-muted", target && "mt-1")}>
-        <Lock className="size-3.5" /> {prompt}
+        <Lock className="size-3.5" /> {prompt ?? t("profiles.enterPin")}
       </div>
-      <div className={cn("flex h-4 items-center gap-3", small ? "mt-4" : "mt-5")} aria-label={`${pin.length} digits entered`}>
+      <div className={cn("flex h-4 items-center gap-3", small ? "mt-4" : "mt-5")} aria-label={t("profiles.digitsEntered", { count: pin.length })}>
         {Array.from({ length: Math.max(4, pin.length) }, (_, i) => (
           <span
             key={i}
@@ -115,19 +120,19 @@ export function PinPad({
             type="button"
             disabled={busy || locked || (key === "ok" && pin.length < 4)}
             onClick={() => press(key)}
-            aria-label={key === "back" ? "Delete digit" : key === "ok" ? submitLabel : key}
+            aria-label={key === "back" ? t("profiles.deleteDigit") : key === "ok" ? (submitLabel ?? t("profiles.switch")) : key}
             className={cn(
               "flex items-center justify-center rounded-full font-semibold transition-colors disabled:opacity-40",
               small ? "size-12 text-lg" : "size-16 text-xl",
               key === "ok" ? "bg-accent text-accent-fg hover:bg-accent-hover" : "bg-surface-2 text-fg hover:bg-surface-3",
             )}
           >
-            {key === "back" ? <Delete className="size-5" /> : key === "ok" ? busy ? <Spinner className="size-5 text-accent-fg" /> : "OK" : key}
+            {key === "back" ? <Delete className="size-5" /> : key === "ok" ? busy ? <Spinner className="size-5 text-accent-fg" /> : t("profiles.ok") : key}
           </button>
         ))}
       </div>
       <Button variant="ghost" className={small ? "mt-3" : "mt-6"} icon={cancelIcon} onClick={onCancel}>
-        {cancelLabel}
+        {cancelLabel ?? t("profiles.backToProfiles")}
       </Button>
     </div>
   );

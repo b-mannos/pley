@@ -73,10 +73,10 @@ public static class Casts
     public const long BannerMs = 4_000;
 
     /// <summary>Said when a show, an album or a playlist has nothing to play.</summary>
-    public const string NothingToPlay = "Nothing to play";
+    public static string NothingToPlay => Strings.T("player.cast.nothingToPlay");
 
     /// <summary>Said when the switch to the remote's profile failed: the cast plays nothing.</summary>
-    public const string SwitchFailed = "Couldn't switch to the remote's profile";
+    public static string SwitchFailed => Strings.T("player.cast.switchFailed");
 
     /// <summary>
     /// The longest a cast's switch waits for the last reports of what played (progress, "stopped",
@@ -123,7 +123,7 @@ public static class Casts
     public static string Banner(string? from)
     {
         var name = (from ?? "").Trim();
-        return $"Playing from {(name.Length > 0 ? name : "another device")}";
+        return Strings.T("player.cast.playingFrom", ("device", name.Length > 0 ? name : Strings.T("player.cast.anotherDevice")));
     }
 
     /// <summary>

@@ -342,6 +342,56 @@ also what waits for them, in red while some failed.
   `Intl.RelativeTimeFormat`. Settings → About says the app uses the TMDB
   API.
 
+### Language
+
+The app is in English, French and Spanish ([API.md](API.md#language)):
+the account's language, else the one picked on this TV, else the TV's,
+else the server's, else English. `packages/tv/test/fixtures/language.json`
+pins that order for both Samsung apps.
+
+- **The globe:** Choose your server and typing an address have a small
+  globe at the bottom right, on the forget hint's line; the sign-in code
+  has it at the top right, on the logo's line. It names the language shown
+  by its two letters ("FR"); Down or Up reaches it, Left and Right don't. OK opens a side panel:
+  Automatic, with what that is on this TV (its language, else the
+  server's, else English), then English, Français and Español, the choice
+  in force checked. A choice shows at once and is kept on the TV
+  (`pley.deviceLanguage`); Automatic forgets it. Signed in, an account's
+  own language comes first, and its Automatic is this choice.
+- **The TV's language:** what Tizen's system information says
+  (`tizen.systeminfo`, `LOCALE`), then the web engine's
+  `navigator.languages`, which Tizen's runtime sets from the TV's menu
+  language. A tag such as `fr-CA` counts as French.
+- **At a start** the app shows the language it showed last
+  (`pley.language`), never another while it waits, which would flash. It
+  changes, signed in, once the account has been heard
+  (`GET /api/auth/me`), and on a TV in a language Pley doesn't have, once
+  the server has said its own (`GET /api/server`, asked again when the
+  events reconnect if it didn't answer). The account's own language counts
+  as soon as it is heard.
+- **A change** (another profile, signing out, Settings) draws the screens
+  again in the new language at once, and asks for Home's and the
+  libraries' rows again, as the server writes their titles.
+- **Settings → Profile → Language:** Automatic, with what that is on
+  this TV: the one picked with the globe, else its language, or the
+  server's on a TV in a language Pley doesn't have; then English, Français
+  and Español, each named in itself. A choice is the profile's on all its
+  devices
+  (`PUT /api/me/language`); a server without that route says it needs a
+  newer Pley.
+- **Requests** to the server carry `Accept-Language` with the language
+  shown.
+- **Dates and numbers** are written with `Intl` in the language shown,
+  with the TV's region when the TV is in that language, so `en-GB` keeps
+  its day before the month. The TVs' engines have no `Intl.PluralRules`:
+  the plural forms of English, French and Spanish are written in the app,
+  as CLDR has them.
+- **The words** are in `packages/tv/src/i18n/locales/<language>/<area>.json`,
+  in the web app's format (`{{name}}`, `_one`, `_many`, `_other`), all
+  three languages in the app's script. A key is typed from the English
+  files, so a wrong one fails the type check; English stands in for a word
+  missing elsewhere, and the tests check every language has every word.
+
 ## Building and testing
 
 ### Commands
@@ -385,7 +435,8 @@ its packages into the SDK by hand and it runs on WHPX.
 | Path | What |
 |---|---|
 | `api/`, `net/`, `auth/` | HTTP API, event stream, server discovery, sign-in with a code, profiles and PINs, the server's proof before a token goes ([Telling servers apart](API.md#telling-servers-apart)) |
-| `state.ts`, `platform.ts` | What the TV keeps (servers, sign-ins, settings, a per-install id, what requests are for the profile); what the app's shell provides |
+| `state.ts`, `platform.ts` | What the TV keeps (servers, sign-ins, settings, a per-install id, what requests are for the profile, the language shown last); what the app's shell provides |
+| `i18n/` | The words in English, French and Spanish, `t()` and `Trans`, plural forms, the language shown, dates and numbers in it |
 | `requests.ts` | Requests' words and rules: badges, a title's one main action, the season picker, stages, what may be done to a request, the server's answers |
 | `ui/focus.ts`, `ui/input.ts`, `ui/keys.ts` | Focus, remote keys, a pointer and its wheel |
 | `ui/shell/`, `ui/screens/`, `ui/kit/` | The rail, back stack and screens |
@@ -655,6 +706,54 @@ and the music's reports share one queue, which the switch waits up to
 | Screens | NUI, Samsung's C# toolkit on its DALi engine |
 | Oldest TV | Tizen 9 |
 
+### Language
+
+The native app is in English, French and Spanish, in the language
+[API.md](API.md#language) describes: the account's, else the one picked on
+this TV, else the TV's own when Pley has it, else the server's, else
+English (`packages/tv/test/fixtures/language.json` pins the order for both
+Samsung apps).
+
+Choose your server and typing an address have a small globe at the bottom
+right, the sign-in code at the top right on the logo's line, as the web
+Samsung app has it (`ButtonKind.Small`: 32 tall, no fill until focused),
+naming the language shown by its two letters ("FR"); Down or Up reaches it. OK opens a side
+panel: "Automatic (English)" (the TV's language where Pley has it, else
+the server's, else English), then English, Français and Español, the
+choice in force checked. A choice shows at once, the screen drawn again in
+it with the globe focused and an address being typed kept, and is kept in
+the TV's preferences (`pley.deviceLanguage`); Automatic forgets it. Signed
+in, an account's own language comes first, and its Automatic is this
+choice. The last language shown is kept on the TV, so the next start shows
+it before the server answers, rather than the TV's for a moment; when the
+account's or the server's turns out to be another, the app changes to it.
+The pages are drawn again where they were, Settings on the row that had
+focus; a film or a channel keeps its words until it closes. The server
+list and the sign-in code are drawn again too, the code unchanged, while
+Who's watching? and the moment after a code is approved keep theirs until
+the next page, which the profile brings its own language to.
+
+Settings → Profile → Language lists "Automatic (Français)" (the one picked
+with the globe, else the TV's language, else the server's), then English,
+Français and Español, each in itself. Choosing
+one sends `PUT /api/me/language`, and the app shows it once the server has
+it. Requests carry `Accept-Language` with the language shown, so what the
+server writes itself (Home's rows) comes in it. Dates and numbers follow
+the language, in the TV's region format when the TV is in that language
+(en-GB keeps its 24-hour clock).
+
+The words are in `src/Pley.Tv.Core/Locales/<language>/<area>.json`, a file
+per area of the app, in the format of the server's and the web app's
+catalogs (i18next's: nested keys, `{{name}}` for values, `_one`, `_many`
+and `_other` for counts), built into the Core library and read with
+`Strings` (`Strings.T("signin.servers.title")`, `Strings.Count(key, n)`).
+JSON rather than .NET's resx: the same files and format as the rest of
+Pley, so the web app's words carry over as they are, plurals by CLDR's
+rules, which resx has no form for, and no satellite assemblies to package.
+A word a language lacks shows in English. The Core's tests hold every
+language to English's keys, its own plural forms and the same values, and
+French and Spanish to their punctuation.
+
 ### How it is built
 
 - It is a port of the Android TV app: its screens, its words and its rules
@@ -678,7 +777,8 @@ and the music's reports share one queue, which the switch waits up to
   the TV was left on when it has one); `rail.json` pins the rail's
   entries (up to six libraries, then Libraries; nothing left out for
   Live TV or Now Playing) and how far they scroll for the entry focus is
-  on; `requests.json` pins where a Discover poster opens. Where the
+  on; `requests.json` pins where a Discover poster opens; `language.json`
+  pins which language shows. Where the
   Android app is
   stricter (a token answer without `token_type`, a device code without
   `expires_in`), the native app follows it, and its test says which

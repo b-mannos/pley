@@ -13,7 +13,7 @@ namespace Pley.Tv.Tizen.Screens;
 /// <summary>
 /// "Choose your server" (design spec §4.7; the Android app's TvServersScreen): saved servers first,
 /// then those that answer as they come; "Enter an address" (on the TV's keyboard) and "Search this
-/// network". Holding OK on a saved server forgets it.
+/// network". Holding OK on a saved server forgets it. The globe at the bottom right picks the TV's language.
 /// </summary>
 sealed class ServersScreen : Sheet
 {
@@ -23,6 +23,8 @@ sealed class ServersScreen : Sheet
 
     readonly Shell shell;
     readonly ServersModel model;
+    readonly LanguageGlobe globe;
+    readonly ButtonView globeButton;
     readonly View list;
     readonly View listContent;
     readonly FocusGroup listGroup = new FocusGroup(Axis.Column, "servers");
@@ -37,22 +39,26 @@ sealed class ServersScreen : Sheet
     readonly IDisposable anyKey;
     AddressEntry? address;
     bool touched;
+    /// <summary>Drawn again after the globe changed the language: the globe has focus, as it had.</summary>
+    bool refocus;
     bool sweepShown;
     float listScroll;
 
-    public ServersScreen(Shell shell, ServersModel model) : base("servers-screen")
+    public ServersScreen(Shell shell, ServersModel model, LanguageGlobe globe) : base("servers-screen")
     {
         this.shell = shell;
         this.model = model;
+        this.globe = globe;
         View.BackgroundColor = PleyColors.Bg;
         View.Add(Onboarding.BrandGlow());
 
-        var title = Text.Label("Choose your server", PleyType.PageTitle, PleyColors.Fg, width: 600);
+        var title = Text.Label(Strings.T("signin.servers.title"), PleyType.PageTitle, PleyColors.Fg, width: 600);
         title.SizeHeight = Ui.Dp(38);
         title.Position = new Position(Ui.Dp(Left), Ui.Dp(Top));
         View.Add(title);
-        var logo = Onboarding.Logo(32);
-        logo.Position = new Position(Ui.Dp(PleyTv.CanvasWidth - Right) - logo.SizeWidth, Ui.Dp(Top + 3));
+        // As tall as on the sign-in code, centred on the title's 38 dp line.
+        var logo = Onboarding.Logo(40);
+        logo.Position = new Position(Ui.Dp(PleyTv.CanvasWidth - Right) - logo.SizeWidth, Ui.Dp(Top - 1));
         View.Add(logo);
 
         // The list scrolls inside its 300 dp; rows are drawn without scale, so nothing spills.
@@ -66,20 +72,24 @@ sealed class ServersScreen : Sheet
         list.Add(listContent);
         View.Add(list);
 
-        enterAddress = buttons.Add(new ButtonView("Enter an address", ButtonKind.Text, OpenAddress));
-        searchNetwork = buttons.Add(new ButtonView("Search this network", ButtonKind.Text, () => _ = model.SearchNetwork()));
+        enterAddress = buttons.Add(new ButtonView(Strings.T("signin.servers.enterAddress"), ButtonKind.Text, OpenAddress));
+        searchNetwork = buttons.Add(new ButtonView(Strings.T("signin.servers.searchNetwork"), ButtonKind.Text, () => _ = model.SearchNetwork()));
         buttons.PositionX = Ui.Dp(Left);
         View.Add(buttons);
 
         status = new View { PositionX = Ui.Dp(Left), Size = new Size(Ui.Dp(RowWidth), 0) };
         View.Add(status);
 
-        forgetHint = Text.Label("Hold OK on a saved server to forget it.", PleyType.Caption, PleyColors.Subtle, width: 600);
+        forgetHint = Text.Label(Strings.T("signin.servers.forgetHint"), PleyType.Caption, PleyColors.Subtle, width: 600);
         forgetHint.Position = new Position(Ui.Dp(Left), Ui.Dp(PleyTv.CanvasHeight - Top - PleyType.Caption.Line));
         View.Add(forgetHint);
+        globeButton = GlobeButton.Of(shell, globe);
+        View.Add(globeButton);
 
+        // Down from the list or the buttons reaches the globe.
         Root.Add(listGroup);
         Root.Add(buttons.Group);
+        Root.Add(globeButton.Item);
         listGroup.ChildFocused += ScrollTo;
 
         // D-pad rule 1 holds until the first key: focus follows the first server as it shows.
@@ -88,8 +98,11 @@ sealed class ServersScreen : Sheet
             if (shell.Top == this) touched = true;
             return false;
         });
+        refocus = globe.TakeFocus();
+        touched = refocus;
         model.Chosen += OnChosen;
         watch = model.State.Watch(Show);
+        if (refocus) Tree.Focus(globeButton.Item);
         Gone += () =>
         {
             watch.Dispose();
@@ -105,11 +118,29 @@ sealed class ServersScreen : Sheet
 
     void OnChosen(ChosenServer chosen) => Chosen?.Invoke(chosen);
 
-    void OpenAddress()
+    void OpenAddress() => OpenAddress("", focusGlobe: false);
+
+    void OpenAddress(string typed, bool focusGlobe)
     {
-        address = new AddressEntry(shell, model);
+        address = new AddressEntry(shell, model, globe, typed);
         address.Gone += () => address = null;
-        address.Show();
+        address.Show(focusGlobe);
+    }
+
+    /// <summary>What is typed on the address screen over this one; null when it isn't open.</summary>
+    public string? Typing => address?.Address;
+
+    /// <summary>
+    /// The address screen again, with <paramref name="typed"/> in its field: it was open when the
+    /// language changed, and this screen was drawn again in the new one.
+    /// </summary>
+    public void ReopenAddress(string typed)
+    {
+        var focusGlobe = refocus;
+        refocus = false;
+        touched = true;
+        Tree.Focus(enterAddress.Item);
+        OpenAddress(typed, focusGlobe);
     }
 
     void Show(ServersState state)
@@ -200,7 +231,7 @@ sealed class ServersScreen : Sheet
         if (state.Sweeping)
         {
             var line = new StatusLine(RowWidth, PleyType.Caption);
-            line.Set(state.SweepRange != null ? $"Checking {state.SweepRange}…" : "Checking this network…");
+            line.Set(state.SweepRange != null ? Strings.T("signin.servers.checkingRange", ("range", state.SweepRange)) : Strings.T("signin.servers.checkingNetwork"));
             Line(line, PleyType.Caption.Line);
             if (bar == null)
             {
@@ -223,12 +254,12 @@ sealed class ServersScreen : Sheet
             if (state.Searching)
             {
                 var line = new StatusLine(RowWidth);
-                line.Set("Looking for Pley on your network…", waiting: true);
+                line.Set(Strings.T("signin.servers.looking"), waiting: true);
                 Line(line, PleyType.Label.Line);
             }
             else if (state.Searched && state.Rows.Count == 0 && state.Problem == null)
             {
-                Line(Paragraph("No servers found. Make sure this TV and the server are on the same network.", PleyColors.Muted, out var h), h);
+                Line(Paragraph(Strings.T("signin.servers.noneFound"), PleyColors.Muted, out var h), h);
             }
         }
         if (state.Problem != null) Line(Paragraph(state.Problem.Text, PleyColors.DangerText, out var h), h);
@@ -246,9 +277,9 @@ sealed class ServersScreen : Sheet
 
     void AskForget(ServerRow row)
     {
-        var dialog = new Dialog(shell, $"Forget {row.Name}?", "Pley signs this TV out of it and deletes what it saved from it.");
-        dialog.Button("Cancel", dialog.Close, initial: true);
-        dialog.Button("Forget", () =>
+        var dialog = new Dialog(shell, Strings.T("signin.servers.forgetTitle", ("name", row.Name)), Strings.T("signin.servers.forgetBody"));
+        dialog.Button(Strings.T("common.actions.cancel"), dialog.Close, initial: true);
+        dialog.Button(Strings.T("signin.servers.forget"), () =>
         {
             dialog.Close();
             _ = model.Forget(row.Url);
@@ -288,9 +319,9 @@ sealed class ServerRowView : View
         Add(iconBox);
 
         string? tagText = null;
-        if (row.Lookalike) (tagText, tagWarns) = ("Not your saved server", true);
-        else if (row.Unencrypted) (tagText, tagWarns) = ("Not encrypted", true);
-        else if (row.Found) tagText = "On this network";
+        if (row.Lookalike) (tagText, tagWarns) = (Strings.T("signin.servers.notYours"), true);
+        else if (row.Unencrypted) (tagText, tagWarns) = (Strings.T("signin.servers.notEncrypted"), true);
+        else if (row.Found) tagText = Strings.T("signin.servers.onNetwork");
         float tagWidth = 0;
         if (tagText != null)
         {
@@ -346,10 +377,10 @@ sealed class ServerRowView : View
         icon.Color = ink;
         name.TextColor = ink;
         var danger = false;
-        if (connecting) Text.Show(line, $"Connecting to {Row.Address}…");
+        if (connecting) Text.Show(line, Strings.T("signin.servers.connecting", ("address", Row.Address)));
         else if (Row.Unreachable)
         {
-            Text.Show(line, "Can't reach it");
+            Text.Show(line, Strings.T("signin.servers.unreachable"));
             danger = true;
         }
         else Text.Show(line, Row.Address);

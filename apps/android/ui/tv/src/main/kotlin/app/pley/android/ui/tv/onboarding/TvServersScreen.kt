@@ -46,6 +46,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -58,11 +59,14 @@ import androidx.core.net.toUri
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import app.pley.android.common.Language
+import app.pley.android.common.UiText
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.PleyType
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcons
+import app.pley.android.designsystem.text.asString
 import app.pley.android.screens.PleyKey
 import app.pley.android.screens.onboarding.LocalAccess
 import app.pley.android.screens.onboarding.ServerRow
@@ -70,7 +74,8 @@ import app.pley.android.screens.onboarding.ServersProblem
 import app.pley.android.screens.onboarding.ServersUiState
 import app.pley.android.screens.onboarding.ServersViewModel
 import app.pley.android.screens.onboarding.onboardingSource
-import app.pley.android.screens.onboarding.sentence
+import app.pley.android.screens.settings.DeviceLanguageUiState
+import app.pley.android.screens.settings.DeviceLanguageViewModel
 import app.pley.android.ui.tv.R
 import app.pley.android.ui.tv.kit.TvTextButton
 import app.pley.android.ui.tv.kit.HeldEnds
@@ -83,7 +88,8 @@ import app.pley.android.ui.tv.shell.LocalTvNavigator
  * "Choose your server" on TV (design spec §4.7): saved servers first, then
  * those that answer as they come; "Enter an address" (on the TV's keyboard),
  * "Search this network", and the demo server in debug builds. Holding OK
- * on a saved server forgets it.
+ * on a saved server forgets it. Beside the title, the globe picks this
+ * device's language.
  */
 @Composable
 internal fun TvServersScreen() {
@@ -91,6 +97,8 @@ internal fun TvServersScreen() {
     val given = LocalOnboardingSource.current
     val vm = viewModel { ServersViewModel(given ?: onboardingSource(), explainFirst = true) }
     val state by vm.state.collectAsStateWithLifecycle()
+    val languageModel: DeviceLanguageViewModel = viewModel(factory = DeviceLanguageViewModel.factory)
+    val language by languageModel.state.collectAsStateWithLifecycle()
     LaunchedEffect(vm) {
         vm.chosen.collect { chosen ->
             navigator.restart(
@@ -131,6 +139,8 @@ internal fun TvServersScreen() {
             onSearchNetwork = vm::searchNetwork,
             onDemo = vm::useDemo,
             onOpenSettings = { openAppSettings(context) },
+            language = language,
+            onLanguage = languageModel::choose,
         )
     }
     if (state.access == LocalAccess.Explain) {
@@ -165,8 +175,11 @@ internal fun TvServersContent(
     onSearchNetwork: () -> Unit,
     onDemo: () -> Unit,
     onOpenSettings: () -> Unit = {},
+    language: DeviceLanguageUiState = DeviceLanguageUiState(),
+    onLanguage: (Language?) -> Unit = {},
 ) {
     var forgetting by remember { mutableStateOf<ServerRow?>(null) }
+    val picker = rememberTvLanguagePicker()
     val firstRow = remember { FocusRequester() }
     // Each row's focus, for the row a cancelled Forget goes back to.
     val rowFocus = remember { HashMap<String, FocusRequester>() }
@@ -174,7 +187,10 @@ internal fun TvServersContent(
     var touched by remember { mutableStateOf(false) }
     val rows = state.rows
     // D-pad rule 1: focus on the first server; "Enter an address" until one shows, or when none does.
-    LaunchedEffect(rows.isNotEmpty(), state.searched) {
+    // Asked again once the window has focus: asked before, on a cold start, it is lost, and the
+    // window's own first focus goes wherever Compose enters the screen.
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
+    LaunchedEffect(rows.isNotEmpty(), state.searched, windowFocused) {
         if (touched) return@LaunchedEffect
         if (rows.isNotEmpty()) runCatching { firstRow.requestFocus() } else runCatching { enterAddress.requestFocus() }
     }
@@ -189,13 +205,14 @@ internal fun TvServersContent(
             .testTag(SERVERS_TAG),
     ) {
         Column(Modifier.padding(start = 96.dp, top = 27.dp, end = 48.dp, bottom = 27.dp).fillMaxSize()) {
-            Row(Modifier.fillMaxWidth().height(38.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
                 BasicText(
                     stringResource(R.string.tv_onboarding_servers_title),
                     style = PleyType.Tv.PageTitle.copy(color = PleyColors.Fg),
                     modifier = Modifier.weight(1f),
                 )
-                PleyLogo(height = 32.dp)
+                // As tall as on the code screen.
+                PleyLogo(height = 40.dp)
             }
             Spacer(Modifier.height(25.dp))
             LazyColumn(
@@ -252,6 +269,9 @@ internal fun TvServersContent(
                 BasicText(stringResource(R.string.tv_onboarding_forget_hint), style = PleyType.Tv.Caption.copy(color = PleyColors.Subtle))
             }
         }
+        // "FR" at the screen's right edge, centred on the forget hint's line (Caption, 27 from the bottom).
+        TvLanguageButton(picker, language, Modifier.align(Alignment.BottomEnd).padding(end = 48.dp - GLOBE_PADDING, bottom = 20.dp))
+        TvLanguagePanel(picker, language, onLanguage)
     }
     forgetting?.let { row ->
         TvDialog(
@@ -383,11 +403,11 @@ private fun SweepBar() {
 /** What went wrong, in words. */
 @Composable
 internal fun problemText(problem: ServersProblem): String = when (problem) {
-    is ServersProblem.Unreachable -> stringResource(R.string.tv_onboarding_problem_unreachable, problem.address, problem.message)
+    is ServersProblem.Unreachable -> stringResource(R.string.tv_onboarding_problem_unreachable, problem.address, problem.reason.asString())
     is ServersProblem.NotPley -> stringResource(R.string.tv_onboarding_problem_not_pley, problem.address)
     is ServersProblem.Unencrypted -> stringResource(R.string.tv_onboarding_problem_unencrypted, problem.address)
     ServersProblem.BadAddress -> stringResource(R.string.tv_onboarding_problem_address)
-    is ServersProblem.Failed -> sentence(problem.message)
+    is ServersProblem.Failed -> UiText.Sentence(problem.text).asString()
 }
 
 private const val SWEEP_MS = 5_000

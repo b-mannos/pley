@@ -47,6 +47,10 @@ pub enum LibraryWork {
 #[serde(default)]
 pub struct Settings {
     pub server_name: String,
+    /// The server language (an ISO 639-1 code of [`crate::i18n::LANGUAGES`]):
+    /// the server's own words, and devices in a language Pley doesn't have
+    /// (see [`crate::i18n`]). Empty: not chosen, which reads as English.
+    pub language: String,
     pub tmdb_api_key: String,
     pub metadata_language: String,
     pub tv_metadata: TvMetadata,
@@ -189,6 +193,7 @@ impl Default for Settings {
         let host = std::env::var("COMPUTERNAME").or_else(|_| std::env::var("HOSTNAME")).unwrap_or_default();
         Self {
             server_name: if host.is_empty() { "Pley".into() } else { host },
+            language: String::new(),
             tmdb_api_key: String::new(),
             metadata_language: "en-US".into(),
             tv_metadata: TvMetadata::Auto,
@@ -549,6 +554,8 @@ pub fn fit_to_accel(before: &Settings, patch: &mut SettingsPatch) -> Result<(), 
 #[derive(Debug, Default, Deserialize)]
 pub struct SettingsPatch {
     pub server_name: Option<String>,
+    /// Empty: not chosen (English).
+    pub language: Option<String>,
     pub tmdb_api_key: Option<String>,
     pub metadata_language: Option<String>,
     pub tv_metadata: Option<TvMetadata>,
@@ -633,6 +640,18 @@ impl SettingsStore {
                 return Err(AppError::bad_request("server name must be 1-64 characters"));
             }
             next.server_name = v;
+        }
+        if let Some(v) = patch.language {
+            next.language = match v.trim() {
+                "" => String::new(),
+                code => crate::i18n::LANGUAGES
+                    .into_iter()
+                    .find(|language| *language == code)
+                    .ok_or_else(|| {
+                        AppError::bad_request(format!("language is one of {}", crate::i18n::LANGUAGES.join(", ")))
+                    })?
+                    .to_owned(),
+            };
         }
         if let Some(v) = patch.tmdb_api_key {
             next.tmdb_api_key = v.trim().to_owned();
@@ -924,6 +943,8 @@ mod tests {
         assert!(bad(serde_json::json!({"server_name": "x".repeat(65)})).await);
         assert!(bad(serde_json::json!({"metadata_language": "e"})).await);
         assert!(bad(serde_json::json!({"metadata_language": "en-US-x-twelve"})).await);
+        assert!(bad(serde_json::json!({"language": "de"})).await);
+        assert!(bad(serde_json::json!({"language": "fr-FR"})).await);
         assert!(bad(serde_json::json!({"max_transcodes": 0})).await);
         assert!(bad(serde_json::json!({"max_transcodes": 65})).await);
         assert!(bad(serde_json::json!({"transcode_preset": "placebo"})).await);
@@ -936,6 +957,7 @@ mod tests {
                 &db,
                 patch(serde_json::json!({
                     "server_name": "  Den  ",
+                    "language": " fr ",
                     "tmdb_api_key": "  abc  ",
                     "metadata_language": " fr-FR ",
                     "max_transcodes": 64,
@@ -947,6 +969,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(s.server_name, "Den");
+        assert_eq!(s.language, "fr");
         assert_eq!(s.tmdb_api_key, "abc");
         assert_eq!(s.metadata_language, "fr-FR");
         assert_eq!((s.max_transcodes, s.transcode_preset.as_str()), (64, "medium"));

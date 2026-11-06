@@ -54,6 +54,12 @@ public abstract record SettingPick
         public override string RowKey => "row-start-as";
     }
 
+    /// <summary>The language Pley is in for the profile (<see cref="MeModel.SetLanguage"/>).</summary>
+    public sealed record Language : SettingPick
+    {
+        public override string RowKey => "row-language";
+    }
+
     public sealed record Quality : SettingPick
     {
         public override string RowKey => "row-quality";
@@ -187,6 +193,15 @@ public interface ISettingsSource
 
     /// <summary>The TV's facts under "Open diagnostics".</summary>
     IReadOnlyList<Fact> DeviceFacts { get; }
+
+    /// <summary>The server's language, which Automatic is on a TV in a language Pley doesn't have; null until it has said.</summary>
+    string? ServerLanguage { get; }
+
+    /// <summary>The TV's languages: the first Pley has is what Automatic is.</summary>
+    IReadOnlyList<string> TvLanguages { get; }
+
+    /// <summary>The language picked on this TV with the globe before signing in, which Automatic is when there is one.</summary>
+    string? DeviceLanguage { get; }
 }
 
 /// <summary>Settings' source in the app: <see cref="AppState"/>, with the TV's facts the Tizen app reads.</summary>
@@ -213,6 +228,12 @@ public sealed class AppSettingsSource : ISettingsSource
     public string Version => app.Platform.Version;
 
     public IReadOnlyList<Fact> DeviceFacts { get; }
+
+    public string? ServerLanguage => app.ServerLanguage;
+
+    public IReadOnlyList<string> TvLanguages => app.TvLanguages;
+
+    public string? DeviceLanguage => app.DeviceLanguage;
 }
 
 /// <summary>
@@ -267,6 +288,7 @@ public sealed class SettingsModel : IDisposable
         switch (e)
         {
             case MeEvent.Saved:
+            case MeEvent.LanguageSaved:
                 Told?.Invoke(SettingsText.Saved);
                 break;
             case MeEvent.ReadOnly:
@@ -322,13 +344,17 @@ public sealed class SettingsModel : IDisposable
                 if (defaults?.ReadsSubtitles == true)
                     items.Add(new SettingsItem.Row("row-subtitle-language", SettingsText.SubtitleLanguage, Edit(new SettingPick.SubtitleLanguage()),
                         (TrackLanguages.NameOf(defaults.Defaults.SubtitleLanguage) ?? SettingsText.SameAsAudio) + webOnly, "captions"));
+                if (me.Language is { } language)
+                    items.Add(new SettingsItem.Row("row-language", SettingsText.Language,
+                        language.Editable ? new SettingAction.Pick(new SettingPick.Language()) : new SettingAction.Web("/account"),
+                        LanguageLabel(language.Code) + (language.Editable ? "" : " · " + SettingsText.ChangeOnWeb), "languages"));
                 items.Add(new SettingsItem.Row("row-history", SettingsText.History, new SettingAction.Open(new PageKey.History()), Icon: "history", Chevron: true));
                 // The Libraries page sorts them; with three or fewer, the rail lists them and has no way there.
                 items.Add(new SettingsItem.Row("row-sort-libraries", SettingsText.SortLibraries, new SettingAction.Open(new PageKey.Libraries()), SettingsText.SortLibrariesValue, "arrow-up-down", Chevron: true));
                 if (state.Profiles.Count > 1)
                 {
                     var chosen = state.Profiles.FirstOrDefault(p => p.Id == state.AlwaysStartAs)?.Name;
-                    items.Add(new SettingsItem.Row("row-start-as", SettingsText.AlwaysStartAs, new SettingAction.Pick(new SettingPick.AlwaysStartAs()), chosen ?? SettingsText.AskWho, "user-round"));
+                    items.Add(new SettingsItem.Row("row-start-as", SettingsText.AlwaysStartAs, new SettingAction.Pick(new SettingPick.AlwaysStartAs()), chosen ?? SettingsText.UsedLast, "user-round"));
                 }
                 items.Add(new SettingsItem.Row("row-web", SettingsText.ManageWeb, new SettingAction.Web("/account"), SettingsText.ManageWebValue, "app-window"));
                 break;
@@ -395,12 +421,14 @@ public sealed class SettingsModel : IDisposable
         var defaults = state.Me.TrackDefaults?.Defaults;
         (string Title, IReadOnlyList<(string Label, string? Hint)> Choices, int Current) p = pick switch
         {
-            SettingPick.AudioLanguage => (SettingsText.AudioLanguage, Languages(SettingsText.FileDefault), LanguageIndex(defaults?.AudioLanguage)),
+            SettingPick.AudioLanguage => (SettingsText.AudioLanguage, TrackChoices(SettingsText.FileDefault), LanguageIndex(defaults?.AudioLanguage)),
             SettingPick.SubtitleMode => (SettingsText.Subtitles, SubtitleModes.Select(m => (SettingsText.ModeLabel(m), (string?)SettingsText.ModeHint(m))).ToList(),
                 Math.Max(0, Index(SubtitleModes, defaults?.SubtitleMode ?? "forced"))),
-            SettingPick.SubtitleLanguage => (SettingsText.SubtitleLanguage, Languages(SettingsText.SameAsAudio), LanguageIndex(defaults?.SubtitleLanguage)),
+            SettingPick.SubtitleLanguage => (SettingsText.SubtitleLanguage, TrackChoices(SettingsText.SameAsAudio), LanguageIndex(defaults?.SubtitleLanguage)),
+            SettingPick.Language => (SettingsText.Language, new[] { LanguageLabel(null) }.Concat(Languages.All.Select(Languages.NameOf)).Select(l => (l, (string?)null)).ToList(),
+                state.Me.Language?.Code is { } code ? Index(Languages.All, code) + 1 : 0),
             SettingPick.AlwaysStartAs => (SettingsText.AlwaysStartAs,
-                new[] { (SettingsText.AskWho, (string?)null) }.Concat(state.Profiles.Select(x => (x.Name, (string?)null))).ToList(),
+                new[] { (SettingsText.UsedLast, (string?)null) }.Concat(state.Profiles.Select(x => (x.Name, (string?)null))).ToList(),
                 state.AlwaysStartAs is { } id ? state.Profiles.Select((x, n) => (x, n)).Where(x => x.x.Id == id).Select(x => x.n + 1).FirstOrDefault() : 0),
             SettingPick.Quality => (SettingsText.Quality, Qualities.All.Select(q => (SettingsText.QualityLabel(q.Id), SettingsText.QualityHint(q.Id))).ToList(),
                 Math.Max(0, Index(Qualities.All, Qualities.ByIdOrLabel(s.Quality)))),
@@ -428,6 +456,9 @@ public sealed class SettingsModel : IDisposable
                 break;
             case SettingPick.SubtitleLanguage:
                 Me.SetSubtitleLanguage(LanguageAt(index));
+                break;
+            case SettingPick.Language when index <= Languages.All.Count:
+                Me.SetLanguage(index == 0 ? null : Languages.All[index - 1]);
                 break;
             case SettingPick.AlwaysStartAs:
                 var profiles = State.Value.Profiles;
@@ -496,18 +527,33 @@ public sealed class SettingsModel : IDisposable
     /// </summary>
     static readonly IReadOnlyList<SubtitleFont> Fonts = new[] { SubtitleFont.Sans, SubtitleFont.Serif, SubtitleFont.Monospace, SubtitleFont.Casual };
 
-    static IReadOnlyList<(string, string?)> Languages(string none) =>
+    static IReadOnlyList<(string, string?)> TrackChoices(string none) =>
         new[] { (none, (string?)null) }.Concat(TrackLanguages.All.Select(l => (l.Name, (string?)null))).ToList();
+
+    /// <summary>
+    /// The Language row's value: the profile's language, named in itself ("Français"), or for
+    /// none "Automatic" with what that is on this TV: the one picked with the globe, else its
+    /// language, else the server's.
+    /// </summary>
+    string LanguageLabel(string? code) =>
+        code != null
+            ? Languages.NameOf(code)
+            : SettingsText.Automatic(Languages.NameOf(Languages.Pick(null, source.ServerLanguage, source.TvLanguages, source.DeviceLanguage)));
 
     static int LanguageIndex(string? code)
     {
         if (code == null) return 0;
-        for (var i = 0; i < TrackLanguages.All.Count; i++)
-            if (TrackLanguages.All[i].Code == code) return i + 1;
+        var all = TrackLanguages.All;
+        for (var i = 0; i < all.Count; i++)
+            if (all[i].Code == code) return i + 1;
         return 0;
     }
 
-    static string? LanguageAt(int index) => index == 0 || index > TrackLanguages.All.Count ? null : TrackLanguages.All[index - 1].Code;
+    static string? LanguageAt(int index)
+    {
+        var all = TrackLanguages.All;
+        return index == 0 || index > all.Count ? null : all[index - 1].Code;
+    }
 
     static int Index<T>(IReadOnlyList<T> list, T value)
     {

@@ -11,6 +11,12 @@ describes how they are made.
 
 ### Added
 
+- Pley is in English, French and Spanish: each device's language by
+  default (the sign-in page has a globe to pick another), or the one an
+  account picks on its Account page, which follows it everywhere. The
+  server language, in Settings → General, is for the server's own words
+  (Home's rows, the tray's menu) and for devices in a language Pley
+  doesn't have.
 - Jellyfin apps that show seek-bar previews, such as Findroid and
   Streamyfin, show Pley's as you scrub: the same previews Pley's own players
   use. Jellyfin for Android TV doesn't show them.
@@ -72,6 +78,8 @@ describes how they are made.
   channel shows only the channel's tuning screen.
 - With TMDB as the TV source, a show with an IMDb or TheTVDB id but no
   TMDB id is found by that id before it is searched for by name.
+- The web and desktop apps' menus open above their button where the
+  window has no room for them below, as in a short window.
 - Jellyfin apps' streams go as far as Pley's own apps' do, by what their
   device profile says: HEVC copied, or made in HEVC to stay HDR, in fMP4
   segments where the app asks for them, VP9 and AV1 copied into fMP4, HDR

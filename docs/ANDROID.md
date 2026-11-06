@@ -73,6 +73,73 @@ from `GET /api/auth/me`, saved with the session, so the start reads it from
 the device; until the TV has heard it for that profile, the start asks
 "Who's watching?".
 
+### Language
+
+Pley is in English, French and Spanish. The app shows the language of the
+account, else this device's (one picked with the globe, below, else the
+first of the device's languages that Pley has), else the server
+language, else English ([API.md](API.md#language)): `language` of
+`GET /api/auth/me` and of `GET /api/server`, which the app asks while
+signed in. Without an account (no server chosen, or signed out of the one
+chosen), it shows this device's. A code Pley doesn't have counts as none,
+and a region doesn't count (`fr-CA` is French).
+
+The screens shown before signing in have a globe, labelled with the
+language shown by its two letters ("FR") and heard as "Choose a
+language". On phones it is at the top left of the sign-in screen
+(choosing a server, or typing its address) and of the code screen, in
+line with their text; "Continue in browser" has an arrow out of a box, so
+the globe only means the language. On TVs it is a small button at the
+bottom right of "Choose your server", on the forget hint's line, and at
+the top right of the code screen, on the logo's line: Down from the
+buttons, or Up from Change server, reaches it, and Left or Right never
+does. It opens **Automatic (English)** (the device's language where Pley
+has it, else English), then English, Français and Español, each named in itself,
+the current choice checked: in a sheet on phones, in a side panel on TVs,
+as Settings' choices open. A pick shows at once and is this device's
+language, kept on the device and read before the first screen; Automatic
+forgets it. Signed in, an account's own language comes first, and its
+Automatic means this one.
+
+Settings has a **Language** row, on phones at the top and on TVs under
+Profile: **Automatic**, naming what that is on this device ("Automatic
+(Français)": this device's language, or the server's on a device in a
+language Pley doesn't have), then English, Français and Español, each
+named in itself. A choice is the account's, on every device it signs
+in on (`PUT /api/me/language`); it shows at once, and is put back, with a
+word, if the server refuses.
+
+The app remembers the language it showed last and starts in it, before
+the server has answered; signed in, it waits for the account's language
+before it turns to the device's, and on a device in a language Pley
+doesn't have, for the server's, so no other language shows for a
+moment. Android 13 and later keep it as the app's own language, which
+the system's settings list (Apps → Pley → Language); the app sets it
+again as it hears the account's and the server's. A language picked
+there is chosen as the app's own picker would choose it, and its System
+default is that picker's Automatic: signed in, the Language row's, for
+the account (refused by the server, the language the app goes by comes
+back); without an account, the globe's, for this device. Below 13 the
+app keeps it itself, and remakes its screens when it changes. A player open then
+plays on: on Android 13 and later its words change where they are, below
+the next time it opens.
+
+Dates, times and numbers follow the language shown, in the device's
+region when the device is in that language (en-GB keeps its 24-hour
+clock). The app's requests to its server say the language shown
+(`Accept-Language`), in which the server writes the titles of Home's and
+the libraries' rows; they are asked for again when it changes.
+
+An open page follows a change at once: its words, and the runtimes, times
+left, "3 hours ago", episode numbers and track languages it writes. Tiles
+already listed in a library, a collection or search results follow when
+they load again. The names of audio and subtitle languages are the
+language shown's own ("Anglais", "Inglés"), sorted as it sorts them. A
+quality the server converts to keeps its name in every language ("8 Mbps
+1080p"), as on the web. Playback details write their numbers as the
+language shown does ("23,976 i/s" in French); Diagnostics writes frame
+rates as the decoder gives them, the same in every language.
+
 ### Phones and tablets
 
 - **The player** shows its controls, the title with them, for 3 s as
@@ -787,7 +854,7 @@ sees only what it builds on.
 | Module | What it holds | Builds on |
 |---|---|---|
 | `:app` | `PleyApplication`, `AppGraph`, the two launchers, Watch Next, the web view clean-up | everything |
-| `:core:common` | Address rules, discovery, local network access, device profile, trace names | nothing |
+| `:core:common` | Address rules, discovery, local network access, device profile, trace names, the language shown (`AppLanguage`), words made outside the interface (`UiText`), the format functions' words (`formatWords`) | model |
 | `:core:model` | The server's requests and answers, events, the capability report (plain Kotlin) | nothing |
 | `:core:auth` | Sign-in: the browser page, the TV's code, tokens | common |
 | `:core:network` | OkHttp clients, `PleyApi`, server events | common, model, auth |
@@ -814,6 +881,33 @@ Rules the build keeps:
 - The only exported components are the two launchers,
   `SignInRedirectActivity`, `MusicService` and `WatchNextImageProvider`
   (`CutoverTest` checks).
+
+### Words
+
+Each module keeps the words people read in
+`src/main/res/values/strings_<area>.xml`, with the same file in
+`values-fr/` and `values-es/`; a count is a `<plurals>` (English one and
+other, French and Spanish one, many and other). Lint fails on a word, or a
+count's form, missing in one of them (`MissingTranslation`,
+`MissingQuantity`, set in `build-logic`).
+
+Words made where nothing is drawn (a ViewModel, an error, the player's
+messages) are a `UiText` (`:core:common`): a resource and its arguments,
+a count's plural, or text as it is (the server's, a name). The interface
+puts them into words (`asString()` in Compose, `resolve` elsewhere), in
+the language shown, so they follow a change of language. An error's words
+are `errorText(error)`: the app's own (`UserFacing.text`) or the server's
+sentence. An activity or a service is made in the language shown
+(`AppLanguage.wrap` in `attachBaseContext`).
+
+`:core:model`'s format functions (durations and time left, relative
+times, episode numbers, counts, sizes and bitrates, a stream's details,
+track languages) take a `FormatWords` last, English when given none:
+`formatWords()` in Compose, `formatWords(resources)` with a screen's or a
+service's resources, `AppLanguage.formatWords()` where a ViewModel builds
+its state. A ViewModel that keeps what they write combines
+`AppLanguage.shown`, so it builds its state again when the language
+changes.
 
 ### Commands
 

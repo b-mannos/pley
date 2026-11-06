@@ -1,6 +1,7 @@
 import { useEffect, useEffectEvent, useRef } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { api, errorMessage } from "@/api/client";
 import { onServerEvent, setReceiver } from "@/api/events";
 import { queries, useSwitchProfile } from "@/api/hooks";
@@ -103,6 +104,7 @@ function useCastSwitch() {
   const switchProfile = useSwitchProfile();
   const closePlayers = useClosePlayers();
   const toast = useToast();
+  const { t } = useTranslation("components");
   return async (cast: Cast) => {
     if (cast.profile_id == null || !cast.switch_ticket || switching) return;
     switching = true;
@@ -114,7 +116,7 @@ function useCastSwitch() {
       await switchProfile.mutateAsync({ user_id: cast.profile_id, ticket: cast.switch_ticket });
     } catch {
       dropHandedOver(cast);
-      toast.error("Couldn't switch to the remote's profile");
+      toast.error(t("castReceiver.switchFailed"));
     } finally {
       release();
       switching = false;
@@ -167,6 +169,7 @@ const MUSIC = new Set(["album", "artist", "track"]);
  * otherwise go on playing over the music.
  */
 function useCastPlayer() {
+  const { t } = useTranslation("components");
   const navigate = useNavigate();
   const qc = useQueryClient();
   const play = usePlayItem();
@@ -174,7 +177,7 @@ function useCastPlayer() {
   const startQueue = useVideoQueue();
   const toast = useToast();
   return async (cast: Cast, onPlayer: boolean) => {
-    const from = `Playing from ${cast.from ?? "another device"}`;
+    const from = t("castReceiver.playingFrom", { device: cast.from ?? t("castReceiver.anotherDevice") });
     try {
       // When nothing plays (a show with nothing next, say), the page said why: no "Playing from".
       let played = true;

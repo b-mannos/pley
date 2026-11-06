@@ -4,7 +4,7 @@ import { EventStream } from "../src/api/events";
 import type { ItemDetail, ItemKind, ItemSummary, LiveSummary, Playlist, PlaylistEntry } from "../src/api/types";
 import type { KeyValue, Tokens } from "../src/auth/tokens";
 import type { Platform } from "../src/platform";
-import { CAST_BANNER_MS, CAST_SWITCH_WAIT_MS, CastReceiver, NOTHING_TO_PLAY, receiverQuery, SWITCH_FAILED, type CastEnv, type CastEvent, type CastServer } from "../src/player/cast";
+import { CAST_BANNER_MS, CAST_SWITCH_WAIT_MS, CastReceiver, receiverQuery, type CastEnv, type CastEvent, type CastServer } from "../src/player/cast";
 import type { PlayRequest } from "../src/player/plan";
 import { AppState } from "../src/state";
 
@@ -144,7 +144,7 @@ describe("a cast to this TV", () => {
     t.receiver.take(cast({ item_id: 21 }));
     await settle();
     expect(t.videos).toEqual([{ itemId: 23, fromStart: false }]);
-    expect(t.said).toEqual(["Playing from Living room phone", NOTHING_TO_PLAY]);
+    expect(t.said).toEqual(["Playing from Living room phone", "Nothing to play"]);
   });
 
   it("plays an album's tracks in order, or shuffled from a random one, as the music's queue", async () => {
@@ -202,7 +202,7 @@ describe("a cast to this TV", () => {
     await settle();
     expect(t.queues).toEqual([{ tracks: [71, 72, 73], at: 1, shuffle: true, fromMs: 0 }]);
     expect(t.videos).toEqual([{ itemId: 81, queue: { kind: "playlist", id: 4 } }]);
-    expect(t.said).toEqual(["Playing from Living room phone", "Playing from Living room phone", NOTHING_TO_PLAY]);
+    expect(t.said).toEqual(["Playing from Living room phone", "Playing from Living room phone", "Nothing to play"]);
   });
 
   it("tunes a channel in the live player at once", () => {
@@ -278,7 +278,7 @@ describe("a cast from another profile's remote", () => {
     t.state.refuse = new Error("this cast's switch has expired or was used: cast again");
     t.receiver.take(cast({ item_id: 5, profile_id: 4, switch_ticket: "t1" }));
     await settle();
-    expect([t.did, t.said]).toEqual([["switch to 4 with t1"], [SWITCH_FAILED]]);
+    expect([t.did, t.said]).toEqual([["switch to 4 with t1"], ["Couldn't switch to the remote's profile"]]);
     expect(t.state.profile).toBe(2);
     let release: () => void = () => undefined;
     t.state.switchHeld = new Promise<void>((r) => (release = r));
@@ -287,7 +287,7 @@ describe("a cast from another profile's remote", () => {
     release();
     await settle();
     expect([app.signedIn, app.signedOut.value]).toEqual([false, true]);
-    expect(t.said).toEqual([SWITCH_FAILED]);
+    expect(t.said).toEqual(["Couldn't switch to the remote's profile"]);
   });
 
   it("drops every cast heard while the switch is made: the left profile's, the same remote's next, another profile's", async () => {
@@ -317,7 +317,7 @@ describe("a cast from another profile's remote", () => {
     t.receiver.take(cast({ item_id: 6, from: "Kitchen tablet" }));
     release();
     await settle();
-    expect([t.did, t.said]).toEqual([["switch to 4 with t1"], [SWITCH_FAILED]]);
+    expect([t.did, t.said]).toEqual([["switch to 4 with t1"], ["Couldn't switch to the remote's profile"]]);
     t.receiver.take(cast({ item_id: 6, from: "Kitchen tablet" }));
     await settle();
     expect(t.videos).toEqual([{ itemId: 6, fromStart: false }]);

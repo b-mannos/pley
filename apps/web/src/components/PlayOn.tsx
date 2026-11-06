@@ -1,5 +1,6 @@
 import { useEffect, useEffectEvent, useId, useRef, useState, type ReactNode } from "react";
 import { Cast } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { isApiError } from "@/api/client";
 import { castError, useCast } from "@/api/hooks";
 import type { CastKind, CastRequest } from "@/api/types";
@@ -58,7 +59,7 @@ interface PinAsk {
 export function PlayOn({
   kind,
   cast,
-  label = "Play on…",
+  label: given,
   icon = <Cast className="size-4" />,
   size = "lg",
   compact,
@@ -68,7 +69,9 @@ export function PlayOn({
   onOpenChange,
   onCast,
 }: PlayOnProps) {
+  const { t } = useTranslation(["components", "common"]);
   const targets = useCastTargets(kind);
+  const label = given ?? t("playOn.label");
   const send = useCast();
   const toast = useToast();
   const me = useAuth();
@@ -125,7 +128,7 @@ export function PlayOn({
       {
         onSuccess: () => {
           if (pin !== undefined) stopAsking(false);
-          toast.success(`Playing on ${device.name}`);
+          toast.success(t("playOn.playingOn", { device: device.name }));
           openRemoteOn(device.id);
           onCast?.();
         },
@@ -228,7 +231,7 @@ export function PlayOn({
             {title}
           </h2>
           <p id={whyId} className="mb-4 mt-1 text-xs text-muted">
-            {asking.device.name} is on {asking.device.profile?.name}'s profile: it switches to yours first.
+            {t("playOn.otherProfile", { device: asking.device.name, profile: asking.device.profile?.name })}
           </p>
           <PinPad
             key={failures}
@@ -236,9 +239,9 @@ export function PlayOn({
             busy={send.isPending}
             locked={pinLocked}
             error={pinMessage}
-            prompt="Enter your PIN"
+            prompt={t("playOn.enterPin")}
             submitLabel={title}
-            cancelLabel="Cancel"
+            cancelLabel={t("common:actions.cancel")}
             cancelIcon={null}
             onSubmit={(pin) => sendTo(asking.device, asking.request, pin)}
             onCancel={() => stopAsking(true)}

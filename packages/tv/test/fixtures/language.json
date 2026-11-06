@@ -1,0 +1,102 @@
+{
+  "pickLanguage": [
+    {
+      "account": "fr",
+      "server": "es",
+      "device": ["en-US"],
+      "out": "fr"
+    },
+    {
+      "account": null,
+      "server": "es",
+      "device": ["fr-FR"],
+      "out": "fr"
+    },
+    {
+      "account": null,
+      "server": "es",
+      "device": ["de-DE"],
+      "out": "es"
+    },
+    {
+      "account": null,
+      "server": null,
+      "device": ["de-DE", "es-MX", "fr-FR"],
+      "out": "es"
+    },
+    {
+      "account": null,
+      "server": null,
+      "device": ["de-DE"],
+      "out": "en"
+    },
+    {
+      "account": null,
+      "server": null,
+      "device": [],
+      "out": "en"
+    },
+    {
+      "account": "de",
+      "server": "fr-CA",
+      "device": ["en-GB"],
+      "out": "en"
+    },
+    {
+      "account": "de",
+      "server": "fr-CA",
+      "device": ["de-DE"],
+      "out": "fr"
+    },
+    {
+      "account": "",
+      "server": "",
+      "device": ["FR_ca"],
+      "out": "fr"
+    }
+  ],
+  "pickLanguageWithChoice": [
+    {
+      "account": "fr",
+      "choice": "es",
+      "server": null,
+      "device": ["en-US"],
+      "out": "fr"
+    },
+    {
+      "account": null,
+      "choice": "es",
+      "server": "en",
+      "device": ["fr-FR"],
+      "out": "es"
+    },
+    {
+      "account": "de",
+      "choice": "es",
+      "server": "fr",
+      "device": ["fr-FR"],
+      "out": "es"
+    },
+    {
+      "account": null,
+      "choice": "es",
+      "server": "fr",
+      "device": [],
+      "out": "es"
+    },
+    {
+      "account": null,
+      "choice": "de",
+      "server": "es",
+      "device": ["fr-CA"],
+      "out": "fr"
+    },
+    {
+      "account": null,
+      "choice": null,
+      "server": "es",
+      "device": ["de-DE"],
+      "out": "es"
+    }
+  ]
+}

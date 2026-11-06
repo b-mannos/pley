@@ -10,6 +10,14 @@ describes how they are made.
 
 ### Added
 
+- Pley in French and Spanish: the app shows your profile's language, else
+  the TV's, else the server's, and starts in the last one it showed. Settings
+  → Profile → Language chooses it for your profile on every device, or
+  Automatic.
+- A globe at the bottom right of Choose your server and the address
+  screen, and at the top right of the sign-in code, picks the TV's language before anyone signs in:
+  Automatic (the TV's own), English, Français or Español. The TV keeps the
+  choice, and a profile set to Automatic uses it.
 - Someone else in your household can cast to the TV from their phone or
   browser while it is on your profile: the TV switches to their profile
   (their phone or browser asks their PIN, not the TV) and plays what they

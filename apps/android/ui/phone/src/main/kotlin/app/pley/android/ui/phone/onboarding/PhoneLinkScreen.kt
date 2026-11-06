@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -40,18 +39,22 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import app.pley.android.common.Language
+import app.pley.android.common.UiText
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.PleyType
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcons
+import app.pley.android.designsystem.text.asString
 import app.pley.android.screens.PleyKey
 import app.pley.android.screens.onboarding.LinkStatus
 import app.pley.android.screens.onboarding.LinkUiState
 import app.pley.android.screens.onboarding.LinkViewModel
 import app.pley.android.screens.onboarding.go
 import app.pley.android.screens.onboarding.onboardingSource
-import app.pley.android.screens.onboarding.sentence
+import app.pley.android.screens.settings.DeviceLanguageUiState
+import app.pley.android.screens.settings.DeviceLanguageViewModel
 import app.pley.android.ui.phone.R
 import app.pley.android.ui.phone.kit.BusyLine
 import app.pley.android.ui.phone.kit.PleyTextButton
@@ -62,7 +65,8 @@ import kotlinx.coroutines.delay
 /**
  * Signing a phone in with a code from another device (design spec §4.7:
  * the link screen stacked in one column), for phones without a browser,
- * or when the person asks for a code.
+ * or when the person asks for a code. The globe in the top bar picks this
+ * device's language.
  */
 @Composable
 internal fun PhoneLinkScreen(server: String) {
@@ -80,23 +84,41 @@ internal fun PhoneLinkScreen(server: String) {
         onDispose { view.keepScreenOn = false }
     }
     val state by vm.state.collectAsStateWithLifecycle()
-    PhoneLinkContent(state, onNewCode = vm::newCode, onChangeServer = { navigator.restart(PleyKey.Servers) })
+    val languageModel: DeviceLanguageViewModel = viewModel(factory = DeviceLanguageViewModel.factory)
+    val language by languageModel.state.collectAsStateWithLifecycle()
+    PhoneLinkContent(
+        state,
+        onNewCode = vm::newCode,
+        onChangeServer = { navigator.restart(PleyKey.Servers) },
+        language = language,
+        onLanguage = languageModel::choose,
+    )
 }
 
 @Composable
-internal fun PhoneLinkContent(state: LinkUiState, onNewCode: () -> Unit, onChangeServer: () -> Unit) {
+internal fun PhoneLinkContent(
+    state: LinkUiState,
+    onNewCode: () -> Unit,
+    onChangeServer: () -> Unit,
+    /** This device's language, for the globe; `null`: no globe. */
+    language: DeviceLanguageUiState? = null,
+    onLanguage: (Language?) -> Unit = {},
+) {
     val status = state.status
     val code = state.code
-    Box(Modifier.fillMaxSize().brandCorner().testTag(LINK_TAG)) {
+    Column(Modifier.fillMaxSize().brandCorner().testTag(LINK_TAG)) {
+        // Signed in, only the success shows.
+        OnboardingTopBar(language.takeIf { status !is LinkStatus.SignedIn }, onLanguage)
         Column(
             Modifier
-                .fillMaxSize()
+                .weight(1f)
+                .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .statusBarsPadding()
                 .navigationBarsPadding()
                 .padding(horizontal = 24.dp),
         ) {
-            Spacer(Modifier.height(72.dp))
+            // The wordmark where it was without the bar, 72 dp under the status bar.
+            Spacer(Modifier.height(8.dp))
             PleyWordmark()
             Spacer(Modifier.height(40.dp))
             if (status is LinkStatus.SignedIn) {
@@ -202,7 +224,7 @@ private fun Status(status: LinkStatus) {
         }
         LinkStatus.Declined -> Text(stringResource(R.string.onboarding_link_declined), style = MaterialTheme.typography.bodyMedium, color = PleyColors.DangerText, modifier = live)
         LinkStatus.Expired -> Text(stringResource(R.string.onboarding_link_expired), style = MaterialTheme.typography.bodyMedium, color = PleyColors.Muted, modifier = live)
-        is LinkStatus.Failed -> Text(sentence(status.message), style = MaterialTheme.typography.bodyMedium, color = PleyColors.DangerText, modifier = live)
+        is LinkStatus.Failed -> Text(UiText.Sentence(status.text).asString(), style = MaterialTheme.typography.bodyMedium, color = PleyColors.DangerText, modifier = live)
         is LinkStatus.SignedIn -> Unit
     }
 }

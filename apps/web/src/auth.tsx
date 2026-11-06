@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, type ReactNode } from "react";
 import { Navigate, Outlet, useLocation } from "react-router";
+import { useTranslation } from "react-i18next";
 import { errorMessage, isApiError } from "@/api/client";
 import { useMe, useServer } from "@/api/hooks";
 import { useServerEvents } from "@/api/events";
@@ -19,6 +20,11 @@ export function AuthUserProvider({ user, children }: { user: User; children: Rea
   return <AuthContext.Provider value={user}>{children}</AuthContext.Provider>;
 }
 
+/** The signed-in user where there is one (`null` on the pages shown before signing in). */
+export function useOptionalAuth(): User | null {
+  return useContext(AuthContext);
+}
+
 export function useAuth(): User {
   const user = useContext(AuthContext);
   if (!user) throw new Error("useAuth must be used inside <RequireAuth>");
@@ -34,17 +40,18 @@ export function Splash() {
   );
 }
 
-export function ErrorScreen({ title = "Something went wrong", message, onRetry }: { title?: string; message: string; onRetry?: () => void }) {
+export function ErrorScreen({ title, message, onRetry }: { title?: string; message: string; onRetry?: () => void }) {
+  const { t } = useTranslation();
   return (
     <div className="flex min-h-screen items-center justify-center">
       <EmptyState
         icon={<TriangleAlert />}
-        title={title}
+        title={title ?? t("states.somethingWentWrong")}
         description={message}
         action={
           onRetry ? (
             <Button variant="primary" onClick={onRetry}>
-              Try again
+              {t("actions.tryAgain")}
             </Button>
           ) : undefined
         }
@@ -55,6 +62,7 @@ export function ErrorScreen({ title = "Something went wrong", message, onRetry }
 
 /** Route guard: needs a finished setup and a valid session. */
 export function RequireAuth() {
+  const { t } = useTranslation("pages");
   const location = useLocation();
   const server = useServer();
   const setupRequired = server.data?.setup_required ?? false;
@@ -72,7 +80,7 @@ export function RequireAuth() {
   if (server.isError) {
     return (
       <ErrorScreen
-        title="Can't reach the Pley server"
+        title={t("auth.cantReachServer")}
         message={errorMessage(server.error)}
         onRetry={() => void server.refetch()}
       />
@@ -103,14 +111,15 @@ export function RequireAuth() {
 }
 
 export function RequireAdmin({ children }: { children: ReactNode }) {
+  const { t } = useTranslation("pages");
   const user = useAuth();
   if (!user.is_admin) {
     return (
       <EmptyState
         className="min-h-[60vh]"
         icon={<TriangleAlert />}
-        title="Admins only"
-        description="You need an administrator account to manage this server."
+        title={t("auth.adminsOnly")}
+        description={t("auth.adminsOnlyHint")}
       />
     );
   }

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="remote_starting_on">Iniciando en %1$s…</string>
+    <string name="remote_playing_on">Reproduciendo en %1$s</string>
+    <string name="remote_title">Tus dispositivos</string>
+    <string name="remote_unknown_device">Dispositivo desconocido</string>
+    <string name="remote_live_tv">TV en vivo</string>
+
+    <string name="remote_ready">Listo para reproducir</string>
+    <string name="remote_open_device">Mostrar sus controles</string>
+    <string name="remote_back_to_devices">Volver a tus dispositivos</string>
+
+    <string name="remote_play">Reproducir en %1$s</string>
+    <string name="remote_pause">Pausar en %1$s</string>
+    <string name="remote_previous">Anterior en %1$s</string>
+    <string name="remote_next">Siguiente en %1$s</string>
+    <string name="remote_channel">Canal</string>
+    <string name="remote_previous_channel">Canal anterior en %1$s</string>
+    <string name="remote_next_channel">Canal siguiente en %1$s</string>
+    <string name="remote_back">Retroceder 30 segundos en %1$s</string>
+    <string name="remote_forward">Avanzar 30 segundos en %1$s</string>
+    <string name="remote_seek">Posición de reproducción en %1$s</string>
+    <string name="remote_progress">Progreso en %1$s</string>
+    <string name="remote_stop">Detener</string>
+    <string name="remote_stop_on">Detener en %1$s</string>
+    <string name="remote_stop_confirm">¿Detener la reproducción en %1$s?</string>
+    <string name="remote_position">%1$s de %2$s</string>
+    <string name="remote_skip_intro">Saltar intro</string>
+    <string name="remote_skip_credits">Saltar créditos</string>
+    <string name="remote_skip_intro_on">Saltar intro en %1$s</string>
+    <string name="remote_skip_credits_on">Saltar créditos en %1$s</string>
+
+    <string name="remote_audio">Audio</string>
+    <string name="remote_subtitles">Subtítulos</string>
+    <string name="remote_quality">Calidad</string>
+    <string name="remote_subtitles_off">Desactivados</string>
+    <string name="remote_audio_on">Audio en %1$s</string>
+    <string name="remote_subtitles_on">Subtítulos en %1$s</string>
+    <string name="remote_quality_on">Calidad en %1$s</string>
+
+    <string name="remote_live_next">A continuación: %1$s</string>
+
+    <string name="remote_no_answer">%1$s no respondió.</string>
+    <string name="remote_gone">%1$s ya no está reproduciendo nada.</string>
+    <string name="remote_cant">%1$s no puede hacer eso.</string>
+    <string name="remote_too_many">Demasiadas solicitudes a la vez: vuelve a intentarlo en un momento.</string>
+
+    <string name="play_on">Reproducir en…</string>
+    <string name="play_on_live">Ver en…</string>
+    <string name="play_on_shuffle">Aleatorio en…</string>
+    <string name="play_on_shuffle_switch">Aleatorio</string>
+    <string name="play_on_gone">%1$s ya no está conectado.</string>
+    <string name="play_on_cant">%1$s no puede reproducir eso.</string>
+    <string name="remote_paused_on">En pausa en %1$s</string>
+    <plurals name="remote_button_playing">
+        <item quantity="one">Control remoto, %1$d dispositivo reproduciendo</item>
+        <item quantity="many">Control remoto, %1$d de dispositivos reproduciendo</item>
+        <item quantity="other">Control remoto, %1$d dispositivos reproduciendo</item>
+    </plurals>
+    <plurals name="remote_button_ready">
+        <item quantity="one">Control remoto, %1$d dispositivo listo para reproducir</item>
+        <item quantity="many">Control remoto, %1$d de dispositivos listos para reproducir</item>
+        <item quantity="other">Control remoto, %1$d dispositivos listos para reproducir</item>
+    </plurals>
+    <string name="remote_on_profile">En el perfil de %1$s</string>
+    <string name="play_on_pin_title">Introduce tu PIN</string>
+    <string name="play_on_pin_body">%1$s pasa del perfil de %2$s al tuyo.</string>
+    <string name="play_on_back">Volver a los dispositivos</string>
+    <string name="play_on_wrong_pin">PIN incorrecto. Inténtalo de nuevo.</string>
+    <string name="play_on_pin_locked">Tu PIN está bloqueado tras demasiados intentos incorrectos. Tú o un administrador pueden restablecerlo.</string>
+</resources>

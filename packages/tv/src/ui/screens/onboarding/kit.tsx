@@ -1,9 +1,14 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import qrcode from "qrcode-generator";
+import { currentLanguage, LANGUAGES, systemLanguage, t, type Language } from "../../../i18n";
 import { useUi } from "../../context";
+import { PanelRow } from "../../kit/buttons";
+import type { Dir } from "../../focus";
 import { F, G } from "../../kit/focusable";
 import { Icon } from "../../kit/icons";
+import { PanelTitle, SidePanel } from "../../kit/panel";
+import { useApp } from "../common";
 
 /** The onboarding screens' background: Bg with BrandDeep glowing up from the bottom-right corner. */
 export function BrandGlow(p: { children: ComponentChildren }) {
@@ -28,14 +33,75 @@ export function LogoMark(p: { size: number }) {
   );
 }
 
-/** The logo (PleyLogo): the mark, then "pley" at three quarters of its height. */
+/** The logo (PleyLogo): the mark, then "Pley" at three quarters of its height, close by. */
 export function PleyLogo(p: { height: number }) {
   const h = p.height;
   return (
     <div class="pley-logo" style={`height:${h}px`} aria-label="Pley" role="img">
       <LogoMark size={h} />
-      <span style={`margin-left:${h * 0.4}px;font-size:${h * 0.75}px;line-height:${h}px;font-weight:700;letter-spacing:-0.25px;color:var(--fg)`}>Pley</span>
+      <span style={`margin-left:${h * 0.15}px;font-size:${h * 0.75}px;line-height:${h}px;font-weight:700;letter-spacing:-0.25px;color:var(--fg)`}>Pley</span>
     </div>
+  );
+}
+
+/**
+ * The globe of the screens before signing in (the web's LanguagePicker): a
+ * small plain globe and the language shown, by its two letters ("FR"), heard by
+ * its name; OK opens {@link LanguagePanel}. A row of its own, at the bottom
+ * right of Choose your server and the address screen, at the top right on the
+ * logo's line on the sign-in code, so the remote reaches it from the buttons.
+ */
+export function LanguageGlobe(p: { onOpen: () => void; class?: string }) {
+  const shown = currentLanguage();
+  const name = t(`settings.language.names.${shown}`);
+  return (
+    <G kind="row" class={p.class}>
+      <F class="text-btn link t-caption globe-btn" fid="language-globe" label={`${t("onboarding.language.choose")}, ${name}`} onSelect={p.onOpen}>
+        <Icon name="globe" size={16} />
+        <span lang={shown}>{shown.toUpperCase()}</span>
+      </F>
+    </G>
+  );
+}
+
+/**
+ * An edge handler for the groups beside the globe: Right stops there, so only Down or Up reach the
+ * globe, as on the native app, whose focus follows a column.
+ */
+export const stopRight = (dir: Dir): boolean => dir === "right";
+
+/**
+ * This TV's language, as Settings lists its choices: Automatic (the TV's own
+ * where Pley has it, else the server's, else English), then each language
+ * named in itself, the one picked checked. A choice shows at once and is
+ * kept on the TV; Automatic forgets it.
+ */
+export function LanguagePanel(p: { onClose: () => void }) {
+  const app = useApp();
+  const choice = app.deviceChoice.value;
+  const automatic = t("settings.language.automatic", {
+    language: t(`settings.language.names.${systemLanguage(app.serverLanguage.value, app.deviceLanguages())}`),
+  });
+  const choices: { value: Language | null; label: string }[] = [
+    { value: null, label: automatic },
+    ...LANGUAGES.map((l) => ({ value: l, label: t(`settings.language.names.${l}`) })),
+  ];
+  return (
+    <SidePanel onClose={p.onClose} label={t("onboarding.language.choose")}>
+      <PanelTitle>{t("onboarding.language.choose")}</PanelTitle>
+      {choices.map((c) => (
+        <PanelRow
+          key={c.value ?? "automatic"}
+          label={c.label}
+          checked={c.value === choice}
+          initial={c.value === choice}
+          onSelect={() => {
+            app.setDeviceLanguage(c.value);
+            p.onClose();
+          }}
+        />
+      ))}
+    </SidePanel>
   );
 }
 
@@ -181,7 +247,12 @@ export function ProfileAvatar(p: { name: string; color: string | null; picture: 
 /** A key of a number pad: a digit, or Delete / OK. */
 export type PadKey = { kind: "text"; text: string } | { kind: "delete" } | { kind: "ok" };
 
-const PAD_LABELS: Record<string, string> = { delete: "Delete", ok: "OK" };
+/** What the screen reader says for a key. */
+function padLabel(k: PadKey): string {
+  if (k.kind === "delete") return t("onboarding.pad.delete");
+  if (k.kind === "ok") return t("onboarding.pad.ok");
+  return t("onboarding.pad.digit", { digit: k.text });
+}
 
 /**
  * A number pad (TvKeypad): rows of 64 px keys 14 apart; a pressed key
@@ -224,7 +295,7 @@ export function NumberPad(p: {
               fid={p.fid ? `${p.fid}/${id}` : undefined}
               initial={enabled && id === (p.initialKey ?? "5")}
               disabled={!enabled}
-              label={k.kind === "text" ? `digit ${k.text}` : PAD_LABELS[k.kind]}
+              label={padLabel(k)}
               onSelect={() => press(k, id)}
             >
               <PadGlyph k={k} />

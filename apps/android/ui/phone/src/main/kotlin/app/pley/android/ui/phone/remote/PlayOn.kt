@@ -47,13 +47,15 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import app.pley.android.common.sentenceOf
+import app.pley.android.common.errorSentence
+import app.pley.android.common.resolve
 import app.pley.android.data.OtherDevice
 import app.pley.android.data.RemoteRepository
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcons
+import app.pley.android.designsystem.text.formatWords
 import app.pley.android.model.CastKind
 import app.pley.android.model.CastRequest
 import app.pley.android.model.ItemKind
@@ -291,14 +293,14 @@ internal fun PlayOnSheet(
                     CastRefusal.WrongPin -> ask(pad.copy(error = resources.getString(R.string.play_on_wrong_pin), shakes = pad.shakes + 1))
                     CastRefusal.PinLocked -> ask(pad.copy(error = resources.getString(R.string.play_on_pin_locked), lockedOut = true))
                     // The server's sentence says how long to wait.
-                    CastRefusal.Throttled -> ask(pad.copy(error = sentenceOf(e)))
+                    CastRefusal.Throttled -> ask(pad.copy(error = errorSentence(e).resolve(resources)))
                     else -> {
                         ask(null)
                         error = when (CastRefusal.of(e)) {
                             CastRefusal.Gone -> resources.getString(R.string.play_on_gone, name)
                             CastRefusal.NotCastable -> resources.getString(R.string.play_on_cant, name)
                             CastRefusal.TooMany -> resources.getString(R.string.remote_too_many)
-                            else -> sentenceOf(e)
+                            else -> errorSentence(e).resolve(resources)
                         }
                     }
                 }
@@ -485,7 +487,7 @@ private fun ChooserRow(device: OtherDevice, name: String, enabled: Boolean, onCl
             Text(name, style = MaterialTheme.typography.titleSmall, color = PleyColors.Fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(2.dp))
             Text(
-                session?.let { lineOf(it, stringResource(R.string.remote_live_tv)) } ?: readyLine(device),
+                session?.let { lineOf(it, stringResource(R.string.remote_live_tv), formatWords()) } ?: readyLine(device),
                 style = MaterialTheme.typography.bodySmall,
                 color = PleyColors.Muted,
                 maxLines = 1,

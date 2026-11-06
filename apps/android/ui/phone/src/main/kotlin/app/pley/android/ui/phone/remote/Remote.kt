@@ -75,7 +75,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.pley.android.common.sentenceOf
+import app.pley.android.common.errorSentence
+import app.pley.android.common.resolve
 import app.pley.android.data.OtherDevice
 import app.pley.android.data.RemoteRepository
 import app.pley.android.data.RemoteSession
@@ -88,6 +89,7 @@ import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.designsystem.image.Artwork
 import app.pley.android.designsystem.image.ArtworkCandidates
 import app.pley.android.designsystem.image.ArtworkImage
+import app.pley.android.designsystem.text.formatWords
 import app.pley.android.designsystem.tile.ChannelLogo
 import app.pley.android.model.Control
 import app.pley.android.model.DeviceKind
@@ -101,6 +103,7 @@ import app.pley.android.model.PlayingSession
 import app.pley.android.model.ProgressState
 import app.pley.android.model.StreamKind
 import app.pley.android.model.TrackOption
+import app.pley.android.model.format.FormatWords
 import app.pley.android.model.format.episodeLabel
 import app.pley.android.model.format.formatClockMs
 import app.pley.android.model.format.fullTitle
@@ -281,7 +284,7 @@ internal fun RemoteBar(device: OtherDevice, name: String, onOpen: () -> Unit, mo
         name,
     )
     // What played there before isn't what starts: nothing under the headline until it plays.
-    val detail = if (starting || session == null) "" else titleOf(session, stringResource(R.string.remote_live_tv))
+    val detail = if (starting || session == null) "" else titleOf(session, stringResource(R.string.remote_live_tv), formatWords())
     Row(
         modifier
             .fillMaxWidth()
@@ -390,7 +393,7 @@ private fun DeviceRow(device: OtherDevice, name: String, now: Long, onClick: () 
                 Text(readyLine(device), style = MaterialTheme.typography.bodySmall, color = PleyColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             } else {
                 Text(
-                    lineOf(session, stringResource(R.string.remote_live_tv)),
+                    lineOf(session, stringResource(R.string.remote_live_tv), formatWords()),
                     style = MaterialTheme.typography.bodySmall,
                     color = PleyColors.Muted,
                     maxLines = 1,
@@ -532,7 +535,7 @@ private fun Playing(
         CommandRefusal.Gone -> resources.getString(R.string.remote_gone, device)
         CommandRefusal.NotControllable -> resources.getString(R.string.remote_cant, device)
         CommandRefusal.TooMany -> resources.getString(R.string.remote_too_many)
-        CommandRefusal.Offline, CommandRefusal.Other -> sentenceOf(e)
+        CommandRefusal.Offline, CommandRefusal.Other -> errorSentence(e).resolve(resources)
     }
 
     fun send(request: PlayerCommandRequest) {
@@ -668,7 +671,7 @@ private class SkipOffer(val kind: MarkerKind, val device: String, val skip: () -
 @Composable
 private fun Header(session: RemoteSession, origin: String?, modifier: Modifier = Modifier, skip: SkipOffer? = null) {
     val playing = session.session
-    val (title, under) = linesOf(playing, stringResource(R.string.remote_live_tv))
+    val (title, under) = linesOf(playing, stringResource(R.string.remote_live_tv), formatWords())
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         val channel = playing.channel
         val item = playing.item
@@ -981,13 +984,14 @@ private fun Choices(session: RemoteSession, device: String, send: (PlayerCommand
     val audio = playing.tracks.audio.takeIf { session.can(Control.Audio) && it.size > 1 }.orEmpty()
     val subtitles = playing.tracks.subtitles.takeIf { session.can(Control.Subtitles) }.orEmpty()
     val qualities = playing.qualities.takeIf { session.can(Control.Quality) }.orEmpty()
+    val words = formatWords()
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
         if (audio.isNotEmpty()) {
             ChoiceMenu(
                 icon = PleyIcons.AudioLines,
                 hint = stringResource(R.string.remote_audio),
                 description = stringResource(R.string.remote_audio_on, device),
-                choices = audio.map { it.index to labelOf(it, StreamKind.Audio) },
+                choices = audio.map { it.index to labelOf(it, StreamKind.Audio, words) },
                 current = playing.audioIndex,
                 tag = REMOTE_AUDIO,
                 onPick = { send(PlayerCommandRequest(Control.Audio, streamIndex = it)) },
@@ -999,7 +1003,7 @@ private fun Choices(session: RemoteSession, device: String, send: (PlayerCommand
                 hint = stringResource(R.string.remote_subtitles),
                 description = stringResource(R.string.remote_subtitles_on, device),
                 choices = listOf(PlayingSession.SUBTITLES_OFF to stringResource(R.string.remote_subtitles_off)) +
-                    subtitles.map { it.index to labelOf(it, StreamKind.Subtitle) },
+                    subtitles.map { it.index to labelOf(it, StreamKind.Subtitle, words) },
                 current = playing.subtitleIndex,
                 tag = REMOTE_SUBTITLES,
                 onPick = { send(PlayerCommandRequest(Control.Subtitles, streamIndex = it)) },
@@ -1078,8 +1082,8 @@ private fun <T> ChoiceMenu(
     }
 }
 
-/** A track as the player's own menu labels it ([streamLabel]): "English (EAC3 5.1)", "French (SRT, Forced)". */
-private fun labelOf(track: TrackOption, kind: StreamKind): String = streamLabel(
+/** A track as the player's own menu labels it ([streamLabel]) in [words]: "English (EAC3 5.1)", "French (SRT, Forced)". */
+private fun labelOf(track: TrackOption, kind: StreamKind, words: FormatWords): String = streamLabel(
     MediaStream(
         index = track.index,
         kind = kind,
@@ -1090,26 +1094,27 @@ private fun labelOf(track: TrackOption, kind: StreamKind): String = streamLabel(
         forced = track.forced,
         channels = track.channels,
     ),
+    words,
 )
 
 /** What plays, in one line, as the bar says it: the title as the web writes it ("Show — S1 · E2 — Title"), or the channel ([liveTv] without one). */
-private fun titleOf(session: RemoteSession, liveTv: String): String = when (session.session.kind) {
+private fun titleOf(session: RemoteSession, liveTv: String, words: FormatWords): String = when (session.session.kind) {
     PlayingKind.Live -> session.session.channel?.name?.takeIf { it.isNotEmpty() } ?: liveTv
-    else -> session.session.item?.let(::fullTitle).orEmpty()
+    else -> session.session.item?.let { fullTitle(it, words) }.orEmpty()
 }
 
 /** What plays, as the list says it: the title as the web writes it, or the channel's number and name. */
-internal fun lineOf(session: RemoteSession, liveTv: String): String {
+internal fun lineOf(session: RemoteSession, liveTv: String, words: FormatWords): String {
     val channel = session.session.channel
     return when {
-        session.session.kind != PlayingKind.Live -> session.session.item?.let(::fullTitle).orEmpty()
+        session.session.kind != PlayingKind.Live -> session.session.item?.let { fullTitle(it, words) }.orEmpty()
         channel != null -> listOfNotNull(channel.number, channel.name.takeIf { it.isNotEmpty() }).joinToString(" ").ifEmpty { liveTv }
         else -> liveTv
     }
 }
 
 /** What plays, in two lines ([Header]); the second `null` when there is nothing to say. */
-private fun linesOf(playing: PlayingSession, liveTv: String): Pair<String, String?> {
+private fun linesOf(playing: PlayingSession, liveTv: String, words: FormatWords): Pair<String, String?> {
     val channel = playing.channel
     val item = playing.item
     return when {
@@ -1120,7 +1125,7 @@ private fun linesOf(playing: PlayingSession, liveTv: String): Pair<String, Strin
         }
         item == null -> "" to null
         item.kind == ItemKind.Episode ->
-            listOf(item.grandparentTitle.orEmpty(), episodeLabel(item)).filter { it.isNotEmpty() }.joinToString(" · ") to item.title
+            listOf(item.grandparentTitle.orEmpty(), episodeLabel(item, words)).filter { it.isNotEmpty() }.joinToString(" · ") to item.title
         item.kind == ItemKind.Track -> item.title to (item.grandparentTitle ?: item.parentTitle)?.takeIf { it.isNotEmpty() }
         else -> item.title to item.year?.toString()
     }

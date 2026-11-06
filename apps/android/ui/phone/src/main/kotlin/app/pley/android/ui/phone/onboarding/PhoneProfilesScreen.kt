@@ -53,6 +53,7 @@ import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.designsystem.reducedMotion
+import app.pley.android.designsystem.text.asString
 import app.pley.android.screens.onboarding.ProfileGate
 import app.pley.android.screens.onboarding.ProfileTile
 import app.pley.android.screens.onboarding.ProfilesStep
@@ -165,7 +166,7 @@ private fun ProfileGrid(state: ProfilesUiState, onPick: (Long) -> Unit, onRetry:
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
             EmptyState(
                 title = stringResource(R.string.onboarding_profiles_failed),
-                body = state.error.orEmpty(),
+                body = state.error?.asString().orEmpty(),
                 action = { TonalButton(stringResource(R.string.onboarding_retry), onClick = onRetry, icon = PleyIcons.RefreshCw) },
             )
             if (!state.canSwitch) {
@@ -188,7 +189,7 @@ private fun ProfileGrid(state: ProfilesUiState, onPick: (Long) -> Unit, onRetry:
         if (error != null) {
             item(key = "error", span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }, contentType = "error") {
                 Text(
-                    error,
+                    error.asString(),
                     style = MaterialTheme.typography.bodyMedium,
                     color = PleyColors.DangerText,
                     textAlign = TextAlign.Center,
@@ -274,7 +275,7 @@ internal fun PhonePinPad(
         onCancel = onCancel,
         lockedOutLabel = stringResource(R.string.onboarding_use_another),
         modifier = Modifier.fillMaxSize(),
-        error = step.error,
+        error = step.error?.asString(),
         shakes = step.shakes,
         lockedOut = step.lockedOut,
         busy = step.busy,

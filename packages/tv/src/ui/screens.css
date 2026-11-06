@@ -85,6 +85,15 @@
 .status-line { display: flex; align-items: center; min-height: 20px; }
 .status-line .breathing-dot { margin-right: 12px; }
 
+/* The globe before signing in: small, "FR" at the screen's right edge (48 less its own 10). At the
+   bottom right of Choose your server and the address screen, centred on the forget hint's line (17
+   tall, 27 from the bottom); on the sign-in code at the top right, centred on the logo's line (40
+   tall from 56). */
+.globe-btn { height: 32px; min-width: 0; padding: 0 10px; }
+.globe-btn .icon { margin-right: 6px; }
+.globe-corner { position: absolute; right: 38px; bottom: 20px; }
+.link-globe { position: absolute; right: 38px; top: 60px; }
+
 /* Servers */
 .servers { position: absolute; left: 96px; top: 27px; right: 48px; bottom: 27px; }
 .servers-header { display: flex; align-items: center; height: 38px; }
