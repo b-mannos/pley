@@ -17,6 +17,7 @@ mod editing;
 mod items;
 mod lists;
 mod playback;
+mod profile;
 mod socket;
 mod system;
 mod users;
