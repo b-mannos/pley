@@ -111,13 +111,19 @@ word, if the server refuses. A Pley from before languages keeps no
 account's language (its `GET /api/server` names none, and the route
 answers 404 or 405): there the row is this device's, as the globe picks it, and
 a choice shows and stays on this device. A language picked in the
-system's settings is too.
+system's settings is too. On phones the hint under the row says so:
+what Pley is in on this device, and that keeping it for the account
+needs a newer Pley on the server. A server that answers a choice 404 or
+405 is taken for one such, though it names a language, until another
+server is in use or the app starts again, so the row stays this
+device's when Settings opens again.
 
 The app remembers the language it showed last and starts in it, before
 the server has answered; signed in, it waits for the account's language
 before it turns to the device's, and on a device in a language Pley
 doesn't have, for the server's, so no other language shows for a
-moment. Android 13 and later keep it as the app's own language, which
+moment. A Pley from before languages has no account's language to wait
+for, and one an account saved means nothing there. Android 13 and later keep it as the app's own language, which
 the system's settings list (Apps → Pley → Language); the app sets it
 again as it hears the account's and the server's. A language picked
 there is chosen as the app's own picker would choose it, and its System

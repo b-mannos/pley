@@ -14,6 +14,8 @@ import { Input } from "../../src/ui/input";
 import { AppContext } from "../../src/ui/screens/common";
 import { SettingsScreen } from "../../src/ui/screens/settings";
 import type { Entry } from "../../src/ui/shell/navigator";
+// Shared with the native Samsung app's tests, which must answer the same.
+import fixture from "../fixtures/language.json";
 
 /**
  * The language the app is in: the one shown last until the server says,
@@ -164,7 +166,7 @@ describe("the language the app is in", () => {
   });
 
   it("is the profile's choice at once, and the TV's again without one", async () => {
-    const { app, asked } = setup({ device: ["en-US"], server: () => Promise.resolve(answer({ version: "1.0.0", language: null })), signedIn: true, account: null });
+    const { app, asked } = setup({ device: ["en-US"], server: () => Promise.resolve(answer({ version: "1.0.0", language: "en" })), signedIn: true, account: null });
     await app.loadAccount();
     await app.setAccountLanguage("fr");
     expect(asked).toContain("PUT language fr");
@@ -181,7 +183,7 @@ describe("the language the app is in", () => {
   });
 
   it("signed in, is the account's own before the one picked on the TV", async () => {
-    const { app } = setup({ device: ["en-US"], choice: "es", server: () => Promise.resolve(answer({ version: "1.0.0", language: null })), signedIn: true, account: "fr" });
+    const { app } = setup({ device: ["en-US"], choice: "es", server: () => Promise.resolve(answer({ version: "1.0.0", language: "en" })), signedIn: true, account: "fr" });
     await app.loadAccount();
     await settle();
     expect(currentLanguage()).toBe("fr");
@@ -203,6 +205,16 @@ describe("the language the app is in", () => {
     expect(store.get("pley.deviceLanguage")).toBeNull();
   });
 
+  it("is the account's on a server that names a language, even one Pley here doesn't have, as the shared fixture has it", async () => {
+    for (const c of fixture.keepsLanguage) {
+      const { app } = setup({ device: ["en-US"], server: () => Promise.resolve(answer(c.server)), signedIn: true });
+      await settle();
+      // The server has said.
+      expect([c, app.serverLanguage.value === undefined]).toEqual([c, false]);
+      expect([c, !app.languageOnDevice.value]).toEqual([c, c.out]);
+    }
+  });
+
   it("on a server that answers the choice 404, is this TV's from then on", async () => {
     const { app, asked } = setup({ device: ["en-US"], server: () => Promise.resolve(answer({ version: "1.0.0", language: "en" })), signedIn: true, account: null, languageRoute: false });
     await app.loadAccount();
@@ -216,6 +228,29 @@ describe("the language the app is in", () => {
     await app.chooseLanguage("fr");
     expect(asked.filter((a) => a.startsWith("PUT"))).toEqual(["PUT language es"]);
     expect(currentLanguage()).toBe("fr");
+  });
+
+  it("keeps a choice made on this TV over a late 404 for the one before it", async () => {
+    const server = later<HttpResponse>();
+    const put = later<User>();
+    const { app, store } = setup({ device: ["en-US"], server: () => server.promise, signedIn: true, account: null });
+    (app.api.value as unknown as { setLanguage: () => Promise<User> }).setLanguage = () => put.promise;
+    await app.loadAccount();
+    // Settings before the server has said: Français goes to it.
+    expect(app.languageOnDevice.value).toBe(false);
+    const first = app.chooseLanguage("fr");
+    // It names no language, a Pley from before languages: the row is this TV's, and Español shows at once.
+    server.resolve(answer({ name: "Den", version: "0.1.0" }));
+    await settle();
+    expect(app.languageOnDevice.value).toBe(true);
+    await app.chooseLanguage("es");
+    expect(currentLanguage()).toBe("es");
+    // Français's 404 comes after it: Español stays.
+    put.reject(new ApiError(404, "not_found", "not found"));
+    await first;
+    expect(currentLanguage()).toBe("es");
+    expect(app.deviceChoice.value).toBe("es");
+    expect(store.get("pley.deviceLanguage")).toBe("es");
   });
 
   it("on a current server, is still the account's, whatever the server answers", async () => {
@@ -256,8 +291,11 @@ describe("Settings' Language row", () => {
     root = null;
   });
 
-  /** Settings on its Profile; `serverLanguage` left out is a Pley from before languages, which names none, and its accounts have none. */
-  async function show(serverLanguage: string | null | undefined, account: string | null | undefined, device = ["en-US"], choice?: Language, languageRoute?: boolean) {
+  /**
+   * Settings on its Profile. A current server names a language (`serverLanguage`); left out, it is a Pley from
+   * before languages, which names none, and its accounts have none.
+   */
+  async function show(serverLanguage: string | undefined, account: string | null | undefined, device = ["en-US"], choice?: Language, languageRoute?: boolean) {
     const said = serverLanguage === undefined ? { version: "0.1.0" } : { version: "1.0.0", language: serverLanguage };
     const { app, asked } = setup({ device, choice, server: () => Promise.resolve(answer(said)), signedIn: true, account, languageRoute });
     await app.loadAccount();
@@ -379,7 +417,7 @@ describe("Settings' Language row", () => {
   });
 
   it("draws the rest of Settings again in the new language", async () => {
-    await show(null, null);
+    await show("en", null);
     const categories = () => Array.from(root!.querySelectorAll(".settings-categories .row-label")).map((el) => el.textContent);
     const audio = () => root!.querySelector('[data-fid="row-audio"]')!;
     expect(categories()).toEqual(["Profile", "Playback", "Audio", "Subtitles and display", "Server", "Diagnostics", "About", "Sign out"]);

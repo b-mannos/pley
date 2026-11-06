@@ -233,7 +233,8 @@ export class AppState {
   readonly deviceChoice = signal<Language | null>(null);
   /**
    * The server keeps no account's language: a Pley from before languages,
-   * whose `GET /api/server` names none, or one that answered a choice 404.
+   * whose `GET /api/server` names none (one that names any, even one this
+   * app doesn't have, keeps it), or one that answered a choice 404 or 405.
    * Settings' Language row is then this TV's, as the globe picks it
    * ({@link chooseLanguage}).
    */
@@ -291,6 +292,8 @@ export class AppState {
   private accountHeard = false;
   /** The server in use answered a choice of language 404 (or 405): it has no route for it. */
   private readonly languageMissing = signal(false);
+  /** Choices made on Settings' Language row: a 404 for one before the last keeps the last ({@link chooseLanguage}). */
+  private languageChoices = 0;
 
   constructor(platform: Platform, http: Transport = xhrTransport) {
     this.platform = platform;
@@ -624,8 +627,11 @@ export class AppState {
    * server keeps none ({@link languageOnDevice}) this TV's, as the globe
    * picks it ({@link setDeviceLanguage}). A server that answers it 404 (or
    * 405) has no route for it: the choice is this TV's, and so are the next.
+   * One made since the choice went (on this TV, once the server turned out
+   * to name no language) stays.
    */
   async chooseLanguage(next: Language | null): Promise<void> {
+    const choice = ++this.languageChoices;
     if (this.languageOnDevice.peek()) {
       this.setDeviceLanguage(next);
       return;
@@ -638,7 +644,7 @@ export class AppState {
       // Another server since: the answer was the one before's.
       if (this.api.value !== api) return;
       this.languageMissing.value = true;
-      this.setDeviceLanguage(next);
+      if (choice === this.languageChoices) this.setDeviceLanguage(next);
     }
   }
 
