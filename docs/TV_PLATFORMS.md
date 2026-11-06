@@ -376,9 +376,11 @@ pins that order for both Samsung apps.
   this TV: the one picked with the globe, else its language, or the
   server's on a TV in a language Pley doesn't have; then English, Français
   and Español, each named in itself. A choice is the profile's on all its
-  devices
-  (`PUT /api/me/language`); a server without that route says it needs a
-  newer Pley.
+  devices (`PUT /api/me/language`). A Pley from before languages keeps no
+  account's language (its `GET /api/server` names none, and the route
+  answers 404): there the row is this TV's, as the globe picks it, with
+  Automatic the TV's own language; a choice shows at once and is kept on
+  the TV (`pley.deviceLanguage`).
 - **Requests** to the server carry `Accept-Language` with the language
   shown.
 - **Dates and numbers** are written with `Intl` in the language shown,
@@ -737,7 +739,12 @@ Settings → Profile → Language lists "Automatic (Français)" (the one picked
 with the globe, else the TV's language, else the server's), then English,
 Français and Español, each in itself. Choosing
 one sends `PUT /api/me/language`, and the app shows it once the server has
-it. Requests carry `Accept-Language` with the language shown, so what the
+it. A Pley from before languages keeps no account's language (its
+`GET /api/server` names none, and the route answers 404): there the row is
+this TV's, as the globe picks it, with Automatic the TV's own language, and
+a choice shows at once and is kept in the TV's preferences
+(`pley.deviceLanguage`), as the Android app has it. Requests carry
+`Accept-Language` with the language shown, so what the
 server writes itself (Home's rows) comes in it. Dates and numbers follow
 the language, in the TV's region format when the TV is in that language
 (en-GB keeps its 24-hour clock).
