@@ -645,7 +645,9 @@ impl Screen for HistoryScreen {
         let root = ui.scope_id();
         self.header(ui);
         match (&self.rows, &self.error) {
-            (None, Some(e)) => {
+            // The saved plays may still be on their way: a server that refuses at once doesn't
+            // show its error, and take focus, before they come.
+            (None, Some(e)) if self.saved.is_none() => {
                 let title = if e.unreachable() { t!("history.unreachable") } else { t!("history.failed") };
                 let body = e.problem();
                 if message(ui, root.with("message"), title, &body, t!("history.retry")) {
@@ -653,7 +655,7 @@ impl Screen for HistoryScreen {
                     self.load(cx, 0, PAGE);
                 }
             }
-            (None, None) => {
+            (None, _) => {
                 for i in 0..5 {
                     skeleton_block(ui, Rect::new(theme::GUTTER, TOP + i as f32 * 64.0, 560.0, 52.0), radius::FIELD);
                 }

@@ -8,6 +8,13 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Fixed
+
+- Watch history, opened while the server is out of reach, shows the plays
+  saved from last time with focus on the newest, without "Can't reach your
+  server" showing for a moment first and leaving focus on a play further
+  down.
+
 ## [0.1.7] - 2026-11-06
 
 ### Added
