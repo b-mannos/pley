@@ -8,6 +8,8 @@ describes how they are made.
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-11-06
+
 ### Added
 
 - Pley in French and Spanish: the app shows your profile's language, else
@@ -487,6 +489,7 @@ describes how they are made.
 
 - The version of the builds made by hand before the app had releases.
 
-[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-05...HEAD
+[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-06...HEAD
+[0.1.7]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-06
 [0.1.6]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-05
 [0.0.1]: https://github.com/pley-media-server/pley/tree/5f6405a7af22a8102cb0ebfa414c66492e161102
