@@ -8,6 +8,8 @@ describes how they are made.
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-11-06
+
 ### Added
 
 - The app's own pages, choosing a server and the downloads it keeps, are in
@@ -81,7 +83,8 @@ describes how they are made.
 - First release with a version of its own (builds before it carried 0.2.0,
   the version every app shared).
 
-[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-05...HEAD
+[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-06...HEAD
+[0.1.4]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-06
 [0.1.3]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-05
 [0.1.2]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-02.2
 [0.1.1]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-01
