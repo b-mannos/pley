@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.pley" name="Pley" version="0.1.6" provider-name="the Pley authors">
+<addon id="plugin.video.pley" name="Pley" version="0.1.7" provider-name="the Pley authors">
   <requires>
     <import addon="xbmc.python" version="3.0.1"/>
   </requires>
@@ -30,18 +30,15 @@
       <fanart>resources/fanart.jpg</fanart>
     </assets>
     <!-- The version's CHANGELOG entries (scripts/release.mjs writes them). -->
-    <news>0.1.6 (2026-11-05)
+    <news>0.1.7 (2026-11-06)
 Added:
 
-- Your phone, the web and your other devices control what Kodi plays: play, pause, seek and skip, the next title in Kodi's queue or the next episode, the next or previous track, and channel up and down on Live TV. Remotes list Kodi with your TVs, by the device name it was given in Kodi's settings. Needs a server from the same release.
-- Your phone, the web and your other devices change the audio and subtitles of what Kodi plays, and see which ones play. A pick is saved for the show or movie, as one made in Kodi's player is.
-- Your phone, the web and your other devices play things on Kodi: a film, an episode, a show's next episode, music, a playlist or a Live TV channel, in place of what plays. Kodi says which device sent it.
-- Your phone, the web and your other devices change the quality of a film or episode playing on Kodi: the Quality setting changes, as picking it there does, and the title plays again where it was. They see which quality is picked. A film or episode they send plays with the audio and subtitles picked on its page.
-- Live TV stopped from another device, or by the server's administrator, says so, with their message.
-- Stopping a Live TV channel, or Kodi, frees its connection at once, so another channel or device can use it straight away.
+- The add-on is in French and Spanish too: in your profile's language, else the one chosen in the add-on's settings (Screens → Language), else Kodi's, else the server's. Profile language, in the profile's menu and the add-on's settings, sets it for your profile on all your devices; on a server from before languages it is kept on this device. Dates, numbers and counts are written in the language shown, and what the server writes itself, such as Home's rows, comes in it.
+- Sent from a device on another profile of your household, Kodi switches to that profile first, and plays it as that profile. Needs a server from the same release.
 
 Changed:
 
-- Requests: a sign-in from before the app could ask says "Sign in again to ask for movies and shows" without a second line, and its button reads Sign in.</news>
+- Pley's window opens straight on Home as the profile Kodi was left on when it has no PIN, where a household of several profiles was asked "Who's watching?" each time Kodi started. A profile with a PIN still asks first, and Switch profile still shows every profile.
+- What your phone, the web or another device does to a film or episode playing on Kodi shows for a moment as a quiet Kodi notification: "Paused", "Playing", "+30 s", "Jumped to 12:34", or the audio, subtitles or quality picked.</news>
   </extension>
 </addon>
