@@ -15,6 +15,7 @@ pub mod ids;
 mod dto;
 mod editing;
 mod items;
+mod lists;
 mod playback;
 mod socket;
 mod system;
@@ -468,6 +469,7 @@ fn router(state: AppState, jellyfin: Arc<Jellyfin>) -> Router {
         .merge(users::routes())
         .merge(editing::routes())
         .merge(items::routes())
+        .merge(lists::routes())
         .merge(playback::routes())
         .merge(socket::routes())
         .fallback(|| async { JfError::NotFound })
