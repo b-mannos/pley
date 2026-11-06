@@ -119,6 +119,31 @@ fn marking_watched_shows_at_once_and_tells_the_server() {
 }
 
 #[test]
+fn a_mark_the_server_took_stays_over_an_answer_asked_before_it() {
+    let mut app = TestApp::start_with_threads(16);
+    open_movie(&mut app);
+    // The page asks again (another device changed something), and those answers take 800 ms.
+    app.server.set_mode(pley_fixtures::Mode::Slow).unwrap();
+    app.state.refresh();
+    let start = std::time::Instant::now();
+    app.until(|_| start.elapsed() > std::time::Duration::from_millis(200));
+    // The mark goes at once, and the server takes it before that answer comes.
+    app.server.set_mode(pley_fixtures::Mode::Normal).unwrap();
+    app.press(Key::Right);
+    app.press(Key::Right);
+    app.press(Key::Ok);
+    let path = format!("/api/items/{MOVIE}/watched");
+    assert!(app.until(|a| !a.writes("POST", &path).is_empty()), "the server wasn't told");
+    // The answer asked before the mark comes, then the one asked after it: the mark stays.
+    let start = std::time::Instant::now();
+    app.until(|a| {
+        assert!(a.shows("Mark as unwatched"), "an answer from before the mark took it back");
+        start.elapsed() > std::time::Duration::from_millis(1_500)
+    });
+    assert!(app.until(|a| a.shows("Play") && !a.shows("Resume")));
+}
+
+#[test]
 fn a_show_goes_down_to_its_next_episode_and_up_to_the_seasons() {
     let mut app = TestApp::start();
     open_show(&mut app);

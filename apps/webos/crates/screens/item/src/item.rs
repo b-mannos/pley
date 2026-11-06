@@ -218,6 +218,15 @@ struct Pending {
     marks: Option<(i64, bool)>,
 }
 
+/// A mark the server took, kept over what comes until an answer asked since then: one asked
+/// before it may still be on its way, as a page asked again just before the mark was set.
+struct Taken {
+    id: i64,
+    watched: bool,
+    /// When the server's answer came ([`AppCx::now`]).
+    at: f64,
+}
+
 /// What a refused change puts back: only what it changed, so a fresher answer that came meanwhile
 /// keeps the rest.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -319,6 +328,7 @@ pub struct ItemScreen {
     dirty: bool,
     view: View,
     changes: Vec<Pending>,
+    taken: Vec<Taken>,
     told: bool,
     prefetched: Option<(i64, f64)>,
     redirected: bool,
@@ -342,6 +352,7 @@ impl ItemScreen {
             dirty: true,
             view: View::default(),
             changes: Vec::new(),
+            taken: Vec::new(),
             told: false,
             prefetched: None,
             redirected: false,
@@ -429,15 +440,20 @@ impl ItemScreen {
             changed = true;
         }
         if changed {
+            let (detail, episodes) = (&self.detail, self.data.as_ref().and_then(|d| d.episodes.as_ref()));
+            self.taken
+                .retain(|t| !(detail.answered_since(t.at) && episodes.is_none_or(|(_, r)| r.answered_since(t.at))));
             self.keep_marks();
         }
         self.dirty |= changed;
     }
 
-    /// Marks still on their way to the server stay on what just came: an answer asked before
-    /// them would otherwise take them back until the page asks again.
+    /// Marks still on their way to the server, or taken by it since the answers shown were asked,
+    /// stay on what just came: an answer asked before them would otherwise take them back until
+    /// the page asks again.
     fn keep_marks(&mut self) {
-        let marks: Vec<(i64, bool)> = self.changes.iter().filter_map(|c| c.marks).collect();
+        let taken = self.taken.iter().map(|t| (t.id, t.watched));
+        let marks: Vec<(i64, bool)> = taken.chain(self.changes.iter().filter_map(|c| c.marks)).collect();
         for (id, watched) in marks {
             if let Some(d) = self.shown_mut().filter(|d| d.id == id) {
                 Marks::marked(&d.summary, watched).put(&mut d.summary);
@@ -735,6 +751,10 @@ impl ItemScreen {
             let done = self.changes.remove(i);
             match answer {
                 Ok(()) if done.reload => {
+                    if let Some((id, watched)) = done.marks {
+                        self.taken.retain(|t| t.id != id);
+                        self.taken.push(Taken { id, watched, at: cx.now });
+                    }
                     self.reload();
                     cx.state.load_home();
                 }
