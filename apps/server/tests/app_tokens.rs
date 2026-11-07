@@ -600,6 +600,17 @@ async fn pleys_own_app_allowed_server_manages_it_on_an_administrators_account() 
     assert_eq!(renamed.status, StatusCode::OK, "{:?}", renamed.body);
     let invite = app.app_call(Method::POST, "/api/invites", &token, Some(json!({}))).await;
     assert_eq!(invite.status, StatusCode::CREATED, "{:?}", invite.body);
+    // Everyone's pictures, as the list of accounts shows them, outside the household too.
+    let avatars = app.state.config.data_dir.join("avatars");
+    std::fs::create_dir_all(&avatars).unwrap();
+    std::fs::write(avatars.join("bob.jpg"), [0xff, 0xd8, 0xff, 0xd9]).unwrap();
+    sqlx::query("UPDATE users SET avatar = 'bob.jpg', home = 0 WHERE id = ?")
+        .bind(bob_id)
+        .execute(&app.state.db.write)
+        .await
+        .unwrap();
+    let picture = format!("/api/users/{bob_id}/avatar");
+    assert_eq!(app.app_call(Method::GET, &picture, &token, None).await.status, StatusCode::OK);
     // With the folders it changes, and the dashboard's view of playback.
     let paths = &app.get("/api/libraries", &token).await.body[0]["paths"];
     assert_eq!(paths, &json!([app.media_path("movies")]));
@@ -652,6 +663,9 @@ async fn pleys_own_app_allowed_server_manages_it_on_an_administrators_account() 
         assert_eq!(app.get("/api/libraries", refused).await.body[0]["paths"], json!([]));
     }
     assert_eq!(app.get("/api/history?all=1", &bobs).await.body["total"], json!(1), "her own");
+    let (plain, _) = app.app_token(1, "library play").await;
+    let reply = app.app_call(Method::GET, &picture, &plain, None).await;
+    assert_eq!(reply.status, StatusCode::NOT_FOUND, "not outside the household without managing the server");
     drop(dora);
 }
 

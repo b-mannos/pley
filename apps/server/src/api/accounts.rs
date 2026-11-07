@@ -664,8 +664,9 @@ pub async fn delete_avatar(State(state): State<AppState>, user: AuthUser) -> Api
 
 pub async fn avatar(State(state): State<AppState>, user: AuthUser, Path(id): Path<i64>) -> ApiResult<Response> {
     // Apps see their own profile's picture, those of its household, and
-    // those of the people named in the requests they may read.
-    if user.app.is_some() && id != user.id {
+    // those of the people named in the requests they may read; one that
+    // manages the server, everyone's, as its list of accounts shows them.
+    if user.app.is_some() && !user.administers() && id != user.id {
         let household: bool = sqlx::query_scalar(
             "SELECT EXISTS (SELECT 1 FROM users me, users them
                             WHERE me.id = ? AND them.id = ? AND me.home AND them.home AND NOT them.disabled)",

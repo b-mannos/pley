@@ -1306,7 +1306,8 @@ What apps see:
 - `/api/users/{id}/avatar` shows only the app's own profile, its
   household, and, to an app allowed `requests` while requests are on, the
   people named in the requests it may read: who decided its own, and for a
-  manager who made or decided any.
+  manager who made or decided any. To one that manages the server
+  (`server`), everyone's.
 - When the transcoder can't read a file, its words (which name the file)
   are replaced by Pley's own: "this title's file can't be read right now",
   and "the conversion failed" for a session's `last_error`.
