@@ -114,7 +114,7 @@ internal fun UserAccountPage(id: Long) {
         }
     }
 
-    val self = model.self
+    val self by model.self.collectAsStateWithLifecycle()
     val twoStepRequired = server.valueOrNull?.twoStepRequired == true
     AdminPage(
         title = load.valueOrNull?.user?.name ?: stringResource(R.string.admin_section_users),
@@ -125,7 +125,7 @@ internal fun UserAccountPage(id: Long) {
         val user = page.user
         val idle = busy == 0
         item(key = "header") { Header(user, model.avatar(user)) }
-        item(key = "profile") { ProfileGroup(user, self, onRename = { dialog = UserDialog.Rename }, onPassword = { dialog = UserDialog.Password }) }
+        item(key = "profile") { ProfileGroup(user, self, idle, onRename = { dialog = UserDialog.Rename }, onPassword = { dialog = UserDialog.Password }) }
         item(key = "roles") { RolesGroup(page, self, idle, model) }
         val requests = requestsShown(user)
         if (requests != null) {
@@ -185,11 +185,13 @@ internal fun UserAccountPage(id: Long) {
                 }
             }
         }
-        item(key = "devices") {
-            val signedIn = devices.valueOrNull.orEmpty().isNotEmpty() || apps.valueOrNull.orEmpty().isNotEmpty()
-            DevicesGroup(devices, showSignOut = !self && signedIn, onSignOut = { dialog = UserDialog.SignOutEverywhere })
+        if (!self) {
+            item(key = "devices") {
+                val signedIn = devices.valueOrNull.orEmpty().isNotEmpty() || apps.valueOrNull.orEmpty().isNotEmpty()
+                DevicesGroup(devices, showSignOut = signedIn, onSignOut = { dialog = UserDialog.SignOutEverywhere })
+            }
+            item(key = "apps") { AppsGroup(apps, user, onSignOut = { dialog = UserDialog.SignOutApp(it) }) }
         }
-        item(key = "apps") { AppsGroup(apps, user, onSignOut = { dialog = UserDialog.SignOutApp(it) }) }
         if (!self) {
             item(key = "delete") {
                 SettingsGroup(null, Modifier.adminWidth) {
@@ -252,7 +254,7 @@ internal fun UserAccountPage(id: Long) {
         UserDialog.Requests -> ChoiceSheet(
             title = stringResource(R.string.admin_users_requests),
             choices = REQUEST_CHOICES.map { Choice(it, requestLabel(it)) },
-            selected = user.requestAccess ?: RequestAccess.Ask,
+            selected = user.requestAccess?.takeIf { it != RequestAccess.Unknown } ?: RequestAccess.Ask,
             onPick = { if (it != user.requestAccess) model.setRequests(it) },
             onDismiss = close,
         )
@@ -330,12 +332,13 @@ private fun Header(user: UserAccount, picture: String?) {
 
 /** The display name, and a new password (not one's own: Account changes it). */
 @Composable
-private fun ProfileGroup(user: UserAccount, self: Boolean, onRename: () -> Unit, onPassword: () -> Unit) {
+private fun ProfileGroup(user: UserAccount, self: Boolean, idle: Boolean, onRename: () -> Unit, onPassword: () -> Unit) {
     SettingsGroup(null, Modifier.adminWidth, footer = if (self) stringResource(R.string.admin_users_own_password) else null) {
         SettingsRow(
             stringResource(R.string.admin_users_display_name),
             value = user.displayName?.takeIf { it.isNotBlank() },
             icon = PleyIcons.Pencil,
+            enabled = !self && idle,
             onClick = onRename,
         )
         if (!self) {
@@ -348,6 +351,7 @@ private fun ProfileGroup(user: UserAccount, self: Boolean, onRename: () -> Unit,
                     else -> null
                 },
                 icon = PleyIcons.Lock,
+                enabled = idle,
                 onClick = onPassword,
                 modifier = Modifier.testTag(USER_PASSWORD),
             )

@@ -99,12 +99,17 @@ class UsersViewModelTest {
         val server = server(user(1, "Ann", admin = true), user(2, "Bea"), user(3, "Cid", admin = true, disabled = true))
         val ann = UserViewModel(server, session, 1)
         val page = ann.page.state.value.valueOrNull!!
-        assertTrue(ann.self)
+        assertTrue(ann.self.value)
+        // One's own devices and apps stay in the web app: they aren't asked for.
+        assertEquals(emptyList<Any>(), ann.devices.state.value.valueOrNull)
+        assertEquals(emptyList<Any>(), ann.apps.state.value.valueOrNull)
+        assertTrue(server.callsTo("GET /api/users/1/devices").isEmpty())
+        assertTrue(server.callsTo("GET /api/users/1/apps").isEmpty())
         // Cid is an administrator, but disabled: Ann is the last one.
         assertEquals(0, page.otherAdmins)
         assertTrue(page.lastAdmin)
         val bea = UserViewModel(server, session, 2)
-        assertFalse(bea.self)
+        assertFalse(bea.self.value)
         assertFalse(bea.page.state.value.valueOrNull!!.lastAdmin)
         assertEquals(1, bea.devices.state.value.valueOrNull?.size)
     }

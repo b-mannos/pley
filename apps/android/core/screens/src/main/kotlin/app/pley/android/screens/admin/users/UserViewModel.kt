@@ -16,9 +16,13 @@ import app.pley.android.screens.admin.AdminDone
 import app.pley.android.screens.admin.AdminLoad
 import app.pley.android.screens.admin.AdminViewModel
 import app.pley.android.screens.screensGraph
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -40,8 +44,9 @@ data class UserPage(val user: UserAccount, val otherAdmins: Int) {
  * signing it out everywhere or one of its apps, deleting it.
  *
  * The server refuses changes to the administrator's own password, PIN,
- * two-step sign-in, sign-ins, disabling and deleting; the page doesn't
- * offer them on one's own account ([self]), as the web doesn't.
+ * two-step sign-in, sign-ins, disabling and deleting, and to an app their
+ * own name, devices and apps too, which stay in the web app's Account;
+ * the page doesn't offer them on one's own account ([self]).
  */
 class UserViewModel(
     admin: ServerAdmin,
@@ -55,8 +60,8 @@ class UserViewModel(
     }
     val libraries = resource { get(ListSerializer(Library.serializer()), LIBRARIES) }
     val server = resource { get(ServerInfo.serializer(), SERVER) }
-    val devices = resource { get(ListSerializer(UserDevice.serializer()), path("devices")) }
-    val apps = resource { get(ListSerializer(UserApp.serializer()), path("apps")) }
+    val devices = resource { if (isSelf()) emptyList() else get(ListSerializer(UserDevice.serializer()), path("devices")) }
+    val apps = resource { if (isSelf()) emptyList() else get(ListSerializer(UserApp.serializer()), path("apps")) }
 
     private val gone = MutableStateFlow<String?>(null)
 
@@ -66,8 +71,11 @@ class UserViewModel(
      */
     val deleted: StateFlow<String?> = gone.asStateFlow()
 
-    /** The account is the signed-in administrator's own. */
-    val self: Boolean get() = session.value?.me?.id == id
+    /** The account is the signed-in administrator's own, once the session knows who that is. */
+    val self: StateFlow<Boolean> =
+        session.map { it?.me?.id == id }.stateIn(viewModelScope, SharingStarted.Eagerly, isSelf())
+
+    private fun isSelf(): Boolean = session.value?.me?.id == id
 
     /** [user]'s picture, on the signed-in server. */
     fun avatar(user: UserAccount): String? = avatarOf(user, session.value?.issuer)

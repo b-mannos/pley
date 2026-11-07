@@ -115,7 +115,8 @@ internal fun AccessGroup(
                 title = stringResource(R.string.admin_users_access_age_limit),
                 choices = limits.map { Choice(it, ageLabel(it)) },
                 selected = access.maxAge,
-                onPick = onAgeLimit,
+                // The one already set isn't sent again.
+                onPick = { if (it != access.maxAge) onAgeLimit(it) },
                 onDismiss = { sheet = null },
             )
         }

@@ -812,8 +812,9 @@ the scope to a code.
   password, administrator, disabled, household, requests, libraries and
   age limit, PIN, two-step sign-in, devices, apps, deleting); making
   accounts and profiles; invitation links, made, copied, shared and
-  deleted. The administrator's own password, PIN, two-step sign-in and
-  devices stay in Account in the web app, as the server requires.
+  deleted. The administrator's own name, password, PIN, two-step
+  sign-in, devices and apps stay in Account in the web app, as the server
+  requires.
 
 A value is sent as it is chosen, as the phone's own Settings save theirs;
 what is made or set together (a library, an account, an invitation) has

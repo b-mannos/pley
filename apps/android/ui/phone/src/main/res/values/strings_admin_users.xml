@@ -58,7 +58,7 @@
     <string name="admin_users_display_name_hint">Shown in the profile switcher and menus.</string>
     <string name="admin_users_password">Password</string>
     <string name="admin_users_new_password">New password</string>
-    <string name="admin_users_own_password">Your own password, PIN and two-step sign-in change in Account, which asks for your current password.</string>
+    <string name="admin_users_own_password">Your own name, password, PIN, two-step sign-in, devices and apps change in Account in Pley\'s web app.</string>
     <string name="admin_users_managed_password_hint">Setting one turns this profile into a regular account.</string>
     <string name="admin_users_no_password_hint">This account has no password: set one so it can sign in.</string>
     <string name="admin_users_admin_hint">Can manage libraries, users and server settings.</string>

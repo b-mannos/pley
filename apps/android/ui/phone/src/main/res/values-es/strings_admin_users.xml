@@ -58,7 +58,7 @@
     <string name="admin_users_display_name_hint">Se muestra en el selector de perfiles y en los menús.</string>
     <string name="admin_users_password">Contraseña</string>
     <string name="admin_users_new_password">Nueva contraseña</string>
-    <string name="admin_users_own_password">Tu propia contraseña, tu PIN y tu inicio de sesión en dos pasos se cambian en Cuenta, que te pide la contraseña actual.</string>
+    <string name="admin_users_own_password">Tu nombre, tu contraseña, tu PIN, tu inicio de sesión en dos pasos, tus dispositivos y tus aplicaciones se cambian en Cuenta, en la aplicación web de Pley.</string>
     <string name="admin_users_managed_password_hint">Definir una convierte este perfil en una cuenta normal.</string>
     <string name="admin_users_no_password_hint">Esta cuenta no tiene contraseña: define una para que pueda iniciar sesión.</string>
     <string name="admin_users_admin_hint">Puede gestionar las bibliotecas, los usuarios y los ajustes del servidor.</string>

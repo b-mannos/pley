@@ -58,7 +58,7 @@
     <string name="admin_users_display_name_hint">Affiché dans le sélecteur de profil et les menus.</string>
     <string name="admin_users_password">Mot de passe</string>
     <string name="admin_users_new_password">Nouveau mot de passe</string>
-    <string name="admin_users_own_password">Votre mot de passe, votre code PIN et votre connexion en deux étapes se changent dans Compte, qui demande votre mot de passe actuel.</string>
+    <string name="admin_users_own_password">Votre nom, votre mot de passe, votre code PIN, votre connexion en deux étapes, vos appareils et vos applications se changent dans Compte, dans l’application web de Pley.</string>
     <string name="admin_users_managed_password_hint">En définir un fait de ce profil un compte standard.</string>
     <string name="admin_users_no_password_hint">Ce compte n’a pas de mot de passe : définissez-en un pour qu’il puisse se connecter.</string>
     <string name="admin_users_admin_hint">Peut gérer les bibliothèques, les utilisateurs et les paramètres du serveur.</string>
