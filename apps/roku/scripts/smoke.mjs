@@ -1464,13 +1464,13 @@ async function walk() {
   await press("down", 5);
   await press("select");
   await settle();
-  // Profile's Watch history, after Switch profile, Audio language and
-  // Subtitles: its plays; Back to Settings, on that row.
+  // Profile's Watch history, after Switch profile, Audio language,
+  // Subtitles and Language: its plays; Back to Settings, on that row.
   since = mark();
   await press("left");
   await press("up"); // Profile
   await press("right");
-  await press("down", 3);
+  await press("down", 4);
   await press("select");
   await waitFor(/^GET \/api\/history\?/, since, "the watch history");
   shoot("history");
