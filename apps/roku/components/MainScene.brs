@@ -130,10 +130,17 @@ sub init()
     m.events.control = "run"
     m.api.observeField("ready", "onApiReady")
     m.api.control = "run"
-    ' The USB drive plugged in, for Home's menu and the drive's page.
+    ' The USB drive plugged in, for Home's menu and the drive's page. Its
+    ' task starts once the first screen can be used: started with the API
+    ' and event tasks, it slowed them, and the start, down; it looks at the
+    ' drive as it starts.
     m.drive = CreateObject("roSGNode", "DriveTask")
     m.global.addFields({ drive: m.drive })
-    m.drive.control = "run"
+    m.top.observeField("launched", "onLaunched")
+end sub
+
+sub onLaunched()
+    if m.top.launched and m.drive.control <> "run" then m.drive.control = "run"
 end sub
 
 ' The task listens: the first request can go.
