@@ -39,6 +39,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
 import app.pley.android.screens.admin.AdminDone
@@ -127,6 +130,17 @@ internal val Modifier.adminWidth: Modifier get() = this.widthIn(max = ADMIN_MAX_
  * them ([app.pley.android.ui.phone.shell.PhoneShellState.report]), and
  * the confirmations [said] has words for.
  */
+/**
+ * Runs [block] while the page is on screen (started), and stops it when it
+ * isn't, as the web reads what changes only while it shows: a page above
+ * it, the app in the background.
+ */
+@Composable
+internal fun WhileShown(key: Any, block: suspend () -> Unit) {
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(key, lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { block() } }
+}
+
 @Composable
 internal fun AdminEvents(model: AdminViewModel, said: (AdminDone) -> String? = { null }) {
     val shell = LocalPhoneShell.current

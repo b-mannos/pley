@@ -15,8 +15,6 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -276,61 +274,6 @@ internal fun Tag(text: String, tone: TagTone = TagTone.Neutral, icon: PleyIcon? 
             Spacer(Modifier.width(4.dp))
         }
         Text(text, style = MaterialTheme.typography.labelSmall, color = ink, maxLines = 1)
-    }
-}
-
-/**
- * A row with a switch, as the account kit's, that can be off limits
- * ([enabled] false: shown at 38 %, doing nothing), where the server
- * wouldn't take the change (one's own administrator role, the last
- * administrator).
- */
-@Composable
-internal fun ToggleRow(
-    title: String,
-    checked: Boolean,
-    onChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier,
-    subtitle: String? = null,
-    icon: PleyIcon? = null,
-    enabled: Boolean = true,
-) {
-    val ink = if (enabled) PleyColors.Fg else PleyColors.Disabled
-    val muted = if (enabled) PleyColors.Muted else PleyColors.Disabled
-    Row(
-        modifier
-            .fillMaxWidth()
-            .heightIn(min = 56.dp)
-            .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onChange)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (icon != null) {
-            Icon(icon, contentDescription = null, size = 24.dp, tint = muted)
-            Spacer(Modifier.width(16.dp))
-        }
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge, color = ink)
-            if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = muted)
-        }
-        Spacer(Modifier.width(12.dp))
-        Switch(
-            checked = checked,
-            onCheckedChange = null,
-            enabled = enabled,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = PleyColors.OnAccent,
-                checkedTrackColor = PleyColors.Accent,
-                uncheckedThumbColor = PleyColors.Control,
-                uncheckedTrackColor = PleyColors.Surface3,
-                uncheckedBorderColor = PleyColors.Control,
-                disabledCheckedTrackColor = PleyColors.Accent.copy(alpha = 0.38f),
-                disabledCheckedThumbColor = PleyColors.OnAccent.copy(alpha = 0.6f),
-                disabledUncheckedTrackColor = PleyColors.Surface3,
-                disabledUncheckedThumbColor = PleyColors.Disabled,
-                disabledUncheckedBorderColor = PleyColors.Disabled,
-            ),
-        )
     }
 }
 

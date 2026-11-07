@@ -33,6 +33,7 @@ import app.pley.android.ui.phone.account.ChoiceSheet
 import app.pley.android.ui.phone.account.RowDivider
 import app.pley.android.ui.phone.account.SettingsGroup
 import app.pley.android.ui.phone.account.SettingsRow
+import app.pley.android.ui.phone.account.SwitchRow
 import app.pley.android.ui.phone.admin.AdminEvents
 import app.pley.android.ui.phone.admin.AdminPage
 import app.pley.android.ui.phone.admin.Entry
@@ -119,7 +120,7 @@ internal fun NewUserPage() {
         }
         item(key = "roles") {
             SettingsGroup(null, Modifier.adminWidth) {
-                ToggleRow(
+                SwitchRow(
                     stringResource(R.string.admin_users_administrator),
                     checked = form.asAdmin,
                     onChange = { on -> model.edit { it.copy(isAdmin = on) } },
@@ -127,7 +128,7 @@ internal fun NewUserPage() {
                     enabled = !managed,
                 )
                 RowDivider(inset = false)
-                ToggleRow(
+                SwitchRow(
                     stringResource(R.string.admin_users_home),
                     checked = form.home,
                     onChange = { on -> model.edit { it.copy(home = on) } },

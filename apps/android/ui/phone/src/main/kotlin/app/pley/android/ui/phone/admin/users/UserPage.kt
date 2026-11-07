@@ -53,6 +53,7 @@ import app.pley.android.ui.phone.account.ChoiceSheet
 import app.pley.android.ui.phone.account.RowDivider
 import app.pley.android.ui.phone.account.SettingsGroup
 import app.pley.android.ui.phone.account.SettingsRow
+import app.pley.android.ui.phone.account.SwitchRow
 import app.pley.android.ui.phone.admin.AdminEvents
 import app.pley.android.ui.phone.admin.AdminPage
 import app.pley.android.ui.phone.admin.Entry
@@ -368,7 +369,7 @@ private fun ProfileGroup(user: UserAccount, self: Boolean, idle: Boolean, onRena
 private fun RolesGroup(page: UserPage, self: Boolean, idle: Boolean, model: UserViewModel) {
     val user = page.user
     SettingsGroup(null, Modifier.adminWidth) {
-        ToggleRow(
+        SwitchRow(
             stringResource(R.string.admin_users_administrator),
             checked = user.asAdmin,
             onChange = model::setAdmin,
@@ -377,7 +378,7 @@ private fun RolesGroup(page: UserPage, self: Boolean, idle: Boolean, model: User
             modifier = Modifier.testTag(USER_ADMIN),
         )
         RowDivider(inset = false)
-        ToggleRow(
+        SwitchRow(
             stringResource(R.string.admin_users_home),
             checked = user.home,
             onChange = model::setHome,
@@ -385,7 +386,7 @@ private fun RolesGroup(page: UserPage, self: Boolean, idle: Boolean, model: User
             enabled = idle,
         )
         RowDivider(inset = false)
-        ToggleRow(
+        SwitchRow(
             stringResource(R.string.admin_users_disabled),
             checked = user.disabled,
             onChange = model::setDisabled,

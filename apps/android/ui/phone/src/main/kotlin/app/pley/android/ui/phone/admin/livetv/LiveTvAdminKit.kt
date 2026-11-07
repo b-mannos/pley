@@ -19,7 +19,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalResources
@@ -27,9 +26,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcon
@@ -52,18 +48,11 @@ import app.pley.android.ui.phone.theme.LocalPhoneMetrics
 import java.text.NumberFormat
 
 /*
- * The pieces Live TV's pages share: reading again while a page shows, the
- * rows that say something rather than open it, and the lines the web's
+ * The pieces Live TV's pages share: the rows that say something rather
+ * than open it, and the lines the web's
  * livetv/common.ts writes (what the transcoder makes of a channel, a rate,
  * how long a channel has been pulled).
  */
-
-/** Runs [block] while the page is on screen, and stops it when it isn't, as the web reads only what it shows. */
-@Composable
-internal fun WhileShown(key: Any, block: suspend () -> Unit) {
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(key, lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { block() } }
-}
 
 /**
  * A row that says something rather than opens it: [label] and its

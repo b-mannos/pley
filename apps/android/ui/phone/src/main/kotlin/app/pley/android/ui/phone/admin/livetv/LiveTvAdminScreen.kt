@@ -38,6 +38,7 @@ import app.pley.android.ui.phone.account.RowDivider
 import app.pley.android.ui.phone.account.SettingsGroup
 import app.pley.android.ui.phone.account.SettingsRow
 import app.pley.android.ui.phone.admin.AdminEvents
+import app.pley.android.ui.phone.admin.WhileShown
 import app.pley.android.ui.phone.admin.AdminPage
 import app.pley.android.ui.phone.admin.adminWidth
 import app.pley.android.ui.phone.kit.ConfirmDialog

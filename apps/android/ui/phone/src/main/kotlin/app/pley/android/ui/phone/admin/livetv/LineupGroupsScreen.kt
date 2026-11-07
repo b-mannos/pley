@@ -18,8 +18,6 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -44,6 +42,7 @@ import app.pley.android.screens.admin.livetv.GroupSection
 import app.pley.android.screens.admin.livetv.GroupsShown
 import app.pley.android.screens.admin.livetv.LineupGroupsViewModel
 import app.pley.android.ui.phone.R
+import app.pley.android.ui.phone.account.RowSwitch
 import app.pley.android.ui.phone.admin.AdminEvents
 import app.pley.android.ui.phone.admin.adminWidth
 import app.pley.android.ui.phone.kit.EmptyState
@@ -204,18 +203,7 @@ private fun GroupRow(group: LineupGroup, label: String, indent: Boolean, enabled
                 Text(counts, style = MaterialTheme.typography.bodySmall, color = PleyColors.Subtle, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Spacer(Modifier.width(12.dp))
-            Switch(
-                checked = !hidden,
-                onCheckedChange = null,
-                enabled = enabled,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = PleyColors.OnAccent,
-                    checkedTrackColor = PleyColors.Accent,
-                    uncheckedThumbColor = PleyColors.Control,
-                    uncheckedTrackColor = PleyColors.Surface3,
-                    uncheckedBorderColor = PleyColors.Control,
-                ),
-            )
+            RowSwitch(checked = !hidden, enabled = enabled)
         }
         HorizontalDivider(thickness = 1.dp, color = PleyColors.Surface4)
     }

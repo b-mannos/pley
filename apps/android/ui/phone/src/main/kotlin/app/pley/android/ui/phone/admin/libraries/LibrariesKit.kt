@@ -12,15 +12,11 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcons
@@ -141,11 +137,3 @@ internal fun librariesSaid(resources: Resources, done: AdminDone): String? {
     }
 }
 
-/** Runs [watch] while the page is on screen (started), as the web polls only while it shows. */
-@Composable
-internal fun WhileShown(key: Any, watch: suspend () -> Unit) {
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(key, lifecycle) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { watch() }
-    }
-}

@@ -48,10 +48,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.pley.android.common.errorSentence
 import app.pley.android.designsystem.PleyColors
@@ -82,6 +79,7 @@ import app.pley.android.screens.admin.valueOrNull
 import app.pley.android.ui.phone.R
 import app.pley.android.ui.phone.account.absolute
 import app.pley.android.ui.phone.admin.AdminEvents
+import app.pley.android.ui.phone.admin.WhileShown
 import app.pley.android.ui.phone.admin.adminWidth
 import app.pley.android.ui.phone.kit.Avatar
 import app.pley.android.ui.phone.kit.ConfirmDialog
@@ -123,8 +121,7 @@ internal fun DashboardScreen(id: String?) {
     AdminEvents(model, said)
     LaunchedEffect(model) { model.results.collect { done -> said(done)?.let { shell.toasts.show(it) } } }
     // Read on the web's timers while the page is started, and not at all while it isn't.
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(model, lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { model.keepFresh() } }
+    WhileShown(model) { model.keepFresh() }
 
     val activity by model.activity.collectAsStateWithLifecycle()
     val transcoder by model.transcoder.collectAsStateWithLifecycle()
