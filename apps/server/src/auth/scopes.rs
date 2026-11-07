@@ -321,8 +321,8 @@ pub const APP_ROUTES: &[(&str, &str, Need)] = &[
     // passwords or providers' addresses stays with the web app: the
     // server's settings and their tests, the network, the transcode folder,
     // backups, the library work's schedule, Live TV's settings and sources.
-    // One's own password, PIN, two-step sign-in and devices stay in
-    // Account, as on the web.
+    // One's own name, password, PIN, two-step sign-in, devices and apps
+    // stay in Account, as for every app.
     // libraries
     ("POST", "/api/libraries", Need::Scope(Server)),
     ("POST", "/api/libraries/scan", Need::Scope(Server)),

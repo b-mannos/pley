@@ -213,16 +213,16 @@ Apps sign in on Pley's own page with OAuth 2.1.
   two-step sign-in, nor see or sign out its devices and apps, and `server`
   is never allowed with a TV's code, which anyone in front of a screen
   could pass to an administrator. Each is checked against the account at
-  every request, so a role taken away takes them at once.
+  every request, so a role taken away takes them at once. Other apps, and
+  apps on other accounts, see and stop only their profile's own streams.
+  Every route apps may use is listed with the scope it needs, anything
+  else is refused, and the compatibility APIs refuse their tokens.
 - Android's app is answered at a private-use address
   (`app.pley.android:/oauth/callback`), as RFC 8252 allows. Another app on
   the phone that claims that scheme can start a sign-in as Pley for Android
   and get its token, `server` included, if the person allows it; PKCE
   doesn't stop that, only the consent page does, so allow a sign-in only
-  when you started it. Other apps, and apps
-  on other accounts, see and stop only their profile's own streams. Every
-  route apps may use is listed with the scope it needs, anything else is
-  refused, and the compatibility APIs refuse their tokens.
+  when you started it.
 - Apps, and people who aren't administrators, don't see library folders or
   file paths on either API (only a file's name), the transcoder's error
   messages included, except Pley's own apps allowed `server` on an
@@ -287,8 +287,8 @@ other apps (`pley_ct_…`), never with a session's
   playback) only for an administrator, checked at every request, so a role
   taken away takes them at once. Each is checked by name where it applies:
   no such token is ever an administrator. No scope administers accounts,
-  sign-in or the server's settings, and the Jellyfin-compatible API takes every token
-  for what `play` allows, and one with `manage` for collections and editing
+  sign-in or the server's settings, and the Jellyfin-compatible API takes
+  every token for what `play` allows, and one with `manage` for collections and editing
   metadata: it lists no one but the caller, a user id in a path must be its
   own, and a playlist is its owner's alone. A picture it is sent to fetch
   must be on one of the hosts Pley takes pictures from, as on the

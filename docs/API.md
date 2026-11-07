@@ -1279,8 +1279,8 @@ What apps see:
   the account does, and administers nothing: history, sessions and
   collections answer it as they would anyone else. Three exceptions, on an
   administrator's account and for Pley's own apps alone: one allowed
-  `server` manages the server (below), one allowed `approvals` manages requests
-  (approves and declines them, marks them as added by hand, sees and
+  `server` manages the server (below), one allowed `approvals` manages
+  requests (approves and declines them, marks them as added by hand, sees and
   deletes everyone's, and hears the managers' request events; see
   [Requests](#requests)), and one allowed `activity` (Pley for Home
   Assistant, the only one that asks for it) sees and stops what everyone
@@ -1313,10 +1313,11 @@ What apps see:
   password. It may not change the account's own name, password, PIN or
   two-step sign-in, see or sign out its devices and apps, disable it or
   delete it, and its administration ends at once when the account stops
-  being an administrator. `GET /api/auth/me` tells Pley's own apps whether the
-  account is an administrator (`account_admin`), so one signed in before it
-  could ask for `server` can offer to sign in again.
-- Libraries' `paths` are empty, and files' `path` is the file name only.
+  being an administrator. `GET /api/auth/me` tells Pley's own apps whether
+  the account is an administrator (`account_admin`), so one signed in
+  before it could ask for `server` can offer to sign in again.
+- Libraries' `paths` are empty, but for one that manages the server, and
+  files' `path` is the file name only.
 - `/api/users/{id}/avatar` shows only the app's own profile, its
   household, and, to an app allowed `requests` while requests are on, the
   people named in the requests it may read: who decided its own, and for a

@@ -818,10 +818,11 @@ the scope to a code.
 
 A value is sent as it is chosen, as the phone's own Settings save theirs;
 what is made or set together (a library, an account, an invitation) has
-one button. What can't be undone asks first. The
-server's refusals show in its own words, and the page then shows what the
-server has. Lists that change (what plays, scans, tuners, the machine's
-load) are read again every few seconds while they show.
+one button. What can't be undone asks first. The server's refusals show
+in its own words, and the page then shows what the server has. Lists that
+change (what plays, scans, tuners, the machine's load) are read again
+every few seconds while they show, and a list is read again as it shows
+after a page above it.
 
 ### Offline and downloads
 
