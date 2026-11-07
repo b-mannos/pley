@@ -1294,8 +1294,8 @@ What apps see:
   manages the server as the web app's Settings do: the `admin` routes those
   pages use answer it as they answer the administrator's own sign-in, and
   it sees and stops everyone's streams as one allowed `activity` does, with
-  the dashboard's library work, everyone's history (`all`, `user_id`) and
-  libraries' folders (`paths`). It may not change the account's own
+  the dashboard's library work, everyone's history (`all`, `user_id`, and
+  removing anyone's plays) and libraries' folders (`paths`). It may not change the account's own
   password, PIN or two-step sign-in, sign its devices out, disable it or
   delete it, which those routes refuse every administrator, and its
   administration ends at once when the account stops being an

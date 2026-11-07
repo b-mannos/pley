@@ -45,8 +45,10 @@ pub async fn list(
     Ok(Json(HistoryPage { total, entries: records.iter().map(history::Record::to_entry).collect() }))
 }
 
+/// Removes a play: one's own, or, for who manages the server (the
+/// dashboard), anyone's.
 pub async fn delete(State(state): State<AppState>, user: AuthUser, Path(id): Path<i64>) -> ApiResult<StatusCode> {
-    if history::delete(&state.db, user.id, user.is_admin, id).await? {
+    if history::delete(&state.db, user.id, user.administers(), id).await? {
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(AppError::not_found(format!("history entry {id} not found")))

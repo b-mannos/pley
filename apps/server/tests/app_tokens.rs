@@ -624,6 +624,21 @@ async fn pleys_own_app_allowed_server_manages_it_on_an_administrators_account() 
     }
     assert_eq!(app.get("/api/history?all=1", &token).await.body["total"], json!(2));
     assert_eq!(app.get("/api/activity", &token).await.status, StatusCode::OK);
+    // The dashboard removes anyone's play, as the web's does.
+    let theirs: i64 = sqlx::query_scalar("SELECT id FROM play_history WHERE user_id = ?")
+        .bind(bob_id)
+        .fetch_one(&app.state.db.read)
+        .await
+        .unwrap();
+    let (viewer, _) = app.app_token(1, "library play").await;
+    assert_eq!(app.delete(&format!("/api/history/{theirs}"), &viewer).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(app.delete(&format!("/api/history/{theirs}"), &token).await.status, StatusCode::NO_CONTENT);
+    sqlx::query("INSERT INTO play_history (user_id, item_id, viewed_at) VALUES (?, ?, 1)")
+        .bind(bob_id)
+        .bind(film)
+        .execute(&app.state.db.write)
+        .await
+        .unwrap();
 
     // Its own sign-in stays in Account, as for the web's administrators.
     let own = [
