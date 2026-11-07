@@ -126,7 +126,7 @@ Each endpoint table has a **Who** column:
 | `user` | any signed-in user; an app's token is refused (`403 insufficient_scope`) |
 | `any app` | any signed-in user, and every app's token |
 | `library`, `play`, `playlists`, `profiles`, `requests`, `approvals`, `activity` | any signed-in user, and an app's token with that [scope](#scopes) (`HEAD` as `GET`); with `play` or `activity`, `activity` or `server`, a token with either |
-| `admin` | administrators only (`403` for others); of apps' tokens, only Pley's own allowed [`server`](#scopes) on an administrator's account |
+| `admin` | administrators only (`403` for others); of apps' tokens, only Pley's own allowed [`server`](#scopes) on an administrator's account, on the routes that scope opens |
 | `page` | Pley's consent page only ([its endpoints](#the-consent-pages-endpoints)) |
 
 ### Headers
@@ -1261,12 +1261,13 @@ everyone, in 10 minutes, no code is looked up (`429`).
 | `requests` | ask for movies and shows the libraries don't have ([Requests](#requests)), and follow the profile's requests |
 | `approvals` | approve and decline what people ask for, where the account is an administrator. Pley's own apps only; it does nothing on other accounts |
 | `activity` | see what's playing and stop it: the profile's streams, and everyone's where the account is an administrator. Any app may be allowed it, but only Pley's own see and stop everyone's, and of those only Pley for Home Assistant asks for it |
-| `server` | manage the server where the account is an administrator, as Settings in the web app do: every `admin` route below that Settings uses. Pley's own apps only, and never with a TV's code ([TVs](#tvs)); it does nothing on other accounts. Of Pley's apps, Android's phones ask for it |
+| `server` | see the server's dashboard and manage its libraries, accounts, invitations and Live TV lineup, where the account is an administrator: the `admin` routes listed below. Pley's own apps only, and never with a TV's code ([TVs](#tvs)); it does nothing on other accounts. Of Pley's apps, Android's phones ask for it |
 
 An app's token opens only the routes whose **Who** is `any app` or one of
-its scopes (`HEAD` as `GET`), and with `server` the `admin` routes Settings
-in the web app uses. Every other route answers `403 insufficient_scope`:
-sign-in settings among them, and editing collections and titles' details.
+its scopes (`HEAD` as `GET`), and with `server` the `admin` routes listed
+below. Every other route answers `403 insufficient_scope`: sign-in
+settings among them, the server's settings, and editing collections and
+titles' details.
 Name, picture (`PATCH /api/me`), password, PIN, two-step sign-in, devices,
 apps and switching by `/api/auth/switch` stay in the web app, for every
 app.
@@ -1291,15 +1292,28 @@ What apps see:
   work. Any other app allowed `activity` sees and stops its profile's own
   sessions alone.
 - One of Pley's own apps allowed `server` on an administrator's account
-  manages the server as the web app's Settings do: the `admin` routes those
-  pages use answer it as they answer the administrator's own sign-in, and
-  it sees and stops everyone's streams as one allowed `activity` does, with
+  manages part of what the web app's Settings do, and these `admin` routes
+  answer it as they answer the administrator's own sign-in: libraries
+  (`POST /api/libraries`, `/api/libraries/scan`, `/api/libraries/order`,
+  `PATCH` and `DELETE /api/libraries/{id}`, `/api/libraries/{id}/scan`,
+  `/api/fs`), accounts and invitations (`/api/users`, `/api/users/{id}`
+  and its `devices`, `apps` and `two-step`, `/api/invites`), the dashboard
+  (`/api/system`, `/api/system/resources`, `/api/system/storage` and its
+  `clean`, `/api/transcoder`) and Live TV's lineup and tuners
+  (`/api/live/lineup`, its `groups` and `page`, `/api/live/tuners`). It
+  sees and stops everyone's streams as one allowed `activity` does, with
   the dashboard's library work, everyone's history (`all`, `user_id`, and
-  removing anyone's plays) and libraries' folders (`paths`). It may not change the account's own
-  password, PIN or two-step sign-in, sign its devices out, disable it or
-  delete it, which those routes refuse every administrator, and its
-  administration ends at once when the account stops being an
-  administrator. `GET /api/auth/me` tells Pley's own apps whether the
+  removing anyone's plays) and libraries' folders (`paths`).
+  What holds the server's keys, passwords and providers' addresses stays
+  with the web app and answers `403 insufficient_scope`: the server's
+  settings and their tests (`/api/settings…`), the network, the transcode
+  folder, backups, the library work's schedule, and Live TV's settings and
+  sources. Nothing it can reach carries a key or a password; in
+  `/api/system`, the transcoder's `url` comes without a user name or
+  password. It may not change the account's own name, password, PIN or
+  two-step sign-in, see or sign out its devices and apps, disable it or
+  delete it, and its administration ends at once when the account stops
+  being an administrator. `GET /api/auth/me` tells Pley's own apps whether the
   account is an administrator (`account_admin`), so one signed in before it
   could ask for `server` can offer to sign in again.
 - Libraries' `paths` are empty, and files' `path` is the file name only.

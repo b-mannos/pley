@@ -67,8 +67,10 @@ const FIRST_PARTY: &[(&str, &str)] = &[
     ("GET", "/api/server/proof-key"),
 ];
 
-/// Administration no app reaches: collections, and editing titles' details
-/// (what `server` opens is in APP_ROUTES).
+/// Administration no app reaches, not even with `server` (what it opens is
+/// in APP_ROUTES): collections, editing titles' details, and what holds the
+/// server's keys, passwords and providers' addresses, which stay with the
+/// web app.
 const ADMIN: &[(&str, &str)] = &[
     ("POST", "/api/libraries/{id}/collections"),
     ("PATCH", "/api/collections/{id}"),
@@ -85,6 +87,24 @@ const ADMIN: &[(&str, &str)] = &[
     ("POST", "/api/items/{id}/artwork/{kind}/upload"),
     ("POST", "/api/items/{id}/refresh"),
     ("POST", "/api/items/{id}/analyze"),
+    ("GET", "/api/system/library-work"),
+    ("GET", "/api/system/backups"),
+    ("POST", "/api/system/backups"),
+    ("PUT", "/api/system/transcode-dir"),
+    ("GET", "/api/settings"),
+    ("PUT", "/api/settings"),
+    ("POST", "/api/settings/test"),
+    ("POST", "/api/settings/arr"),
+    ("GET", "/api/network"),
+    ("PUT", "/api/network"),
+    ("GET", "/api/live/settings"),
+    ("PUT", "/api/live/settings"),
+    ("GET", "/api/live/sources"),
+    ("POST", "/api/live/sources"),
+    ("POST", "/api/live/sources/test"),
+    ("PUT", "/api/live/sources/{id}"),
+    ("DELETE", "/api/live/sources/{id}"),
+    ("POST", "/api/live/sources/{id}/refresh"),
 ];
 
 /// Routes that take pley's own page's cookie and nothing else: allowing
@@ -394,10 +414,12 @@ async fn each_scope_opens_only_its_routes() {
     let devices = app.get("/api/me/devices", &library).await;
     assert_eq!(devices.body["message"], "apps can't do that: use Pley's web app");
     let settings = app.get("/api/settings", &library).await;
+    assert_eq!(settings.body["message"], "apps can't do that: use Pley's web app");
+    let users = app.get("/api/users", &library).await;
     assert_eq!(
-        settings.body["message"],
-        "this app wasn't allowed to manage the server (its libraries, accounts, Live TV and settings) where the \
-         account is an administrator: sign in to it again to allow it"
+        users.body["message"],
+        "this app wasn't allowed to manage the server's libraries, accounts, invitations and Live TV channels, and \
+         see its dashboard, where the account is an administrator: sign in to it again to allow it"
     );
 }
 
@@ -588,9 +610,13 @@ async fn pleys_own_app_allowed_server_manages_it_on_an_administrators_account() 
     assert_eq!((&me.body["is_admin"], &me.body["account_admin"]), (&json!(false), &json!(true)));
     assert_eq!(me.body["scope"], "library play server");
 
-    // What Settings in the web app do.
-    assert_eq!(app.get("/api/settings", &token).await.status, StatusCode::OK);
+    // What Settings in the web app do, but for what holds keys and passwords.
     assert_eq!(app.get("/api/system", &token).await.status, StatusCode::OK);
+    for (method, path) in ADMIN {
+        let uri = concrete(path);
+        let (status, challenge) = status_of(&app, bearer(method, &uri, &token)).await;
+        assert_eq!((status, challenge.as_str()), (StatusCode::FORBIDDEN, NO_SCOPE), "{method} {uri}");
+    }
     let users = app.get("/api/users", &token).await;
     assert_eq!((users.status, users.body.as_array().map(Vec::len)), (StatusCode::OK, Some(2)));
     let carol = json!({"username": "carol", "password": "test-pass-1"});
@@ -647,9 +673,17 @@ async fn pleys_own_app_allowed_server_manages_it_on_an_administrators_account() 
         app.app_call(Method::DELETE, "/api/users/1/two-step", &token, None).await,
         app.app_call(Method::DELETE, "/api/users/1/devices", &token, None).await,
         app.app_call(Method::DELETE, "/api/users/1", &token, None).await,
+        app.app_call(Method::PATCH, "/api/users/1", &token, Some(json!({"display_name": "Boss"}))).await,
+        app.app_call(Method::GET, "/api/users/1/devices", &token, None).await,
+        app.app_call(Method::GET, "/api/users/1/apps", &token, None).await,
+        app.app_call(Method::DELETE, "/api/users/1/apps/1", &token, None).await,
     ];
     for reply in own {
         assert_eq!(reply.status, StatusCode::BAD_REQUEST, "{:?}", reply.body);
+    }
+    // Others' devices and apps, as the web's Users page shows them.
+    for uri in [format!("/api/users/{bob_id}/devices"), format!("/api/users/{bob_id}/apps")] {
+        assert_eq!(app.get(&uri, &token).await.status, StatusCode::OK, "{uri}");
     }
     for (method, uri, body) in [
         (Method::PUT, "/api/auth/password", Some(json!({"current_password": "secret-one", "new_password": "x"}))),
@@ -669,11 +703,11 @@ async fn pleys_own_app_allowed_server_manages_it_on_an_administrators_account() 
     assert_eq!(app.get("/api/auth/me", &other).await.body.get("account_admin"), None, "only pley's own apps are told");
     let (dora, dora_id) = app.user(&admin, "dora", json!({"is_admin": true})).await;
     let (doras, _) = app.app_token(dora_id, "library play server").await;
-    assert_eq!(app.get("/api/settings", &doras).await.status, StatusCode::OK);
+    assert_eq!(app.get("/api/users", &doras).await.status, StatusCode::OK);
     let demoted = app.patch(&format!("/api/users/{dora_id}"), &admin, json!({"is_admin": false})).await;
     assert_eq!(demoted.status, StatusCode::OK, "{:?}", demoted.body);
     for refused in [&bobs, &other, &doras] {
-        let reply = app.get("/api/settings", refused).await;
+        let reply = app.get("/api/users", refused).await;
         assert_eq!(reply.status, StatusCode::FORBIDDEN, "{:?}", reply.body);
         assert_eq!(app.get("/api/libraries", refused).await.body[0]["paths"], json!([]));
     }
@@ -1103,4 +1137,85 @@ async fn administration_refuses_app_tokens_even_on_a_route_apps_may_use() {
         .with_state(app.state.clone());
     let resp = router.oneshot(bearer("GET", "/api/libraries", &token)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn no_answer_an_app_reaches_carries_the_servers_secrets() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.media_file("movies/Film (2020).mkv", 2048);
+    app.library(&admin, "Movies", "movies", "movies").await;
+    // Every key and password the server keeps, set as the web app sets them.
+    let secrets = [
+        "tmdb-secret-1111",
+        "tvdb-secret-2222",
+        "subtitles-key-3333",
+        "subtitles-pass-4444",
+        "radarr-secret-5555",
+        "sonarr-secret-6666",
+        "provider-pass-7777",
+    ];
+    let saved = app
+        .put(
+            "/api/settings",
+            &admin,
+            json!({
+                "tmdb_api_key": secrets[0],
+                "tvdb_api_key": secrets[1],
+                "opensubtitles_api_key": secrets[2],
+                "opensubtitles_username": "someone",
+                "opensubtitles_password": secrets[3],
+                "radarr_url": "http://localhost:7878",
+                "radarr_api_key": secrets[4],
+                "sonarr_url": "http://localhost:8989",
+                "sonarr_api_key": secrets[5],
+            }),
+        )
+        .await;
+    assert_eq!(saved.status, StatusCode::OK, "{:?}", saved.body);
+    // A Live TV provider whose password is in its channels' addresses.
+    let source: i64 = sqlx::query_scalar(
+        "INSERT INTO live_sources (name, kind, url, username, password, created_at)
+         VALUES ('Provider', 'xtream', 'http://provider.invalid', 'viewer', ?, 0) RETURNING id",
+    )
+    .bind(secrets[6])
+    .fetch_one(&app.state.db.write)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO live_channels (source_id, key, name, stream_url, position)
+         VALUES (?, '1', 'News', ?, 0)",
+    )
+    .bind(source)
+    .bind(format!("http://provider.invalid/live/viewer/{}/1.ts", secrets[6]))
+    .execute(&app.state.db.write)
+    .await
+    .unwrap();
+
+    // The widest token an app can hold: pley's own, every scope, on the
+    // administrator's account.
+    let (token, _) = app.app_token(1, "library play playlists profiles requests approvals activity server").await;
+    let mut read = 0;
+    for (method, path, _) in APP_ROUTES.iter().filter(|(method, _, _)| *method == "GET") {
+        let uri = concrete(path);
+        let resp = app.api.clone().oneshot(bearer(method, &uri, &token)).await.unwrap();
+        // The event stream and media don't end: what came in a moment is enough.
+        let mut body = resp.into_body().into_data_stream();
+        let mut text = Vec::new();
+        while let Ok(Some(Ok(chunk))) = tokio::time::timeout(Duration::from_millis(200), body.next()).await {
+            text.extend_from_slice(&chunk);
+            if text.len() > 4 << 20 {
+                break;
+            }
+        }
+        let text = String::from_utf8_lossy(&text);
+        for secret in secrets {
+            assert!(!text.contains(secret), "{method} {uri} carries {secret}: {text}");
+        }
+        read += 1;
+    }
+    assert!(read > 50, "{read} routes read");
+    // The lineup is read, with the channel, and without its address.
+    let lineup = app.get("/api/live/lineup/page", &token).await;
+    assert_eq!(lineup.body["total"], json!(1), "{:?}", lineup.body);
 }

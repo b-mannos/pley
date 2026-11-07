@@ -33,10 +33,13 @@ pub enum Scope {
     /// only, see `AuthUser::oversees_playback`; other apps see and stop
     /// only the profile's own).
     Activity,
-    /// Manage the server where the account is an administrator: libraries,
-    /// accounts, invitations, Live TV's sources and lineup, and the
-    /// server's settings (pley's own apps only, never with a TV's code; it
-    /// does nothing for other accounts, see `AuthUser::administers`).
+    /// Manage the server where the account is an administrator: its
+    /// libraries, accounts, invitations, Live TV's lineup and tuners, and
+    /// the dashboard (pley's own apps only, never with a TV's code; it does
+    /// nothing for other accounts, see `AuthUser::administers`). What holds
+    /// keys and passwords stays in the web app: the server's settings, its
+    /// network, the transcoder's settings, Radarr and Sonarr, backups and
+    /// Live TV's sources.
     Server,
 }
 
@@ -83,7 +86,7 @@ impl Scope {
                 "see what's playing and stop it: the profile's streams, and everyone's where the account is an administrator"
             }
             Scope::Server => {
-                "manage the server (its libraries, accounts, Live TV and settings) where the account is an administrator"
+                "manage the server's libraries, accounts, invitations and Live TV channels, and see its dashboard, where the account is an administrator"
             }
         }
     }
@@ -311,11 +314,15 @@ pub const APP_ROUTES: &[(&str, &str, Need)] = &[
     // casting. With `server`, the dashboard's too: everyone's, with the
     // administrators' counters.
     ("GET", "/api/activity", Need::Either(Activity, Server)),
-    // server: what the web app's Settings do, for pley's own apps on an
-    // administrator's account (see AuthUser::administers); the routes are
-    // administrators' (`AdminUser`), which answer such an app as they
-    // answer an administrator's own sign-in. One's own password, PIN,
-    // two-step sign-in and devices stay in Account, as on the web.
+    // server: the parts of the web app's Settings a phone has, for pley's
+    // own apps on an administrator's account (see AuthUser::administers);
+    // the routes are administrators' (`AdminUser`), which answer such an
+    // app as they answer an administrator's own sign-in. What holds keys,
+    // passwords or providers' addresses stays with the web app: the
+    // server's settings and their tests, the network, the transcode folder,
+    // backups, the library work's schedule, Live TV's settings and sources.
+    // One's own password, PIN, two-step sign-in and devices stay in
+    // Account, as on the web.
     // libraries
     ("POST", "/api/libraries", Need::Scope(Server)),
     ("POST", "/api/libraries/scan", Need::Scope(Server)),
@@ -337,32 +344,13 @@ pub const APP_ROUTES: &[(&str, &str, Need)] = &[
     ("GET", "/api/invites", Need::Scope(Server)),
     ("POST", "/api/invites", Need::Scope(Server)),
     ("DELETE", "/api/invites/{code}", Need::Scope(Server)),
-    // the dashboard, storage and backups
+    // the dashboard and storage
     ("GET", "/api/system", Need::Scope(Server)),
     ("GET", "/api/system/resources", Need::Scope(Server)),
-    ("GET", "/api/system/library-work", Need::Scope(Server)),
     ("GET", "/api/system/storage", Need::Scope(Server)),
-    ("GET", "/api/system/backups", Need::Scope(Server)),
-    ("POST", "/api/system/backups", Need::Scope(Server)),
     ("POST", "/api/system/storage/clean", Need::Scope(Server)),
-    ("PUT", "/api/system/transcode-dir", Need::Scope(Server)),
     ("GET", "/api/transcoder", Need::Scope(Server)),
-    // the server's settings, the network, Radarr and Sonarr
-    ("GET", "/api/settings", Need::Scope(Server)),
-    ("PUT", "/api/settings", Need::Scope(Server)),
-    ("POST", "/api/settings/test", Need::Scope(Server)),
-    ("POST", "/api/settings/arr", Need::Scope(Server)),
-    ("GET", "/api/network", Need::Scope(Server)),
-    ("PUT", "/api/network", Need::Scope(Server)),
-    // Live TV's sources, lineup and tuners
-    ("GET", "/api/live/settings", Need::Scope(Server)),
-    ("PUT", "/api/live/settings", Need::Scope(Server)),
-    ("GET", "/api/live/sources", Need::Scope(Server)),
-    ("POST", "/api/live/sources", Need::Scope(Server)),
-    ("POST", "/api/live/sources/test", Need::Scope(Server)),
-    ("PUT", "/api/live/sources/{id}", Need::Scope(Server)),
-    ("DELETE", "/api/live/sources/{id}", Need::Scope(Server)),
-    ("POST", "/api/live/sources/{id}/refresh", Need::Scope(Server)),
+    // Live TV's lineup and tuners
     ("GET", "/api/live/lineup", Need::Scope(Server)),
     ("PATCH", "/api/live/lineup", Need::Scope(Server)),
     ("GET", "/api/live/lineup/groups", Need::Scope(Server)),
@@ -423,7 +411,7 @@ mod tests {
     fn every_app_route_is_on_a_real_path() {
         // Whether each names a route of api/mod.rs is checked by
         // tests/app_tokens.rs, which reads it.
-        assert_eq!(APP_ROUTES.len(), 153);
+        assert_eq!(APP_ROUTES.len(), 135);
         for (i, (method, path, _)) in APP_ROUTES.iter().enumerate() {
             assert!(["GET", "POST", "PUT", "PATCH", "DELETE"].contains(method), "{method} {path}");
             assert!(path.starts_with("/api/") && !path.ends_with('/'), "{path}");
@@ -449,7 +437,8 @@ mod tests {
         assert_eq!(required(&Method::PATCH, "/api/me"), None, "name and picture stay in the web app");
         assert_eq!(required(&Method::POST, "/api/auth/switch"), None, "the web's switch makes sessions");
         assert_eq!(required(&Method::POST, "/api/libraries"), Some(Need::Scope(Scope::Server)), "administration");
-        assert_eq!(required(&Method::GET, "/api/settings"), Some(Need::Scope(Scope::Server)));
+        assert_eq!(required(&Method::GET, "/api/settings"), None, "the server's settings hold its keys");
+        assert_eq!(required(&Method::GET, "/api/live/sources"), None, "sources hold providers' passwords");
         assert_eq!(required(&Method::DELETE, "/api/users/{id}/two-step"), Some(Need::Scope(Scope::Server)));
         assert_eq!(required(&Method::PUT, "/api/auth/password"), None, "one's own password stays in Account");
         assert_eq!(required(&Method::PUT, "/api/me/pin"), None, "one's own PIN too");

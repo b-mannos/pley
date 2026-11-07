@@ -199,16 +199,27 @@ Apps sign in on Pley's own page with OAuth 2.1.
   apps get, on an administrator's account and when the administrator
   allows them: approving requests (`approvals`), seeing and stopping
   everyone's streams (`activity`, which only Pley for Home Assistant asks
-  for), and managing the server as Settings in the web app do (`server`,
-  which Android's phones ask for). Whatever holds such a token can do as
-  much, so whoever controls a Home Assistant an administrator signed in can
-  see what everyone plays and stop it, and whoever holds an administrator's
-  phone signed in with `server` administers the server as the web app's
-  Settings do. Such a token still can't change the account's own password,
-  PIN or two-step sign-in, nor sign its devices out, and `server` is never
-  allowed with a TV's code, which anyone in front of a screen could pass
-  to an administrator. Each is checked against the account at every
-  request, so a role taken away takes them at once. Other apps, and apps
+  for), and managing the server's libraries, accounts, invitations and
+  Live TV lineup, with its dashboard (`server`, which Android's phones ask
+  for). Whatever holds such a token can do as much, so whoever controls a
+  Home Assistant an administrator signed in can see what everyone plays and
+  stop it, and whoever holds an administrator's phone signed in with
+  `server` can change who may sign in and what they see. No app reads or
+  changes what holds the server's keys and passwords: its settings, network
+  and transcoder, Radarr and Sonarr, backups and Live TV's sources stay
+  with the web app, and no answer an app can reach carries a key, a
+  password or a provider's address (tests/app_tokens.rs checks every one).
+  Such a token can't change the account's own name, password, PIN or
+  two-step sign-in, nor see or sign out its devices and apps, and `server`
+  is never allowed with a TV's code, which anyone in front of a screen
+  could pass to an administrator. Each is checked against the account at
+  every request, so a role taken away takes them at once.
+- Android's app is answered at a private-use address
+  (`app.pley.android:/oauth/callback`), as RFC 8252 allows. Another app on
+  the phone that claims that scheme can start a sign-in as Pley for Android
+  and get its token, `server` included, if the person allows it; PKCE
+  doesn't stop that, only the consent page does, so allow a sign-in only
+  when you started it. Other apps, and apps
   on other accounts, see and stop only their profile's own streams. Every
   route apps may use is listed with the scope it needs, anything else is
   refused, and the compatibility APIs refuse their tokens.

@@ -135,11 +135,11 @@ impl AuthUser {
         }
     }
 
-    /// Whether this request manages the server, as Settings in the web app
-    /// do: an administrator's own sign-in, or one of pley's own apps on an
-    /// administrator's account allowed `server` (no other app can be, and
-    /// never a compatibility token). The administrators' routes
-    /// ([`AdminUser`]) answer such an app as an administrator; elsewhere it
+    /// Whether this request manages the server: an administrator's own
+    /// sign-in, or one of pley's own apps on an administrator's account
+    /// allowed `server` (no other app can be, and never a compatibility
+    /// token). The administrators' routes `server` opens ([`AdminUser`],
+    /// APP_ROUTES) answer such an app as an administrator; elsewhere it
     /// stays a viewer, apart from what this opens by name.
     pub fn administers(&self) -> bool {
         if self.compatibility.is_some() {

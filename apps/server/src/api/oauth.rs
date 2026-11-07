@@ -1546,18 +1546,20 @@ pub async fn sign_out_my_app(
 /// `GET /api/users/{id}/apps` (administrators).
 pub async fn user_apps(
     State(state): State<AppState>,
-    _admin: AdminUser,
+    AdminUser(admin): AdminUser,
     Path(id): Path<i64>,
 ) -> ApiResult<Json<Vec<AppGrant>>> {
+    super::accounts::not_ones_own_from_an_app(&admin, id, "see your own apps in Pley's web app")?;
     Ok(Json(apps_of(&state, id).await?))
 }
 
 /// `DELETE /api/users/{id}/apps/{grant}` (administrators).
 pub async fn sign_out_user_app(
     State(state): State<AppState>,
-    _admin: AdminUser,
+    AdminUser(admin): AdminUser,
     Path((id, grant)): Path<(i64, i64)>,
 ) -> ApiResult<StatusCode> {
+    super::accounts::not_ones_own_from_an_app(&admin, id, "sign your own apps out in Pley's web app")?;
     sign_out_app(&state, id, grant).await
 }
 
