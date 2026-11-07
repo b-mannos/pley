@@ -25,6 +25,11 @@ describes how they are made.
   seconds (holding still under the pointer, and for those who ask their
   system for less motion). Swipe between them on a phone.
 
+### Fixed
+
+- Settings → Live TV → Channels lists a source's channels when one is
+  picked, where the server answered with an error.
+
 ## [0.1.8] - 2026-11-06
 
 ### Added
