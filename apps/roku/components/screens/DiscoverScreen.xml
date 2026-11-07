@@ -45,7 +45,7 @@
         <!-- Android TV's two gradients over the backdrop (stretched pictures):
              the page's colour from the left, and from below, which comes up
              over the backdrop as the page slides up. -->
-        <Poster uri="pkg:/images/scrim-left.png" width="1600" height="1080" blendColor="0x16191EFF" />
+        <Poster uri="pkg:/images/scrim-left.png" width="1920" height="1080" blendColor="0x16191EFF" />
         <Group id="shade" translation="[0, 440]">
             <Poster uri="pkg:/images/scrim-bottom.png" width="1920" height="380" blendColor="0x16191EFF" />
             <Rectangle translation="[0, 379]" width="1920" height="1080" color="0x16191EFF" />

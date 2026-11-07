@@ -18,8 +18,9 @@ a tile (3 dp wide, as Android's PleyFocus, and 2 dp out).
 images/dash.png and images/dash-long.png are the dashes beside Home's
 hero's buttons (Android TV's 14 and 36 dp by 4, rounded), one per title.
 images/scrim-left.png and images/scrim-bottom.png are the gradients over
-a backdrop (Android TV's TvSurfaces.kt: from the left 100 %, 92 %, 85 %
-then nothing; from the top nothing to all), and images/fade-right.png a
+a backdrop (Android TV's TvSurfaces.kt: from the left 100 %, 90 %, 80 % at
+the text's end, then a gentle fall to 20 % at the screen's edge; from
+the top nothing to all), and images/fade-right.png a
 plain fade, each stretched to its place. images/poster-mask.png and
 images/cover-mask.png round a title page's poster and an album's cover
 (a MaskGroup's mask).
@@ -336,8 +337,9 @@ def main():
         write_png(os.path.join(folder, name), box + 2, box + 2, rows)
         print("images/" + name, box + 2, "x", box + 2)
     gradients = (
-        # From the left over 800 dp: 100 % at 0, 92 % at 300, 85 % at 560, none at 800.
-        ("scrim-left.png", 400, 4, render_gradient(400, [(0, 1), (0.375, 0.92), (0.7, 0.85), (1, 0)], True)),
+        # From the left over 960 dp, the whole screen: 100 % at 0, 90 % at 300,
+        # 80 % at the text's end (520), then a long, gentle fall to 20 % at 960.
+        ("scrim-left.png", 480, 4, render_gradient(480, [(0, 1), (300 / 960, 0.9), (520 / 960, 0.8), (620 / 960, 0.68), (720 / 960, 0.53), (820 / 960, 0.38), (1, 0.2)], True)),
         ("scrim-bottom.png", 4, 256, render_gradient(256, [(0, 0), (1, 1)], False)),
         ("fade-right.png", 256, 4, render_gradient(256, [(0, 1), (1, 0)], True)),
     )

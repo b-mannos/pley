@@ -69,6 +69,8 @@ describes how they are made.
 
 ### Changed
 
+- A backdrop's shade from the left eases out across the whole screen, a
+  light 20 % at the far edge, as on Android TV, so no edge shows.
 - A title's page looks like Android TV's: its backdrop fills the screen,
   with no poster, the title is as big as Home's, and its buttons are one
   row, Resume or Play on a pill, then round icon buttons whose names show
