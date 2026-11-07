@@ -25,7 +25,7 @@ const SIZE = 40;
 const ICONS = [
   ["Search"], ["House"], ["Compass"], ["ListVideo"], ["TvMinimal"], ["Clapperboard"], ["Tv"],
   ["Music"], ["Film"], ["Layers"], ["ListMusic"], ["AudioLines"], ["Settings"],
-  ["Play", true], ["RotateCcw"], ["Info"], ["CircleCheck"],
+  ["Play", true], ["RotateCcw"], ["Info"], ["CircleCheck"], ["Plus"], ["Check"],
   ["CalendarDays"], ["LayoutGrid"], ["Clock"], ["Star"], ["Star", true], ["ChevronRight"], ["ChevronDown"],
 ];
 // [Lucide's name, the file's]: the USB drive's page (a folder, a video, ".." up a folder) and its

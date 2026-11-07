@@ -57,13 +57,78 @@ sub test_home_hero_buttons()
     inProgress = homeInfo(homeTestEpisode(), "http://s", false)
     tkEqual(homeHeroButtons(inProgress), { labels: ["Resume", "From start", "Info", "Mark as watched"], actions: ["resume", "start", "info", "watched"] })
     watched = homeInfo({ id: 5, kind: "movie", title: "Dune", user_state: { watched: true } }, "http://s", false)
-    tkEqual(homeHeroButtons(watched), { labels: ["Play", "Info", "Mark as unwatched"], actions: ["start", "info", "unwatched"] })
+    tkEqual(homeHeroButtons(watched), { labels: ["Play", "Info", "Add to My List"], actions: ["start", "info", "listAdd"] }, "a movie's My List in the watched mark's place, as on Android TV")
+    tkEqual(homeHeroButtons(watched, true), { labels: ["Play", "Info", "Remove from My List"], actions: ["start", "info", "listRemove"] }, "on My List")
     show = homeInfo({ id: 9, kind: "show", title: "A show", user_state: {} }, "http://s", false)
-    tkEqual(homeHeroButtons(show), { labels: ["Play", "Info", "Mark as watched"], actions: ["next", "info", "watched"] }, "a show plays its next episode, as on Android TV")
+    tkEqual(homeHeroButtons(show), { labels: ["Play", "Info", "Add to My List"], actions: ["next", "info", "listAdd"] }, "a show plays its next episode, as on Android TV")
     season = homeInfo({ id: 10, kind: "season", title: "Season 1", user_state: {} }, "http://s", false)
     tkEqual(homeHeroButtons(season).actions, ["next", "info", "watched"])
+    tkEqual(homeHeroButtons(season, true).actions, ["next", "info", "watched"], "a season doesn't go on My List")
     album = homeInfo({ id: 7, kind: "album", title: "An album", user_state: {} }, "http://s", false)
     tkEqual(homeHeroButtons(album), { labels: ["Open"], actions: ["info"] })
+end sub
+
+' The featured titles' cases every TV app runs
+' (packages/tv/test/fixtures/featured.json, which the runner gives as
+' pkg:/fixtures/featured.json): the same titles, in the same order, each
+' new or from My List.
+sub test_home_features_what_the_fixture_has()
+    data = ParseJson(ReadAsciiFile("pkg:/fixtures/featured.json"))
+    if data = invalid or httpArray(data.cases).Count() = 0
+        tkFail("the fixture packages/tv/test/fixtures/featured.json didn't load")
+        return
+    end if
+    for each c in data.cases
+        count = homeFeaturedCount()
+        if c.count <> invalid then count = c.count
+        picked = []
+        for each pick in homeFeatured(c.hubs, count)
+            picked.Push({ id: pick.item.id, fromList: pick.fromList })
+        end for
+        tkEqual(picked, c.featured, c.name)
+    end for
+end sub
+
+sub test_home_features_six_at_most()
+    tkEqual(homeFeaturedCount(), 6, "as on the other apps")
+    tkEqual(homeFeatured(invalid, 6), [])
+    tkEqual(homeFeatured([{ key: "recently_added:1", items: invalid }], 6), [])
+end sub
+
+sub test_home_says_why_a_title_is_featured()
+    libraries = [{ id: 1, name: "Movies", kind: "movies" }, { id: 2, name: "TV Shows", kind: "shows" }]
+    tkEqual(homeFeaturedLabel(false, 1, libraries), "New in Movies")
+    tkEqual(homeFeaturedLabel(false, 2, libraries), "New in TV Shows")
+    tkEqual(homeFeaturedLabel(false, 3, libraries), "New", "a library not listed")
+    tkEqual(homeFeaturedLabel(false, 1, invalid), "New", "the libraries not known yet")
+    tkEqual(homeFeaturedLabel(true, 1, libraries), "On your list")
+    i18nUse("fr")
+    tkEqual(homeFeaturedLabel(false, 1, libraries), "Nouveau dans Movies", "a library keeps the server's name")
+    tkEqual(homeFeaturedLabel(false, 0, libraries), "Nouveau")
+    tkEqual(homeFeaturedLabel(true, 1, libraries), "Dans votre liste")
+    i18nUse("es")
+    tkEqual(homeFeaturedLabel(false, 2, libraries), "Novedad en TV Shows")
+    tkEqual(homeFeaturedLabel(false, 0, libraries), "Novedad")
+    tkEqual(homeFeaturedLabel(true, 1, libraries), "En tu lista")
+end sub
+
+sub test_home_featured_label_is_spaced_capitals()
+    thin = Chr(&h2009)
+    tkEqual(typeSpaced("New in Movies"), "N" + thin + "E" + thin + "W" + thin + " " + thin + "I" + thin + "N" + thin + " " + thin + "M" + thin + "O" + thin + "V" + thin + "I" + thin + "E" + thin + "S")
+    tkEqual(typeSpaced("Novedad"), "N" + thin + "O" + thin + "V" + thin + "E" + thin + "D" + thin + "A" + thin + "D")
+    tkEqual(typeSpaced("Ταινίες"), UCase("Ταινίες"), "a script Roboto lacks: in capitals alone, Roku's font may lack the thin space")
+    tkEqual(typeSpaced(""), "")
+end sub
+
+sub test_home_hero_turns_after_nine_quiet_seconds()
+    tkEqual(homeTurnSeconds(), 9, "as on the other apps")
+    tkTrue(homeTurnsNow(6, true, 9, 9000))
+    tkTrue(homeTurnsNow(2, true, 30, 12000))
+    tkFalse(homeTurnsNow(6, true, 8, 30000), "a key 8 s ago starts the time over")
+    tkFalse(homeTurnsNow(6, true, 30, 8999), "turned less than 9 s ago")
+    tkFalse(homeTurnsNow(6, false, 30, 30000), "the focus in the rows, the rail or a dialog")
+    tkFalse(homeTurnsNow(1, true, 30, 30000), "one title")
+    tkFalse(homeTurnsNow(0, true, 30, 30000))
 end sub
 
 sub test_home_says_why_it_is_empty()
@@ -94,7 +159,8 @@ sub test_home_in_french_and_spanish()
     end for
     tkEqual(titles[8], "Bibliothèques", "Libraries in place of the seventh")
     tkEqual(titles[10], "Périphérique USB")
-    tkEqual(homeHeroButtons(homeInfo({ id: 9, kind: "show", title: "A show", user_state: {} }, "http://s", false)).labels, ["Lire", "Infos", "Marquer comme vu"], "a show's Play")
+    tkEqual(homeHeroButtons(homeInfo({ id: 9, kind: "show", title: "A show", user_state: {} }, "http://s", false)).labels, ["Lire", "Infos", "Ajouter à Ma liste"], "a show's Play")
+    tkEqual(homeHeroButtons(homeInfo({ id: 9, kind: "season", title: "Saison 1", user_state: {} }, "http://s", false)).labels, ["Lire", "Infos", "Marquer comme vu"], "a season's")
     i18nUse("es")
     titles = []
     for each entry in homeMenu([{ id: 1, name: "Movies", kind: "movies" }], false, [], false)
@@ -180,6 +246,8 @@ sub test_home_hero_buttons_look_like_android_tvs()
     tkEqual(homeHeroLooks(["start", "info", "unwatched"])[0], { icon: "play-fill", round: false }, "Play")
     tkEqual(homeHeroLooks(["info", "watched"])[0], { icon: "", round: false }, "Open, a pill of words")
     tkEqual(homeHeroLooks(["next", "info"])[0], { icon: "play-fill", round: false }, "a show's Play, its next episode")
+    tkEqual(homeHeroLooks(["start", "info", "listAdd"])[2], { icon: "plus", round: true }, "Add to My List, as Android TV's")
+    tkEqual(homeHeroLooks(["start", "info", "listRemove"])[2], { icon: "check", round: true }, "on My List")
     tkEqual(homeRailIcon({ title: "Libraries", action: "libraries" }), "layers")
     tkEqual(homeRailIcon({ title: "USB drive", action: "drive" }), "usb", "as Android TV's rail")
 end sub

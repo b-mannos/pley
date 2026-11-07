@@ -5,12 +5,16 @@ sub init()
     m.message.text = t("common.states.loading")
     m.backdrop = m.top.findNode("backdrop")
     m.hero = m.top.findNode("hero")
+    m.heroWhy = m.top.findNode("heroWhy")
     m.heroTitle = m.top.findNode("heroTitle")
     m.heroContext = m.top.findNode("heroContext")
     m.heroMeta = m.top.findNode("heroMeta")
     m.heroLeft = m.top.findNode("heroLeft")
     m.heroSummary = m.top.findNode("heroSummary")
+    m.heroBar = m.top.findNode("heroBar")
     m.heroButtons = m.top.findNode("heroButtons")
+    m.heroTurns = m.top.findNode("heroTurns")
+    m.turnClock = m.top.findNode("turnClock")
     m.info = m.top.findNode("info")
     m.infoTitle = m.top.findNode("infoTitle")
     m.infoMeta = m.top.findNode("infoMeta")
@@ -43,13 +47,31 @@ sub init()
     m.rowSigs = {}
     ' Which asking for the rows the answer must be for.
     m.rowsAsked = 0
-    ' The hero (homeInfo), its buttons' actions, and what is known of the
-    ' titles focus rested on ({ itemId: homeInfo }, their details once
-    ' asked for), the one the info block shows (0 for none) and the one
-    ' the rows' focus is on.
+    ' The titles the hero takes turns showing ([{ info (homeInfo, as the
+    ' rows say it), featured, fromList, libraryId }]: the featured ones,
+    ' else Continue Watching's first alone) and the one on, how long ago
+    ' it turned, and the time since the last key (TimeSinceLastKeypress).
+    m.heroes = []
+    m.turn = 0
+    m.turnedAgo = CreateObject("roTimespan")
+    m.device = CreateObject("roDeviceInfo")
+    m.turning = false
+    ' The hero (homeInfo, with its details once they came), its buttons'
+    ' actions, and what is known of the titles focus rested on ({ itemId:
+    ' homeInfo }, their details once asked for), the one the info block
+    ' shows (0 for none) and the one the rows' focus is on.
     m.heroInfo = invalid
     m.heroActions = []
     m.heroLabels = []
+    ' How tall the title's one line and the summary's three are: titles
+    ' taking turns keep the summary's room and the title's last line
+    ' where they are, so the buttons stay put.
+    m.heroTitle.text = "Pley"
+    m.titleLine = m.heroTitle.boundingRect().height
+    m.heroTitle.text = ""
+    m.heroSummary.text = String(80, "Pley ")
+    m.summaryRoom = m.heroSummary.boundingRect().height
+    m.heroSummary.text = ""
     ' A show's next episode is being asked for (its Play).
     m.askingNext = false
     m.infos = {}
@@ -75,6 +97,8 @@ sub init()
     m.rows.observeField("rowItemSelected", "onTile")
     m.rows.observeField("rowItemFocused", "onTileFocused")
     m.heroButtons.observeField("chosen", "onHeroButton")
+    m.heroButtons.observeField("rowWidth", "placeTurns")
+    m.turnClock.observeField("fire", "onTurnClock")
     m.message.observeField("chosen", "onRetry")
     m.rest.observeField("fire", "onRested")
     m.menu.observeField("focusedChild", "onRailFocus")
@@ -106,6 +130,8 @@ sub onActive()
     else
         m.global.session.unobserveFieldScoped("profileName")
     end if
+    ' The hero turns only while Home shows.
+    watchTurns()
     if not m.top.active
         ' Covered by another screen: focus comes back to the same place.
         m.lastFocus = m.menu
@@ -141,8 +167,9 @@ sub onActive()
 end sub
 
 ' A title marked watched, put in My List or taken out of Continue Watching
-' here: the rows follow.
+' here: the rows follow, and the hero's My List says so at once.
 sub onTitleChanged(change as object)
+    if (change.action = "listAdd" or change.action = "listRemove") and m.heroInfo <> invalid then drawHero()
     if change.count > 0 then load()
 end sub
 
@@ -248,6 +275,8 @@ sub onLibraries(event as object)
     m.librariesShown = shown
     m.libraries = libraries
     buildMenu()
+    ' A featured title's library is named over it ("New in Movies").
+    if m.heroInfo <> invalid then drawHero()
 end sub
 
 sub onRows(event as object)
@@ -268,7 +297,9 @@ sub onRows(event as object)
     if rows.Count() = 0
         m.rowKeys = []
         m.rowSigs = {}
+        m.heroes = []
         m.heroInfo = invalid
+        watchTurns()
         showEmpty()
         return
     end if
@@ -280,7 +311,7 @@ sub onRows(event as object)
         load()
         return
     end if
-    showHero(answer.data.hero)
+    showHero(answer.data.hero, answer.data.featured)
     ' The page takes the focus as it first shows: the hero's first button,
     ' as on the other TVs, else the rows.
     if firstShown and m.top.isInFocusChain() then focusPage()
@@ -477,12 +508,22 @@ end sub
 
 ' --- The hero and the info block ---
 
-' The hero for the title the rows have it show (homeHeroItem). What its
-' details said before stays until they come again, so a new answer for the
-' rows never draws it without them for a moment.
-sub showHero(hero as dynamic)
-    if hero = invalid
+' The hero for the titles the rows have it feature (homeFeatured), taking
+' turns, else for its one title (homeHeroItem); it stays on the title it
+' showed while that is among them. Their details are all asked for at
+' once, so turning to one shows it whole; what they said before stays
+' until they come again, so a new answer for the rows never draws the
+' hero without them for a moment.
+sub showHero(hero as dynamic, featured as dynamic)
+    heroes = []
+    for each entry in httpArray(featured)
+        heroes.Push({ info: entry.info, featured: true, fromList: entry.fromList, libraryId: entry.libraryId })
+    end for
+    if heroes.Count() = 0 and hero <> invalid then heroes.Push({ info: hero, featured: false, fromList: false, libraryId: 0 })
+    if heroes.Count() = 0
+        m.heroes = []
         m.heroInfo = invalid
+        watchTurns()
         if m.heroButtons.isInFocusChain()
             m.rows.setFocus(true)
             m.inRows = true
@@ -490,26 +531,64 @@ sub showHero(hero as dynamic)
         placeRows()
         return
     end if
-    known = m.infos[urlValue(hero.itemId)]
-    if known <> invalid and known.complete
-        hero.meta = known.meta
-        hero.summary = known.summary
-    end if
-    m.heroInfo = hero
-    drawHero()
-    if known = invalid or known.loads <> m.loads then askInfo(hero.itemId)
+    shownId = 0
+    if m.heroInfo <> invalid then shownId = m.heroInfo.itemId
+    turn = m.turn
+    if turn >= heroes.Count() then turn = 0
+    for i = 0 to heroes.Count() - 1
+        if heroes[i].info.itemId = shownId then turn = i
+    end for
+    if heroes.Count() <> m.heroes.Count() then m.turnedAgo.Mark()
+    m.heroes = heroes
+    m.turn = turn
+    for each entry in heroes
+        known = m.infos[urlValue(entry.info.itemId)]
+        if known = invalid or known.loads <> m.loads then askInfo(entry.info.itemId)
+    end for
+    showTurn()
     placeRows()
+    watchTurns()
+end sub
+
+' The hero shows the title of its turn: what the rows say of it, with its
+' details once they came (whole, once asked for since the last load).
+sub showTurn()
+    info = m.heroes[m.turn].info
+    known = m.infos[urlValue(info.itemId)]
+    if known <> invalid and known.complete
+        if known.loads = m.loads
+            info = known
+        else
+            info.meta = known.meta
+            info.summary = known.summary
+        end if
+    end if
+    m.heroInfo = info
+    drawHero()
 end sub
 
 sub drawHero()
     info = m.heroInfo
     if info = invalid then return
+    entry = m.heroes[m.turn]
+    why = ""
+    if entry.featured then why = typeSpaced(homeFeaturedLabel(entry.fromList, entry.libraryId, m.libraries))
+    typeSet(m.heroWhy, why)
     typeSet(m.heroTitle, info.title)
     typeSet(m.heroContext, info.context)
     typeSet(m.heroMeta, info.meta)
     typeSet(m.heroLeft, info.timeLeft)
     typeSet(m.heroSummary, info.summary)
-    buttons = homeHeroButtons(info)
+    ' Taking turns, the summary keeps its three lines' room, even empty.
+    turns = m.heroes.Count() > 1
+    if turns
+        m.heroSummary.height = m.summaryRoom
+    else
+        m.heroSummary.height = 0
+    end if
+    ' My List as Home's My List row has it (the scene's).
+    listed = pageInList(m.top.getScene().myList, info.itemId)
+    buttons = homeHeroButtons(info, GetInterface(listed, "ifBoolean") <> invalid and listed)
     m.heroActions = buttons.actions
     if FormatJson(buttons.labels) <> FormatJson(m.heroLabels)
         m.heroLabels = buttons.labels
@@ -520,17 +599,93 @@ sub drawHero()
         end for
         m.heroButtons.chips = chips
     end if
-    layOut(m.hero, [{ label: m.heroTitle, gap: 0 }, { label: m.heroContext, gap: 20 }, { label: m.heroMeta, gap: 16 }, { label: m.heroLeft, gap: 20 }, { label: m.heroSummary, gap: 20 }], m.heroButtons, 40)
+    drawTurns()
+    layOut(m.hero, [{ label: m.heroWhy, gap: 0 }, { label: m.heroTitle, gap: 24 }, { label: m.heroContext, gap: 20 }, { label: m.heroMeta, gap: 16 }, { label: m.heroLeft, gap: 20 }, { label: m.heroSummary, gap: 20, keep: turns }], m.heroBar, 40)
+    ' Taking turns, a title of two lines grows up, as Android TV's does:
+    ' what is under it stays where it was.
+    lift = 0
+    if turns then lift = Int(m.heroTitle.boundingRect().height - m.titleLine)
+    if lift < 0 then lift = 0
+    m.hero.translation = [192, 104 - lift]
     if not m.inRows then setBackdrop(info.backdrop)
 end sub
 
-' Only the labels with text stay in a column, each after its gap; then
-' its last child (the hero's buttons).
+' The dashes beside the hero's buttons while titles take turns, one each,
+' the one on longer and white, as Android TV's.
+sub drawTurns()
+    count = m.heroes.Count()
+    if count < 2
+        m.heroTurns.visible = false
+        return
+    end if
+    if m.heroTurns.getChildCount() <> count
+        m.heroTurns.removeChildrenIndex(m.heroTurns.getChildCount(), 0)
+        for i = 1 to count
+            dash = m.heroTurns.createChild("Poster")
+            dash.height = 8
+            dash.blendColor = "0xEBEBEBFF"
+        end for
+    end if
+    x = 0
+    for i = 0 to count - 1
+        dash = m.heroTurns.getChild(i)
+        if i = m.turn
+            dash.uri = "pkg:/images/dash-long.png"
+            dash.width = 72
+            dash.opacity = 1.0
+        else
+            dash.uri = "pkg:/images/dash.png"
+            dash.width = 28
+            dash.opacity = 0.3
+        end if
+        dash.translation = [x, 0]
+        x = x + dash.width + 16
+    end for
+    m.heroTurns.visible = true
+    placeTurns()
+end sub
+
+' The dashes, 48 pixels after the last button, in the middle of the row.
+sub placeTurns()
+    m.heroTurns.translation = [m.heroButtons.rowWidth + 48, 36]
+end sub
+
+' The hero's clock runs while Home shows titles taking turns.
+sub watchTurns()
+    turning = m.top.active and m.heroes.Count() > 1
+    if turning = m.turning then return
+    m.turning = turning
+    if turning
+        m.turnClock.control = "start"
+    else
+        m.turnClock.control = "stop"
+    end if
+end sub
+
+' The next title once 9 s went by without a key or a turn, while the
+' hero's buttons have the focus (homeTurnsNow).
+sub onTurnClock()
+    focused = m.top.active and m.heroButtons.isInFocusChain()
+    if homeTurnsNow(m.heroes.Count(), focused, m.device.TimeSinceLastKeypress(), m.turnedAgo.TotalMilliseconds()) then turnHero()
+end sub
+
+' The next title in the hero, the focus on its first button: its buttons
+' may not be the last one's (From start).
+sub turnHero()
+    if m.heroes.Count() < 2 then return
+    m.turn = (m.turn + 1) mod m.heroes.Count()
+    m.turnedAgo.Mark()
+    m.heroButtons.focusIndex = 0
+    showTurn()
+end sub
+
+' Only the labels with text (or kept without) stay in a column, each after
+' its gap; then its last child (the hero's bar of buttons).
 sub layOut(column as object, parts as object, last as dynamic, lastGap as integer)
     shown = []
     spacings = []
     for each part in parts
-        if part.label.text <> ""
+        if part.label.text <> "" or (part.DoesExist("keep") and part.keep)
             if shown.Count() > 0 then spacings.Push(part.gap)
             shown.Push(part.label)
         end if
@@ -545,7 +700,7 @@ sub layOut(column as object, parts as object, last as dynamic, lastGap as intege
     column.removeChildrenIndex(column.getChildCount(), 0)
     column.appendChildren(shown)
     column.itemSpacings = spacings
-    if focused then last.setFocus(true)
+    if focused then m.heroButtons.setFocus(true)
 end sub
 
 ' The scene's agent as each backdrop is asked for, as the other screens
@@ -606,10 +761,7 @@ sub onInfo(event as object)
     ' What is kept stays small: the titles of a few rows.
     if m.infos.Count() >= 100 then m.infos = {}
     m.infos[urlValue(info.itemId)] = info
-    if m.heroInfo <> invalid and m.heroInfo.itemId = info.itemId
-        m.heroInfo = info
-        drawHero()
-    end if
+    if m.heroInfo <> invalid and m.heroInfo.itemId = info.itemId then showTurn()
     if m.infoShown = info.itemId and m.restingOn = info.itemId then drawInfo(info)
 end sub
 
@@ -667,7 +819,9 @@ end function
 ' Resume or Play plays a movie or an episode (From start, from its
 ' start), a show's or a season's Play its next episode (GET
 ' /api/items/{id}/on-deck); Info, and Open for anything else, opens its
-' page; the watched mark toggles, and Home asks for its rows again.
+' page; My List and the watched mark toggle (PUT or DELETE
+' /api/watchlist/{id}, as the Options key does), and Home asks for its
+' rows again.
 sub onHeroButton(event as object)
     info = m.heroInfo
     if info = invalid then return
@@ -778,8 +932,9 @@ sub focusPage()
 end sub
 
 ' Down from the hero goes to the rows, Up from their first row back to
-' it; Back from the rows puts the page back at its hero, and Left or Back
-' goes to the menu, as on the other TVs.
+' it; Right from its last button turns it to its next title; Back from the
+' rows puts the page back at its hero, and Left or Back goes to the menu,
+' as on the other TVs.
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
     ' The focus given back to the screen itself (what had it went): the
@@ -824,6 +979,11 @@ function onKeyEvent(key as string, press as boolean) as boolean
         return false
     end if
     if m.heroButtons.isInFocusChain()
+        ' Right from the last button: the next title, as along a row.
+        if key = "right" and m.heroes.Count() > 1
+            turnHero()
+            return true
+        end if
         if key = "down" and m.rows.visible
             m.rows.setFocus(true)
             m.inRows = true

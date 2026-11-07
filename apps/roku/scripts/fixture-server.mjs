@@ -544,6 +544,8 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
       fixture.libraryOrder = [1, 2, 3];
       return json(200, ordered());
     }
+    // Home's rows. Its hero features what Recently Added has not yet
+    // watched, the movies and Severance in turn.
     if (path === "/api/hubs/home") {
       return json(200, {
         hubs: [
@@ -685,7 +687,8 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
       res.writeHead(200, { "Content-Type": "image/png" });
       return res.end(POSTER);
     }
-    // Marks, My List and Continue Watching (the Options key, a title's buttons).
+    // Marks, My List and Continue Watching (the Options key, a title's
+    // buttons, Home's hero).
     if ((match = path.match(/^\/api\/items\/(\d+)\/(watched|unwatched)$/)) && req.method === "POST") {
       fixture.marks.push({ item: Number(match[1]), action: match[2] });
       res.writeHead(204);

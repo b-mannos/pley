@@ -64,7 +64,7 @@ files.set("source/run.brs", new Blob([main]));
 // The rules every TV app shares (packages/tv/test/fixtures), which the
 // tests read as pkg:/fixtures/<name>.json.
 const fixtures = join(root, "../../packages/tv/test/fixtures");
-for (const name of ["remote.json", "language.json"]) {
+for (const name of ["remote.json", "language.json", "featured.json"]) {
   files.set(`fixtures/${name}`, new Blob([readFileSync(join(fixtures, name))]));
 }
 // The words, as the package has them (pkg:/locales/<language>/<area>.json).

@@ -1,7 +1,9 @@
 // Runs the whole app, SceneGraph and Tasks included, in brs-node against
 // a fake pley server on 127.0.0.1 (scripts/fixture-server.mjs), and walks
 // it with the remote: sign in with the TV code and its QR code on a server
-// that requires two-step sign-in, Home, a title's details, the player and
+// that requires two-step sign-in, Home (its hero turning through the
+// featured titles by itself and with Right, its My List), a title's
+// details, the player and
 // subtitles picked in its menu, the Options key, a library's grid, its A
 // to Z and the pages a jump passes over, a sort by bitrate and a filter
 // by resolution with their quality badges, filters saved as a smart
@@ -467,6 +469,9 @@ const pages = { diagnostics: false, licences: false };
 const offline = { asked: false };
 // Home asks again only after playing, or when its rows are a minute old.
 const home = { kept: false };
+// Home's hero: the featured titles' details asked for at once, the hero
+// turning by itself, then with Right from its last button, and its My List.
+const hero = { details: false, turned: false, right: false };
 // From when the server knew nothing of requests (an older one).
 const older = { since: -1 };
 // The ready-to-watch notice: it waited while the requests showed, then
@@ -511,6 +516,37 @@ function pixel(x, y) {
   return [frame.data[at], frame.data[at + 1], frame.data[at + 2]];
 }
 const accent = ([r, g, b]) => r < 120 && g > 150 && b > 200;
+// The hero's button with the focus, by where the accent is in the hero's
+// band above the rows (HomeScreen.xml, from 192): Play or Resume, a pill
+// 256 wide, then the round buttons, 80 wide and 16 apart. -1 for none.
+function heroButtonFocused() {
+  if (!frame) return -1;
+  let sum = 0;
+  let count = 0;
+  for (let y = 200; y < 760; y += 4) {
+    for (let x = 192; x < 1100; x += 4) {
+      if (accent(pixel(x, y))) {
+        sum += x;
+        count += 1;
+      }
+    }
+  }
+  if (count === 0) return -1;
+  const x = sum / count;
+  return x < 192 + 256 + 8 ? 0 : 1 + Math.round((x - (192 + 256 + 16 + 40)) / 96);
+}
+// Right along the hero's buttons to the one at index; a key brs-node
+// dropped is pressed again.
+async function heroToButton(index) {
+  for (let attempt = 0; attempt < 6; attempt++) {
+    await sleep(300);
+    const at = heroButtonFocused();
+    if (at === index) return;
+    if (at < 0 || at > index) break;
+    await press("right", index - at);
+  }
+  throw new Error(`couldn't reach the hero's button ${index} (focus on ${heroButtonFocused()})`);
+}
 // The drive's page: line index focused (its bar in the accent, DriveRow.xml
 // at 96, 196, a line each 100 down).
 function driveLineFocused(index) {
@@ -623,10 +659,40 @@ async function walk() {
   twoStep.shown = seen(/^GET \/api\/server$/, 0) && (await drawnWithin(1000, twoStepDrawn));
   shoot("sign-in");
   await waitFor(/^GET \/api\/hubs\/home$/, 0, "Home");
+  const homeAt = mark();
   await settle();
   shoot("home");
+  // The hero features the newest titles not yet watched with a backdrop,
+  // each library's in turn: 2001 Movie 001 (in progress), Severance, then
+  // the next movies (Cedar's is watched), their details asked for at once.
+  hero.details = [1000, 99, 1001, 1002, 1004, 1005].every((id) => seen(new RegExp(`^GET /api/items/${id}$`), 0));
+  // No key pressed since signing in: 9 s on, it turns to Severance by
+  // itself, the focus on its Play. A key at once holds it there.
+  await waitFor(/^GET \/api\/items\/99\/images\/backdrop/, homeAt, "the hero's next title, by itself", { ms: 40000, settles: false });
+  hero.turned = true;
+  await press("up");
+  await sleep(1000);
+  shoot("home-turned");
+  // My List, after Play and Info: Severance put on it, then taken off
+  // (the walk's My List as it was), Home asked again each time.
+  await heroToButton(2);
   let since = mark();
-  // The hero's Resume has the focus: Down to the rows.
+  await press("select");
+  await waitFor(/^PUT \/api\/watchlist\/99$/, since, "the hero's title put on My List", { settles: false });
+  await waitFor(/^GET \/api\/hubs\/home$/, since, "Home after My List", { settles: false });
+  await sleep(1000);
+  shoot("home-my-list");
+  since = mark();
+  await press("select"); // Remove from My List, the focus kept on it
+  await waitFor(/^DELETE \/api\/watchlist\/99$/, since, "the hero's title taken off My List", { settles: false });
+  await waitFor(/^GET \/api\/hubs\/home$/, since, "Home after My List again", { settles: false });
+  // Right from My List, the last button: the next title, 2001 Movie 002.
+  since = mark();
+  await press("right");
+  await waitFor(/^GET \/api\/items\/1001\/images\/backdrop/, since, "the hero's next title, with Right");
+  hero.right = true;
+  since = mark();
+  // The hero's Play has the focus: Down to the rows.
   await press("down");
   await press("select"); // the first of Continue Watching: an episode
   await waitFor(/^GET \/api\/items\/103$/, since, "its details");
@@ -1708,6 +1774,9 @@ const checks = [
   // The fake server says so when a token goes before a proof.
   ["had the server prove itself before its token went", fixture.proofs > 0],
   ["loaded Home", asked(/^GET \/api\/hubs\/home$/)],
+  ["asked for the details of every title Home's hero features, at once", hero.details],
+  ["turned Home's hero to its next title after 9 s without a key, and with Right from its last button", hero.turned && hero.right],
+  ["put the hero's title on My List and took it off again", fixture.marks.some((m) => m.item === 99 && m.action === "listAdd") && fixture.marks.some((m) => m.item === 99 && m.action === "listRemove")],
   ["asked to play with its capabilities", asked(/^POST \/api\/playback$/)],
   ["drew the PGS subtitles picked itself: nothing burned in, their list asked for where the playback starts", fixture.playbacks.some((p) => p.item === 103 && p.subtitle_index === null && p.keyed && p.draws_pgs) && fixture.picturesAsked.some((p) => p.session === "s2" && p.index === 4)],
   ["asked again for picture subtitles not whole yet", fixture.picturesAsked.filter((p) => p.session === "s2").length >= 2],

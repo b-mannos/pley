@@ -30,6 +30,22 @@ function typeStyle(name as string) as object
     return style
 end function
 
+' text in capitals spaced out, as Android TV's hero writes why a title is
+' there ("NEW IN MOVIES", 3 sp apart): a thin space after each character,
+' 5.7 pixels in Roboto at 28. Roku's own font, which draws what Roboto
+' lacks, may lack the thin space: such text is in capitals alone.
+function typeSpaced(text as string) as string
+    upper = UCase(text)
+    if not typeCovers(upper) then return upper
+    thin = Chr(&h2009)
+    out = ""
+    for i = 1 to Len(upper)
+        if i > 1 then out = out + thin
+        out = out + Mid(upper, i, 1)
+    end for
+    return out
+end function
+
 ' Whether Pley's Roboto, its Latin files, draws every character of text:
 ' Roku draws a label in one font, without falling back to another for a
 ' character it lacks, so a title in Greek, Cyrillic, Polish or Japanese

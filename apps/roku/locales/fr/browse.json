@@ -20,7 +20,12 @@
     "scanning": "Analyse de vos bibliothèques…",
     "scanningHint": "Les nouveaux titres apparaissent ici dès qu’ils sont trouvés.",
     "empty": "Rien pour l’instant",
-    "emptyHint": "Vos bibliothèques sont vides. Ajoutez des médias dans leurs dossiers et lancez une analyse."
+    "emptyHint": "Vos bibliothèques sont vides. Ajoutez des médias dans leurs dossiers et lancez une analyse.",
+    "featured": {
+      "newIn": "Nouveau dans {{library}}",
+      "new": "Nouveau",
+      "onList": "Dans votre liste"
+    }
   },
   "counts": {
     "seasons_one": "{{count, number}} saison",

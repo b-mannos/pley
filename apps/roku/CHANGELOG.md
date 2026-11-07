@@ -10,6 +10,13 @@ describes how they are made.
 
 ### Added
 
+- Home's hero features the newest movies and shows you haven't watched,
+  as the web and the other TVs do, each saying why it's there ("New in
+  Movies", "On your list"), with Play, Info and My List. Right from its
+  last button goes to the next title, and it turns to the next by itself
+  every 9 seconds while you aren't pressing anything; dashes beside the
+  buttons show which one is on. With nothing new, it shows Continue
+  Watching's first, as before.
 - Videos on a USB drive, on a Roku with a USB port (Roku Ultra): while a
   drive is plugged in, Home's menu has USB drive before Settings, and the
   screen saying the server can't be reached has a USB drive button. Its

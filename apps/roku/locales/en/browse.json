@@ -20,7 +20,12 @@
     "scanning": "Scanning your libraries…",
     "scanningHint": "New titles show up here as soon as they're found.",
     "empty": "Nothing here yet",
-    "emptyHint": "Your libraries are empty. Add media to the library folders and run a scan."
+    "emptyHint": "Your libraries are empty. Add media to the library folders and run a scan.",
+    "featured": {
+      "newIn": "New in {{library}}",
+      "new": "New",
+      "onList": "On your list"
+    }
   },
   "counts": {
     "seasons_one": "{{count, number}} season",
