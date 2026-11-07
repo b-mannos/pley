@@ -41,13 +41,15 @@ fun invitationLink(server: String, code: String): String = server.trimEnd('/') +
 class InvitationsViewModel(
     admin: ServerAdmin,
     private val session: StateFlow<Session?>,
-    clock: () -> Long = { System.currentTimeMillis() / 1000 },
+    private val clock: () -> Long = { System.currentTimeMillis() / 1000 },
 ) : AdminViewModel(admin) {
     val invitations = resource { get(ListSerializer(Invitation.serializer()), INVITES) }
     val libraries = resource { get(ListSerializer(Library.serializer()), LIBRARIES) }
 
-    /** When the page opened: "expires" or "expired" is decided once per visit, as the web does. */
-    val now: Long = clock()
+    private val shownAt = MutableStateFlow(clock())
+
+    /** When the page last showed: "expires" or "expired" is decided once per visit, as the web does. */
+    val now: StateFlow<Long> = shownAt.asStateFlow()
 
     /** [invitation]'s link; `null` while the server isn't known. */
     fun link(invitation: Invitation): String? = session.value?.issuer?.let { invitationLink(it, invitation.code) }
@@ -56,8 +58,11 @@ class InvitationsViewModel(
         call("DELETE", listOf("api", "invites", invitation.code))
     }
 
-    /** The page shows again after making one: it is read. */
-    fun shownAgain() = invitations.reload()
+    /** The page shows again after making one: it is read, as of now. */
+    fun shownAgain() {
+        shownAt.value = clock()
+        invitations.reload()
+    }
 
     companion object {
         const val DELETED = "deleted"

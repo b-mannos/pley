@@ -105,6 +105,7 @@ private fun InvitationsList() {
     val add = { navigator.open(PleyKey.Manage(AdminSection.Invitations, PleyKey.Manage.NEW)) }
     AdminEvents(model) { done -> if (done.what == InvitationsViewModel.DELETED) resources.getString(R.string.admin_invitations_deleted) else null }
     ShownAgain(model::shownAgain)
+    val now by model.now.collectAsStateWithLifecycle()
     val words = formatWords()
     AdminPage(
         title = stringResource(R.string.admin_section_invitations),
@@ -138,8 +139,8 @@ private fun InvitationsList() {
                         if (i > 0) RowDivider(inset = false)
                         InvitationRow(
                             invitation = invitation,
-                            state = stateOf(invitation, model.now),
-                            now = model.now,
+                            state = stateOf(invitation, now),
+                            now = now,
                             words = words,
                             libraries = libraries.valueOrNull,
                             onCopy = model.link(invitation)?.let { link -> { copy(link) } },

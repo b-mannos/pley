@@ -41,7 +41,7 @@ class InvitationsViewModelTest {
     fun theListShowsEachLinksStateAsOfWhenThePageOpened() = runTest {
         val page = InvitationsViewModel(server(), session, clock = { 1000 })
         val invitations = (page.invitations.state.value as AdminLoad.Ready).value
-        assertEquals(listOf(InvitationState.Active, InvitationState.Used, InvitationState.Expired), invitations.map { stateOf(it, page.now) })
+        assertEquals(listOf(InvitationState.Active, InvitationState.Used, InvitationState.Expired), invitations.map { stateOf(it, page.now.value) })
         assertEquals("http://nas:7539/invite/active1", page.link(invitations[0]))
         // Spent counts first, as on the web: a used link that also expired is Used.
         assertEquals(InvitationState.Used, stateOf(Invitation("x", expiresAt = 1, usesLeft = 0), 1000))
