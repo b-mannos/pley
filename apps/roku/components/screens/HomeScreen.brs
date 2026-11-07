@@ -81,8 +81,21 @@ sub init()
     m.remoteSeen = 0
     m.top.observeField("active", "onActive")
     m.top.observeField("refresh", "onRefresh")
+    ' A USB drive plugged in or pulled out: its entry comes or goes.
+    m.driveShown = false
+    m.global.drive.observeFieldScoped("drive", "onDrive")
     buildMenu()
 end sub
+
+sub onDrive()
+    if driveHere() <> m.driveShown then buildMenu()
+end sub
+
+' Whether a USB drive is plugged in (the drive task's word).
+function driveHere() as boolean
+    drive = m.global.drive.drive
+    return drive <> invalid and httpString(drive.volume) <> ""
+end function
 
 sub onActive()
     ' The profile's name, for the avatar, while Home shows.
@@ -99,6 +112,8 @@ sub onActive()
         if m.heroButtons.isInFocusChain() then m.lastFocus = m.heroButtons
         return
     end if
+    ' A drive plugged in that told nothing gets its entry too.
+    uiDrive({ op: "look" }, "")
     if not m.started
         m.started = true
         uiChangesSince()
@@ -283,8 +298,9 @@ end sub
 sub buildMenu()
     m.requestEntries = requestEntries()
     m.musicShown = m.global.music.state <> "stopped"
+    m.driveShown = driveHere()
     entries = [profileEntry()]
-    for each entry in homeMenu(m.libraries, m.live, m.requestEntries, m.musicShown)
+    for each entry in homeMenu(m.libraries, m.live, m.requestEntries, m.musicShown, m.driveShown)
         entry.icon = homeRailIcon(entry)
         entry.current = entry.action = "home"
         entries.Push(entry)
@@ -735,6 +751,8 @@ sub onMenu(event as object)
         uiNavigate({ to: "requests" })
     else if action = "settings"
         uiNavigate({ to: "settings" })
+    else if action = "drive"
+        uiNavigate({ to: "drive", params: { folder: "" } })
     else if m.global.music.state = "stopped"
         ' The music ended meanwhile.
         buildMenu()

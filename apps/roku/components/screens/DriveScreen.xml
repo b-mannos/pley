@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A folder of the USB drive, as on Android TV and the native Samsung app
+     (DriveScreen.brs): the drive's name, where the folder is under it,
+     then a line each for its folders and videos, ".." first under the
+     drive's top; or, in the middle of the page under an icon, why there is
+     nothing to list. -->
+<component name="DriveScreen" extends="Group">
+    <interface>
+        <field id="route" type="string" />
+        <!-- { folder }: the folder shown, "" for the drive's top. -->
+        <field id="params" type="assocarray" />
+        <field id="navigate" type="assocarray" alwaysNotify="true" />
+        <field id="active" type="boolean" alwaysNotify="true" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/screens/DriveScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Nav.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Format.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Drive.brs" />
+    <children>
+        <Label id="title" translation="[96, 56]" width="1728" maxLines="1" text="USB drive" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
+        <Label id="place" translation="[96, 128]" width="1728" maxLines="1" color="0xA1A9B6FF" font="font:SmallerSystemFont" />
+        <MarkupList id="lines" translation="[96, 196]" itemComponentName="DriveRow" itemSize="[1440, 96]" itemSpacing="[0, 4]" numRows="8" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" />
+        <!-- No drive, nothing to play, a folder that can't be read: in the
+             middle of the page, under ".." where there is one. -->
+        <Group id="message" visible="false">
+            <Poster id="messageIcon" translation="[800, 0]" width="128" height="128" uri="pkg:/images/icons/usb.png" blendColor="0xA1A9B6FF" />
+            <Label id="messageTitle" translation="[0, 152]" width="1728" horizAlign="center" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
+            <Label id="messageText" translation="[0, 212]" width="1728" horizAlign="center" wrap="true" maxLines="3" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+        </Group>
+        <Label id="loading" translation="[96, 480]" width="1728" horizAlign="center" text="Loading…" color="0xA1A9B6FF" font="font:MediumSystemFont" visible="false" />
+    </children>
+</component>

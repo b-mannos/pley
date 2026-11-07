@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A line of the USB drive's page (DriveScreen): its icon on a tile, its
+     name, what it is or where it resumes with a bar of how far through it
+     is under them, and a video's size at the end; as an album's tracks
+     look focused. The task's ContentNode (DriveTask.brs's driveNode). -->
+<component name="DriveRow" extends="Group">
+    <interface>
+        <field id="itemContent" type="node" onChange="onContent" />
+        <field id="itemHasFocus" type="boolean" onChange="onFocus" />
+        <field id="listHasFocus" type="boolean" value="true" onChange="onFocus" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/items/DriveRow.brs" />
+    <children>
+        <Rectangle id="background" width="1440" height="96" color="0x1E222AFF" />
+        <Rectangle id="bar" width="6" height="96" color="0x38BDF8FF" visible="false" />
+        <Rectangle id="tile" translation="[28, 16]" width="64" height="64" color="0x262B35FF" />
+        <Poster id="icon" translation="[40, 28]" width="40" height="40" loadDisplayMode="scaleToFit" blendColor="0xA1A9B6FF" />
+        <Label id="title" translation="[120, 12]" width="1100" height="40" vertAlign="center" maxLines="1" color="0xEBEBEBFF" font="font:SmallSystemFont" />
+        <Label id="subtitle" translation="[120, 50]" width="1100" height="28" vertAlign="center" maxLines="1" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+        <!-- How far through it is, under the name. -->
+        <Rectangle id="track" translation="[120, 82]" width="240" height="4" color="0x3A4150FF" visible="false" />
+        <Rectangle id="fill" translation="[120, 82]" height="4" color="0x38BDF8FF" visible="false" />
+        <Label id="size" translation="[1236, 0]" width="176" height="96" horizAlign="right" vertAlign="center" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+    </children>
+</component>

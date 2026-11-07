@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The USB drive plugged into the Roku (DriveTask.brs): which one, as
+     Roku mounts and unmounts it, and what the screens ask of it, handed
+     over as ApiRequest nodes through `request` (Ui.brs's uiDrive). -->
+<component name="DriveTask" extends="Task">
+    <interface>
+        <!-- { volume ("ext1:"; "" for none), name, space ("437 GB free of
+             1.0 TB"; "" when the Roku doesn't say) }. -->
+        <field id="drive" type="assocarray" alwaysNotify="true" />
+        <field id="request" type="node" alwaysNotify="true" />
+        <!-- Set once the task listens: a request set before is never seen. -->
+        <field id="ready" type="boolean" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/tasks/DriveTask.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Format.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Drive.brs" />
+</component>

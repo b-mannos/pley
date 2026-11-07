@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The server doesn't answer: why, Retry (the screen that needed it) or
-     Switch server. Shown in place of that screen, which comes back by
-     itself once the server answers. -->
+<!-- The server doesn't answer: why, Retry (the screen that needed it),
+     Switch server, and USB drive while one is plugged in. Shown in place
+     of that screen, which comes back by itself once the server answers. -->
 <component name="UnreachableScreen" extends="Group">
     <interface>
         <field id="route" type="string" />

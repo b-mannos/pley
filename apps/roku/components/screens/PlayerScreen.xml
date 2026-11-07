@@ -7,7 +7,8 @@
      Chapters, Previous chapter, Next chapter, Next episode, Sleep timer,
      Find subtitles…, Playback details), the sleep timer's notice,
      Automatic's notice of a lower quality, "Reconnecting…" while the
-     server is out of reach, and what went wrong when it did. -->
+     server is out of reach, and what went wrong when it did; a video on a
+     USB drive plays here too, with no server. -->
 <component name="PlayerScreen" extends="Group">
     <interface>
         <field id="route" type="string" />
@@ -42,6 +43,7 @@
     <script type="text/brightscript" uri="pkg:/components/lib/SubtitleSearch.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Sleep.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Pictures.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Drive.brs" />
     <children>
         <Rectangle width="1920" height="1080" color="0x000000FF" />
         <Video id="video" width="1920" height="1080">
@@ -51,6 +53,13 @@
             <Group id="pictures">
                 <Poster id="pictureA" opacity="0" loadDisplayMode="scaleToFit" />
                 <Poster id="pictureB" opacity="0" loadDisplayMode="scaleToFit" />
+            </Group>
+            <!-- A drive's subtitle file, drawn here (DriveScreen's videos):
+                 the cue's text over its shadow, at the foot of the picture,
+                 under the skip button and the player's panels. -->
+            <Group id="cue" visible="false">
+                <Label id="cueShadow" translation="[163, 723]" width="1600" height="280" horizAlign="center" vertAlign="bottom" wrap="true" maxLines="4" color="0x101010CC" font="font:MediumBoldSystemFont" />
+                <Label id="cueText" translation="[160, 720]" width="1600" height="280" horizAlign="center" vertAlign="bottom" wrap="true" maxLines="4" color="0xEBEBEBFF" font="font:MediumBoldSystemFont" />
             </Group>
             <SkipButton id="skip" translation="[1544, 924]" visible="false" />
         </Video>

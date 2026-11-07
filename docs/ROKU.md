@@ -79,7 +79,8 @@ then Search, Home, one way into requests (where the server has them:
 Discover where the profile may ask, else Your requests, a manager's
 Requests, with the number of what waits there), Live TV, the libraries,
 Playlists, Collections (every library's collections, a row each), Now
-Playing while music plays, and Settings, each with its icon. With more
+Playing while music plays, USB drive while one is plugged in
+([below](#videos-on-a-usb-drive)), and Settings, each with its icon. With more
 than six libraries, as on Android TV, the rail lists the first six, then
 Libraries in place of Collections: every library, with what it holds
 ("Movies · 412 movies"). While the focus is in the page the rail shows
@@ -926,6 +927,79 @@ Not offered: Approve's choices of profile, folder and seasons (on the web
 and phones; Approve here approves what was asked), bulk approve and
 decline, and the requests' settings (the web).
 
+### Videos on a USB drive
+
+On a Roku with a USB port (Roku Ultra, some Roku TVs), while a USB drive
+is plugged in, Home's menu has **USB drive** before Settings, as Android
+TV and the native Samsung app have it
+([ANDROID.md](ANDROID.md#videos-on-a-usb-drive),
+[TV_PLATFORMS.md](TV_PLATFORMS.md#videos-on-a-usb-drive)). Its page lists
+the drive's folders, then its videos, each sorted as a person sorts names
+("Part 2" before "Part 10"); hidden files, what Windows and macOS leave on
+a drive, and other files aren't shown. The videos are those Roku's Video
+node plays as they are: MKV and WebM (`streamFormat` `mkv`), MP4, M4V and
+MOV (`mp4`). The page's title is the name the drive was given (its volume
+label), else "USB drive"; under it, the folder's path ("/Films/2019"), at
+the drive's top "/" and how full the drive is. A folder opens over the one
+before, with ".." first to go back up. A video's line gives its kind, or
+where it resumes with a bar of how far through it is, and its size. No
+drive, an empty folder and one that can't be read say so in the middle of
+the page, under an icon. The page and the menu follow the drive as it is
+plugged in or pulled out.
+
+A video plays in Pley's player as it is, with no server, also while the
+server is out of reach: the screen that says so has **USB drive** beside
+Try again and Switch server while a drive is plugged in, and Back from
+the drive's page comes back to it. Seeking, the sleep timer and Playback
+details are the same as for the server's videos. What only a server does
+isn't there: converting, Quality, seek previews, Find subtitles…, saving
+track choices, the next episode, Continue Watching and the remote on
+other devices.
+
+- **The drive** is the first of Roku's USB volumes (`ext1:`, `ext2:`…,
+  `roFileSystem`'s `GetVolumeList`), read by the drive task
+  (`components/tasks/DriveTask`): `roFileSystem` works only in a Task, and
+  a large folder takes a while. It lists a folder with
+  `GetDirectoryListing`, then `Stat` for each name that shows, 5,000
+  entries at most, folders first. Roku tells of a drive plugged in or
+  pulled out (`roFileSystemEvent`), and the task looks again as Home, the
+  screen saying the server is out of reach or the drive's page shows, for
+  a Roku that tells nothing. Roku mounts USB drives read-only.
+- **The Video node** is given the file's path as its address
+  (`ext1:/Films/Ad Astra.mkv`, no `file://`), as Roku Media Player plays
+  a drive's files; Roku's documentation of the Video node names no local
+  address, only that `mp4` covers MOV and M4V and `mkv` WebM.
+- **Pley's menu** (Down) has Subtitles: Off, the file's own tracks as the
+  Video node lists them, which the Roku shows (captions on for them), then
+  the `.srt` and `.vtt` files beside the video, named after it and then a
+  language, "forced" and SDH in any order (`Film.en.forced.srt`;
+  `Film 2.srt` is Film 2's); Audio, the Video node's tracks, where it has
+  two or more; Subtitle sync while a file beside it shows; Sleep timer;
+  Playback details. Subtitles start as the Roku's captions have them; a
+  pick turns captions on or off for the playback, and they go back as
+  they were after. Roku's options (\*) offer the file's own tracks too.
+- **Subtitle files** are drawn by the app over the video, as Android draws
+  them: the drive task reads the file (2 MB at most) as UTF-16 or UTF-32
+  when it starts with that byte-order mark, UTF-16 without one when its
+  NUL bytes say so, else UTF-8, else Windows-1252, as the other apps do,
+  and hands the player its cues without their styling
+  (`components/lib/Drive.brs`). They show while the video plays, at the
+  foot of the picture, Roku's captions off meanwhile, in the text size,
+  colour, opacity and edge the Roku's caption settings give
+  (`GetCaptionsOption`; white over a shadow by default), with no
+  background behind them. Subtitle sync moves them at once, and is kept by
+  the file's path; it doesn't move the file's own tracks, as on Android
+  TV.
+- **Where it stopped** is kept on the Roku by the file's path (registry
+  section `driveResume`, the latest 50 videos) as the server's progress
+  would go: as it pauses, once a minute while it plays (Android TV keeps
+  it every 10 s; the registry is the Roku's flash) and as the player
+  closes. Past 95 % it was watched, and it starts over next time.
+- **What doesn't play** says so: a file the Roku can't play as it is ("a
+  file on a drive has no server to convert it"), a picture that doesn't
+  start in 12 s, and a video that stops, or stands still 12 s, once it
+  played (the drive pulled out).
+
 ### Settings
 
 Settings is in two panes, as on Android TV: the categories at the left,
@@ -988,6 +1062,7 @@ then shows it. It is kept on the Roku for each server.
 | `components/tasks/ApiTask` | The only code that talks to the server |
 | `components/tasks/DiscoveryTask` | `pley?` to UDP port 7539 (`apps/server/src/discovery.rs`) |
 | `components/tasks/EventsTask` | The server's event stream, on a socket |
+| `components/tasks/DriveTask` | The USB drive: which one is plugged in, a folder's lines, subtitle files' cues |
 | `components/lib/` | Plain BrightScript (no SceneGraph): the logic the unit tests cover |
 | `tests/` | Unit tests of `components/lib` |
 | `components/shared/Type.brs`, `components/lib/Type.brs` | Roboto at Android TV's sizes, and Roku's font for text Roboto can't draw |
@@ -999,6 +1074,7 @@ then shows it. It is kept on the Roku for each server.
 Rules the code keeps:
 
 - All HTTP goes through `ApiTask`; the render thread never makes a request.
+  The USB drive is read only in `DriveTask`.
 - The access token goes only in `Authorization: Bearer`, never in an
   address, including the Video node's and the pictures' HTTP agents.
 - No token goes to the server's address before the server there proves it
@@ -1028,7 +1104,7 @@ Rules the code keeps:
   Roku's sockets have no TLS.
 - Settings and views are kept in registry sections: `playback`,
   `subtitleSync`, `libraryViews`, `liveViews`, `household`, `startAs`,
-  `requests`, `searches`.
+  `requests`, `searches`, `driveResume`.
 - Sign-in asks for `library play playlists profiles`, and `requests
   approvals` when the server's metadata lists them in `scopes_supported`
   (an older server refuses scopes it doesn't know). A sign-in from before
@@ -1108,7 +1184,10 @@ bun run fonts     # Roboto, from @fontsource/roboto
   under an album's "Disc 2", opens the See all of Search's Discover row,
   asks for a movie and three seasons from Discover, approves a request,
   opens a title from its ready-to-watch card on Home (which waited while
-  the requests showed), and checks that a server
+  the requests showed), plugs in a USB drive (a zip brs-node mounts as
+  `ext1:`) and walks its page, a folder, an empty one and a video's menu,
+  then pulls it out, opens the drive's page from the screen saying the
+  server is out of reach, and checks that a server
   without requests is asked nothing but the summary. The fake server also
   checks that a video's reports say which audio and subtitles play, and
   music's don't.
@@ -1117,7 +1196,9 @@ bun run fonts     # Roboto, from @fontsource/roboto
   Next and its wait at the end, the title as an item begins, reconnecting,
   stalls, media that ends short, the sleep timers' ends, picture
   subtitles shown in time and the remote's commands, which a player obeys
-  only once it plays, have only unit tests), sockets that connect but send
+  only once it plays, have only unit tests, as do a drive's subtitle files
+  drawn in time and a drive's video's place kept), a drive named "Zip
+  Storage", sockets that connect but send
   nothing (the event stream, and the casts it brings, have only unit
   tests), one fetch at a time, the odd dropped key, and no measure of a
   Roku's speed.
@@ -1126,7 +1207,8 @@ bun run fonts     # Roboto, from @fontsource/roboto
   well, the corners that round it and its focus ring), the gradients over
   backdrops, the watched mark and the guide's cells. `bun run icons`
   draws Lucide's icons through Chrome (`scripts/svg-render.mjs` at the
-  repository root), white for a Poster's `blendColor` to tint, and `bun
+  repository root), white for a Poster's `blendColor` to tint, the USB
+  drive page's at a message's size, and `bun
   run fonts` unpacks Roboto from the web TV app's `@fontsource/roboto`;
   both need the repository's packages installed. The home screen icons
   and splash screens come from `bun scripts/render-icons.mjs` at the
@@ -1151,6 +1233,12 @@ The manifest asks for SceneGraph 1.2, which every Roku OS from 9 runs.
   playing, 30 s while paused), a channel when its stream breaks off.
 - Audio other than the file's default isn't played as it is.
 - Live TV has no channel numbers to type: Roku remotes have no number keys.
+- A USB drive's TS, M2TS, AVI and MPEG files aren't listed: the Video node
+  has no stream format for them (a transport stream only as HLS's
+  segments). The drive's make and model aren't given to apps, so its page
+  is titled with the drive's label. A size `Stat` gives as no positive
+  number isn't shown. A drive's video has no Chapters: the Video node
+  doesn't tell a file's chapters.
 - Not yet: an editable music queue.
 - Text in scripts other than the Latin alphabets of Western Europe is in
   Roku's font, not Roboto: Roku has no fallback from one font to another.

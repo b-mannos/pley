@@ -195,7 +195,7 @@ end function
 function homeRailIcon(entry as object) as string
     icons = {
         search: "search", home: "house", discover: "compass", requests: "list-video", live: "tv-minimal",
-        libraries: "layers", playlists: "list-music", collections: "layers", nowPlaying: "audio-lines", settings: "settings"
+        libraries: "layers", playlists: "list-music", collections: "layers", nowPlaying: "audio-lines", drive: "usb", settings: "settings"
     }
     if entry.action <> "library" then return icons[entry.action]
     kind = ""
@@ -247,9 +247,10 @@ end function
 ' the server has it, the libraries (six at most, then Libraries, which
 ' lists them all, as on Android TV), Playlists, Collections where there is
 ' a library of movies or shows (the page says when none has any) and
-' Libraries isn't, Now Playing while music plays, and Settings last.
+' Libraries isn't, Now Playing while music plays, USB drive while one is
+' plugged in (drive), and Settings last.
 ' [{ title, action, library, count, danger }].
-function homeMenu(libraries as object, live as boolean, requests as object, music as boolean) as object
+function homeMenu(libraries as object, live as boolean, requests as object, music as boolean, drive = false as boolean) as object
     entries = [{ title: "Search", action: "search" }, { title: "Home", action: "home" }]
     for each entry in requests
         entries.Push(entry)
@@ -267,6 +268,7 @@ function homeMenu(libraries as object, live as boolean, requests as object, musi
     entries.Push({ title: "Playlists", action: "playlists" })
     if videos and not many then entries.Push({ title: "Collections", action: "collections" })
     if music then entries.Push({ title: "Now Playing", action: "nowPlaying" })
+    if drive then entries.Push({ title: "USB drive", action: "drive" })
     entries.Push({ title: "Settings", action: "settings" })
     return entries
 end function

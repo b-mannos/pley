@@ -28,6 +28,14 @@ const ICONS = [
   ["Play", true], ["RotateCcw"], ["Info"], ["CircleCheck"],
   ["CalendarDays"], ["LayoutGrid"], ["Clock"], ["Star"], ["Star", true], ["ChevronRight"], ["ChevronDown"],
 ];
+// [Lucide's name, the file's]: the USB drive's page (a folder, a video, ".." up a folder) and its
+// messages (no drive, an empty folder, one that can't be read), drawn at a message's size and
+// scaled down for a row.
+const DRIVE = [
+  ["Folder", "folder"], ["FileVideoCamera", "file-video"], ["CornerLeftUp", "corner-left-up"],
+  ["Usb", "usb"], ["FolderOpen", "folder-open"], ["CircleAlert", "circle-alert"],
+];
+const DRIVE_SIZE = 128;
 
 const kebab = (name) => name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").replace(/([A-Za-z])([0-9])/g, "$1-$2").toLowerCase();
 const attrs = (o) => Object.entries(o).map(([k, v]) => ` ${k}="${String(v).replace(/"/g, "&quot;")}"`).join("");
@@ -37,16 +45,18 @@ mkdirSync(out, { recursive: true });
 const all = await import(pathToFileURL(require.resolve("lucide")).href);
 const r = await renderer();
 try {
-  for (const [name, filled] of ICONS) {
+  const draw = async (name, filled, file, size) => {
     const node = all[name];
     if (!Array.isArray(node)) throw new Error(`Lucide has no ${name}`);
     const body = node.map(([tag, a]) => `<${tag}${attrs(a)}/>`).join("");
     const fill = filled ? "#ffffff" : "none";
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="${fill}" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
-    writeFileSync(join(out, `${kebab(name)}${filled ? "-fill" : ""}.png`), await r.png(svg, SIZE));
-  }
+    writeFileSync(join(out, `${file}.png`), await r.png(svg, size));
+  };
+  for (const [name, filled] of ICONS) await draw(name, filled, `${kebab(name)}${filled ? "-fill" : ""}`, SIZE);
+  for (const [name, file] of DRIVE) await draw(name, false, file, DRIVE_SIZE);
 } finally {
   r.close();
 }
 writeFileSync(join(app, "licenses", "lucide.txt"), readFileSync(join(lucide, "LICENSE"), "utf8"));
-console.log(`${ICONS.length} icons in ${out}`);
+console.log(`${ICONS.length + DRIVE.length} icons in ${out}`);

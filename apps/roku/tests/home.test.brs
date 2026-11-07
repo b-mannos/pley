@@ -90,6 +90,11 @@ sub test_home_menu_follows_the_other_tvs_rail()
         actions.Push(entry.action)
     end for
     tkEqual(actions, ["search", "home", "library", "playlists", "settings"], "no Collections without movies or shows")
+    actions = []
+    for each entry in homeMenu([movies], false, [], true, true)
+        actions.Push(entry.action)
+    end for
+    tkEqual(actions, ["search", "home", "library", "playlists", "collections", "nowPlaying", "drive", "settings"], "USB drive before Settings while one is plugged in")
     libraries = []
     for i = 1 to 7
         libraries.Push({ id: i, name: "Library " + i.ToStr(), kind: "movies" })
@@ -139,4 +144,5 @@ sub test_home_hero_buttons_look_like_android_tvs()
     tkEqual(homeHeroLooks(["info", "watched"])[0], { icon: "", round: false }, "Open, a pill of words")
     tkEqual(homeHeroLooks(["next", "info"])[0], { icon: "play-fill", round: false }, "a show's Play, its next episode")
     tkEqual(homeRailIcon({ title: "Libraries", action: "libraries" }), "layers")
+    tkEqual(homeRailIcon({ title: "USB drive", action: "drive" }), "usb", "as Android TV's rail")
 end sub

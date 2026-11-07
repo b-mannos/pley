@@ -10,6 +10,14 @@ describes how they are made.
 
 ### Added
 
+- Videos on a USB drive, on a Roku with a USB port (Roku Ultra): while a
+  drive is plugged in, Home's menu has USB drive before Settings, and the
+  screen saying the server can't be reached has a USB drive button. Its
+  page lists the drive's folders, then the videos the Roku plays as they
+  are (MKV, WebM, MP4, M4V, MOV), sorted as a person sorts names, and says
+  where each video resumes. A video plays in Pley's player with no
+  server: its subtitles are its own and the .srt and .vtt files beside
+  it, and its place is kept on the Roku.
 - Your phone or browser changes the quality of a film or episode playing
   on the Roku, as the player's Quality menu does (the pick is kept as the
   Roku's), and sees which is picked. A film or episode sent with "Play

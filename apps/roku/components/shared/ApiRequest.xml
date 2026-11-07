@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- One request to the API task (components/tasks/ApiTask.brs): spec in,
-     result out, and updates while a TV code sign-in or a search of the
-     network goes on. -->
+<!-- One request to the API task (components/tasks/ApiTask.brs), or to
+     the drive task (DriveTask.brs): spec in, result out, and updates while
+     a TV code sign-in or a search of the network goes on. -->
 <component name="ApiRequest" extends="Node">
     <interface>
         <field id="spec" type="assocarray" />

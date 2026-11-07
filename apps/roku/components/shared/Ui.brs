@@ -55,6 +55,18 @@ function uiGet(path as string, callback as string) as object
     return uiRequest({ method: "GET", path: path }, callback)
 end function
 
+' Sends spec to the drive task (components/tasks/DriveTask), as uiRequest
+' does to the API task: { op: "look" } (which drive is plugged in, told in
+' its drive field), { op: "list", folder }, { op: "sidecars", path } or
+' { op: "cues", path }.
+function uiDrive(spec as object, callback as string) as object
+    request = CreateObject("roSGNode", "ApiRequest")
+    request.spec = spec
+    if callback <> "" then request.observeField("result", callback)
+    m.global.drive.request = request
+    return request
+end function
+
 ' An HTTP agent for the server's pictures, playlists, segments and
 ' subtitles: the app's User-Agent and the access token, which never goes
 ' in an address. Without withToken, for what anyone may fetch.

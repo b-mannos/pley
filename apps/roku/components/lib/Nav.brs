@@ -32,7 +32,8 @@ function navScreen(name as string) as string
         discoverList: "DiscoverListScreen",
         requestTitle: "RequestTitleScreen",
         requestSeasons: "RequestSeasonsScreen",
-        requests: "RequestsScreen"
+        requests: "RequestsScreen",
+        drive: "DriveScreen"
     }
     if not screens.DoesExist(name) then return ""
     return screens[name]
