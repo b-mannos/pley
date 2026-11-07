@@ -1,5 +1,6 @@
 package app.pley.android.ui.phone.admin
 
+import android.annotation.SuppressLint
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -113,7 +114,12 @@ internal fun AdminColumn(state: androidx.compose.foundation.lazy.LazyListState =
     )
 }
 
-/** A [Modifier] that keeps a group of a page as wide as Settings' at most. */
+/**
+ * A [Modifier] that keeps a group of a page as wide as Settings' at most.
+ * Lint doesn't see a property's getter use its receiver, which this one
+ * does.
+ */
+@get:SuppressLint("ModifierFactoryUnreferencedReceiver")
 internal val Modifier.adminWidth: Modifier get() = this.widthIn(max = ADMIN_MAX_WIDTH).fillMaxWidth()
 
 /**
