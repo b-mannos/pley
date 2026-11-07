@@ -37,9 +37,15 @@ function contentBackdropWidth() as integer
     return 640
 end function
 
-' The poster beside a title's details.
+' The poster beside a TMDB title's details.
 function contentDetailPosterWidth() as integer
     return 420
+end function
+
+' A title's page has no poster: its backdrop fills the screen, as Home's
+' hero's does, as sharp and as small (homeBackdropWidth).
+function contentDetailBackdropWidth() as integer
+    return 960
 end function
 
 ' One tile of a row or a grid. wide: a 16:9 picture (Continue Watching,
@@ -613,8 +619,8 @@ function contentDetail(detail as object, server as string, onDeck = invalid as d
     ' what can.
     focus = 0
     if actions.Count() > 1 and actions[0] = "unavailable" then focus = 1
-    backdrop = urlImage(server, detail.backdrop_url, contentBackdropWidth())
-    if backdrop = "" then backdrop = urlImage(server, detail.thumb_url, contentBackdropWidth())
+    backdrop = urlImage(server, detail.backdrop_url, contentDetailBackdropWidth())
+    if backdrop = "" then backdrop = urlImage(server, detail.thumb_url, contentDetailBackdropWidth())
     genres = []
     for each genre in httpArray(detail.genres)
         name = httpSentence(genre)
@@ -640,7 +646,6 @@ function contentDetail(detail as object, server as string, onDeck = invalid as d
         credits: contentCredits(detail),
         summary: httpClean(detail.summary, 1200, true),
         backdrop: backdrop,
-        poster: contentTileImage(detail, server, false, contentDetailPosterWidth()),
         positionMs: position,
         durationMs: duration,
         watched: watched,
@@ -655,6 +660,33 @@ function contentDetail(detail as object, server as string, onDeck = invalid as d
         more: more,
         note: note
     }
+end function
+
+' How a title's buttons (contentDetail's actions) look, as on Android TV's
+' title page and Home's hero (homeHeroLooks): [{ icon, round, disabled }].
+' Resume or Play (a show's next episode too) is a pill with Play's icon,
+' Unavailable a pill of words alone, drawn faint, which the focus passes
+' over; the others are round, an icon alone, their words shown under them
+' while focused. icon: its name in images/icons.
+function contentDetailLooks(actions as object) as object
+    icons = {
+        start: "rotate-ccw", nextFromStart: "rotate-ccw", askMore: "plus", watched: "circle-check", unwatched: "eye-off",
+        tracks: "captions", listAdd: "bookmark-plus", listRemove: "bookmark-check", trailer: "film", playlist: "list-plus", more: "ellipsis"
+    }
+    looks = []
+    for i = 0 to actions.Count() - 1
+        action = actions[i]
+        if action = "unavailable"
+            looks.Push({ icon: "", round: false, disabled: true })
+        else if i = 0 and (action = "resume" or action = "start" or action = "playNext")
+            looks.Push({ icon: "play-fill", round: false, disabled: false })
+        else
+            icon = icons[action]
+            if icon = invalid then icon = ""
+            looks.Push({ icon: icon, round: icon <> "", disabled: false })
+        end if
+    end for
+    return looks
 end function
 
 ' A season's own title, else "Specials" for season 0, else "Season 2".

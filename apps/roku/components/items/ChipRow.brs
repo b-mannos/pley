@@ -39,6 +39,8 @@ sub onChips()
         place(chip, width, h)
         chip.group.translation = [x, 0]
         chip.selected = spec.DoesExist("selected") and spec.selected = true
+        chip.disabled = spec.DoesExist("disabled") and spec.disabled = true
+        if chip.disabled then chip.group.opacity = 0.4
         m.chips.Push(chip)
         places.Push([x, width])
         x = x + width + 16
@@ -63,8 +65,8 @@ sub onChips()
 end sub
 
 ' A chip's nodes in a group of its own, which grows with the focus:
-' { group, back, edge, icon, label, under, number, round, inner (how wide
-' its words, icon and number are together) }.
+' { group, back, edge, icon, label, under, number, round, disabled, inner
+' (how wide its words, icon and number are together) }.
 function makeChip(spec as object, index as integer) as object
     group = m.row.createChild("Group")
     group.id = "chip" + index.ToStr()
@@ -74,7 +76,7 @@ function makeChip(spec as object, index as integer) as object
     edge.uri = "pkg:/images/pill-edge.9.png"
     edge.blendColor = "0x6C7584FF"
     edge.visible = m.top.onArt
-    chip = { group: group, back: back, edge: edge, icon: invalid, label: invalid, under: invalid, number: invalid, round: false, inner: 0 }
+    chip = { group: group, back: back, edge: edge, icon: invalid, label: invalid, under: invalid, number: invalid, round: false, disabled: false, inner: 0 }
     icon = ""
     if spec.DoesExist("icon") and spec.icon <> invalid then icon = spec.icon
     chip.round = spec.DoesExist("round") and spec.round = true and icon <> ""
@@ -272,12 +274,12 @@ end sub
 
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
-    if key = "left" and m.top.focusIndex > 0
-        m.top.focusIndex = m.top.focusIndex - 1
-        return true
-    end if
-    if key = "right" and m.top.focusIndex < m.chips.Count() - 1
-        m.top.focusIndex = m.top.focusIndex + 1
+    if key = "left" or key = "right"
+        delta = 1
+        if key = "left" then delta = -1
+        at = nextChip(m.top.focusIndex, delta)
+        if at < 0 then return false
+        m.top.focusIndex = at
         return true
     end if
     if key = "OK"
@@ -285,4 +287,15 @@ function onKeyEvent(key as string, press as boolean) as boolean
         return true
     end if
     return false
+end function
+
+' The chip beside chip at, delta one way (-1 left, 1 right), past those
+' disabled; -1 for none.
+function nextChip(at as integer, delta as integer) as integer
+    i = at + delta
+    while i >= 0 and i < m.chips.Count()
+        if not m.chips[i].disabled then return i
+        i = i + delta
+    end while
+    return -1
 end function
