@@ -34,7 +34,7 @@ import app.pley.android.designsystem.text.shownLocale
 import app.pley.android.model.admin.LibraryWorkMode
 import app.pley.android.model.admin.LibraryWorkWait
 import app.pley.android.model.admin.LibraryWorkWeek
-import app.pley.android.model.admin.ServerBackups
+import app.pley.android.model.admin.DatabaseBackups
 import app.pley.android.model.admin.ServerSettings
 import app.pley.android.model.admin.TestedService
 import app.pley.android.model.admin.TvMetadataSource
@@ -562,7 +562,7 @@ private fun LazyListScope.apps(s: ServerSettings, model: ServerViewModel, onOpen
 }
 
 /** The database's health, its backups, and backing up now. */
-private fun LazyListScope.backups(backups: ServerBackups?, busy: Boolean, model: ServerViewModel) {
+private fun LazyListScope.backups(backups: DatabaseBackups?, busy: Boolean, model: ServerViewModel) {
     item(key = "backups") {
         val words = formatWords()
         SettingsGroup(stringResource(R.string.admin_server_backups), Modifier.adminWidth) {
