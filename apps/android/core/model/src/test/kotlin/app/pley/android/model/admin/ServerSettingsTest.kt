@@ -90,14 +90,14 @@ class ServerSettingsTest {
     @Test
     fun backupsReadWithTheDatabasesHealth() {
         val backups = PleyJson.decodeFromString(
-            ServerBackups.serializer(),
+            DatabaseBackups.serializer(),
             """{"health":{"ok":false,"problem":"page 4 is never used","checked_at":1700000000},
                "backups":[{"name":"pley-2026-11-07.db","path":"/data/backups/pley-2026-11-07.db","bytes":2048,"created_at":1700000000}]}""",
         )
         assertEquals(false, backups.health.ok)
         assertEquals("page 4 is never used", backups.health.problem)
         assertEquals(listOf(DatabaseBackup("pley-2026-11-07.db", 2048, 1_700_000_000)), backups.backups)
-        assertNull(PleyJson.decodeFromString(ServerBackups.serializer(), """{"health":{"ok":null,"checked_at":null},"backups":[]}""").health.ok)
+        assertNull(PleyJson.decodeFromString(DatabaseBackups.serializer(), """{"health":{"ok":null,"checked_at":null},"backups":[]}""").health.ok)
     }
 
     @Test

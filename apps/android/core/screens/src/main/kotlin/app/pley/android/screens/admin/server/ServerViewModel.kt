@@ -9,7 +9,7 @@ import app.pley.android.model.Me
 import app.pley.android.model.admin.DatabaseBackup
 import app.pley.android.model.admin.LibraryWorkMode
 import app.pley.android.model.admin.LibraryWorkWeek
-import app.pley.android.model.admin.ServerBackups
+import app.pley.android.model.admin.DatabaseBackups
 import app.pley.android.model.admin.ServerSettings
 import app.pley.android.model.admin.ServerSystem
 import app.pley.android.model.admin.ServiceTestResult
@@ -64,7 +64,7 @@ class ServerViewModel(admin: ServerAdmin) : SettingsPageViewModel<ServerSettings
     /** When people watch, as learned, for library work's Automatically. */
     val week: AdminResource<LibraryWorkWeek> = resource { get(LibraryWorkWeek.serializer(), listOf("api", "system", "library-work")) }
 
-    val backups: AdminResource<ServerBackups> = resource { get(ServerBackups.serializer(), BACKUPS) }
+    val backups: AdminResource<DatabaseBackups> = resource { get(DatabaseBackups.serializer(), BACKUPS) }
 
     private val testsNow = MutableStateFlow<Map<TestedService, ServiceTestState>>(emptyMap())
 

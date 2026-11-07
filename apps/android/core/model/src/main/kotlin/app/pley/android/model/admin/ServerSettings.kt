@@ -163,30 +163,6 @@ enum class LibraryWorkWait(override val wire: String) : WireEnum {
     object Serializer : LenientEnumSerializer<LibraryWorkWait>("LibraryWorkWait", LibraryWorkWait.entries, LibraryWorkWait.Unknown)
 }
 
-/** GET /api/system/backups: the database's health and its backups, newest first. */
-@Serializable
-data class ServerBackups(
-    val health: DatabaseHealth = DatabaseHealth(),
-    val backups: List<DatabaseBackup> = emptyList(),
-)
-
-/** What the check at start found; [ok] is `null` until it finished. */
-@Serializable
-data class DatabaseHealth(
-    val ok: Boolean? = null,
-    /** What SQLite found, when the database is damaged. */
-    val problem: String? = null,
-)
-
-/** One backup (POST /api/system/backups answers the one it made). */
-@Serializable
-data class DatabaseBackup(
-    val name: String,
-    val bytes: Long = 0,
-    /** Unix seconds. */
-    val createdAt: Long = 0,
-)
-
 /** An account of GET /api/users, as far as requiring two-step sign-in goes. */
 @Serializable
 data class SignInAccount(

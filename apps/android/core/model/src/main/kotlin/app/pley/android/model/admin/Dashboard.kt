@@ -245,26 +245,3 @@ data class StorageCleanReport(
     val mediaFoldersRemoved: Int = 0,
     val bytesFreed: Long = 0,
 )
-
-/** GET /api/system/backups: the database's health and its backups, newest first. */
-@Serializable
-data class DatabaseBackups(
-    val health: DatabaseHealth = DatabaseHealth(),
-    val backups: List<DatabaseBackup> = emptyList(),
-)
-
-/** The last check of the database; [ok] `null` until it was checked. */
-@Serializable
-data class DatabaseHealth(
-    val ok: Boolean? = null,
-    val problem: String? = null,
-)
-
-/** A copy of the database (POST /api/system/backups answers the new one). */
-@Serializable
-data class DatabaseBackup(
-    val name: String,
-    val bytes: Long = 0,
-    /** Unix seconds. */
-    val createdAt: Long = 0,
-)
