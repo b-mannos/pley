@@ -433,6 +433,10 @@ fn asked_scopes(scope: Option<&str>, client: &clients::Client) -> Result<Scopes,
         // Deciding what everyone asks for: pley's own apps only.
         return Err(fail("only Pley's own apps can approve requests (approvals): ask the app's publisher to fix it"));
     }
+    if asked.contains(Scope::Server) && !client.first_party {
+        // Administration: pley's own apps only.
+        return Err(fail("only Pley's own apps can manage the server (server): ask the app's publisher to fix it"));
+    }
     if client.scope_cap.as_deref().is_some_and(|cap| !asked.is_subset_of(Scopes::from_stored(cap))) {
         return Err(fail("this app asked for more than its description allows: ask the app's publisher to fix it"));
     }
@@ -873,6 +877,12 @@ fn start_on_device(
         return Err(OAuthError::new("unauthorized_client", "this app doesn't sign in with a code"));
     }
     let scopes = asked_scopes(form.get("scope"), client).map_err(|err| OAuthError::new(err.error, err.description))?;
+    if scopes.contains(Scope::Server) {
+        // A code shown on a screen can be passed to an administrator by
+        // anyone in front of it: managing the server is allowed only to an
+        // app signing in on the device it runs on.
+        return Err(OAuthError::new("invalid_scope", "managing the server can't be allowed with a code"));
+    }
     let issuer = issuer(headers).map_err(|_| OAuthError::invalid_request("the Host header is missing or wrong"))?;
     let app = AppSnapshot::from(client);
     // What the device says it is, so the person typing the code can tell

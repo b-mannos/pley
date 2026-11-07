@@ -11,6 +11,11 @@ describes how they are made.
 
 ### Added
 
+- Pley's own apps can manage the server, as Settings in the web app do,
+  where an administrator allows it: a new permission, "Manage the server",
+  which Pley for Android asks for on phones. It is never given with a TV's
+  code, and the account's own password, PIN, two-step sign-in and devices
+  stay in the web app.
 - The web and desktop apps' home screen opens on a banner: the newest
   films and shows you haven't watched, full width under the top bar, each
   with its plot, Play, More info and My List, taking turns every few

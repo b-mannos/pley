@@ -19,15 +19,16 @@ pub struct HistoryPage {
     entries: Vec<HistoryEntry>,
 }
 
-/// Your plays, newest first. Administrators can ask for one user's
-/// (`user_id`) or everyone's (`all=1`).
+/// Your plays, newest first. Administrators, and pley's own apps that
+/// manage the server, can ask for one user's (`user_id`) or everyone's
+/// (`all=1`), as the dashboard does.
 pub async fn list(
     State(state): State<AppState>,
     user: AuthUser,
     Query(query): Query<HashMap<String, String>>,
 ) -> ApiResult<Json<HistoryPage>> {
     let parse = |key: &str| query.get(key).and_then(|v| v.parse::<i64>().ok());
-    let user_id = match (user.is_admin, query.get("all").is_some_and(|v| truthy(v)), parse("user_id")) {
+    let user_id = match (user.administers(), query.get("all").is_some_and(|v| truthy(v)), parse("user_id")) {
         (true, true, _) => None,
         (true, false, Some(id)) => Some(id),
         _ => Some(user.id),

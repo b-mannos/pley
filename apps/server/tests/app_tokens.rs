@@ -1,7 +1,8 @@
 //! Apps' tokens (src/auth/grants.rs) open only the routes their scopes allow
 //! (src/auth/scopes.rs), and only from `Authorization: Bearer`: every route
-//! of api/mod.rs is classified, an administrator's app administers nothing,
-//! and the Jellyfin-compatible API refuses them.
+//! of api/mod.rs is classified, an administrator's app administers nothing
+//! unless it is one of pley's own allowed `server`, and the
+//! Jellyfin-compatible API refuses them.
 
 mod common;
 
@@ -10,7 +11,7 @@ use std::time::Duration;
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
 use futures::StreamExt;
-use pley::auth::scopes::{APP_ROUTES, Need};
+use pley::auth::scopes::{APP_ROUTES, Need, Scope};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -66,14 +67,9 @@ const FIRST_PARTY: &[(&str, &str)] = &[
     ("GET", "/api/server/proof-key"),
 ];
 
-/// Administration.
+/// Administration no app reaches: collections, and editing titles' details
+/// (what `server` opens is in APP_ROUTES).
 const ADMIN: &[(&str, &str)] = &[
-    ("POST", "/api/libraries"),
-    ("POST", "/api/libraries/scan"),
-    ("PUT", "/api/libraries/order"),
-    ("PATCH", "/api/libraries/{id}"),
-    ("DELETE", "/api/libraries/{id}"),
-    ("POST", "/api/libraries/{id}/scan"),
     ("POST", "/api/libraries/{id}/collections"),
     ("PATCH", "/api/collections/{id}"),
     ("DELETE", "/api/collections/{id}"),
@@ -89,48 +85,6 @@ const ADMIN: &[(&str, &str)] = &[
     ("POST", "/api/items/{id}/artwork/{kind}/upload"),
     ("POST", "/api/items/{id}/refresh"),
     ("POST", "/api/items/{id}/analyze"),
-    ("GET", "/api/users"),
-    ("POST", "/api/users"),
-    ("PATCH", "/api/users/{id}"),
-    ("DELETE", "/api/users/{id}"),
-    ("GET", "/api/users/{id}/devices"),
-    ("DELETE", "/api/users/{id}/devices"),
-    ("GET", "/api/users/{id}/apps"),
-    ("DELETE", "/api/users/{id}/apps/{grant}"),
-    ("DELETE", "/api/users/{id}/two-step"),
-    ("GET", "/api/invites"),
-    ("POST", "/api/invites"),
-    ("DELETE", "/api/invites/{code}"),
-    ("GET", "/api/system"),
-    ("GET", "/api/system/resources"),
-    ("GET", "/api/system/library-work"),
-    ("GET", "/api/system/storage"),
-    ("GET", "/api/system/backups"),
-    ("POST", "/api/system/backups"),
-    ("POST", "/api/system/storage/clean"),
-    ("PUT", "/api/system/transcode-dir"),
-    ("GET", "/api/transcoder"),
-    ("GET", "/api/settings"),
-    ("PUT", "/api/settings"),
-    ("POST", "/api/settings/test"),
-    ("POST", "/api/settings/arr"),
-    ("GET", "/api/network"),
-    ("PUT", "/api/network"),
-    ("POST", "/api/fs"),
-    ("GET", "/api/live/settings"),
-    ("PUT", "/api/live/settings"),
-    ("GET", "/api/live/sources"),
-    ("POST", "/api/live/sources"),
-    ("POST", "/api/live/sources/test"),
-    ("PUT", "/api/live/sources/{id}"),
-    ("DELETE", "/api/live/sources/{id}"),
-    ("POST", "/api/live/sources/{id}/refresh"),
-    ("GET", "/api/live/lineup"),
-    ("PATCH", "/api/live/lineup"),
-    ("GET", "/api/live/lineup/groups"),
-    ("GET", "/api/live/lineup/page"),
-    ("GET", "/api/live/tuners"),
-    ("DELETE", "/api/live/tuners/{channel}"),
 ];
 
 /// Routes that take pley's own page's cookie and nothing else: allowing
@@ -377,6 +331,10 @@ async fn an_administrators_app_token_opens_only_app_routes() {
         let first_party = FIRST_PARTY.iter().chain(ADMIN).any(|(m, p)| *m == method && *p == path);
         if first_party {
             assert_eq!((status, challenge.as_str()), (StatusCode::FORBIDDEN, NO_SCOPE), "{method} {uri}");
+        } else if app_route(&method, &path) == Some(Need::Scope(Scope::Server)) {
+            // Administration: not without `server`.
+            let expected = r#"Bearer error="insufficient_scope", scope="server""#;
+            assert_eq!((status, challenge.as_str()), (StatusCode::FORBIDDEN, expected), "{method} {uri}");
         } else if app_route(&method, &path).is_some() {
             assert!(status != StatusCode::UNAUTHORIZED && challenge.is_empty(), "{method} {uri}: {status} {challenge}");
         } else if COOKIE_ONLY.iter().any(|(m, p)| *m == method && *p == path) {
@@ -401,7 +359,7 @@ async fn each_scope_opens_only_its_routes() {
     let app = TestApp::new().await;
     let admin = app.setup_admin().await;
     let (_, ann) = app.user(&admin, "ann", json!({})).await;
-    for scope in ["library", "play", "playlists", "profiles", "requests", "approvals", "activity"] {
+    for scope in ["library", "play", "playlists", "profiles", "requests", "approvals", "activity", "server"] {
         let (token, _) = app.app_token(ann, scope).await;
         for (method, path, need) in APP_ROUTES {
             let uri = concrete(path);
@@ -419,6 +377,11 @@ async fn each_scope_opens_only_its_routes() {
                 }
                 None => assert!(challenge.is_empty(), "{scope}: {method} {uri}: {status} {challenge}"),
             }
+            if scope == "server" && *need == Need::Scope(Scope::Server) {
+                // Ann isn't an administrator: the scope opens the route,
+                // her role doesn't let her through.
+                assert_eq!(status, StatusCode::FORBIDDEN, "{method} {uri}");
+            }
         }
     }
     let (library, _) = app.app_token(ann, "library").await;
@@ -428,8 +391,14 @@ async fn each_scope_opens_only_its_routes() {
         denied.body["message"],
         "this app wasn't allowed to make, change and delete the profile's playlists: sign in to it again to allow it"
     );
+    let devices = app.get("/api/me/devices", &library).await;
+    assert_eq!(devices.body["message"], "apps can't do that: use Pley's web app");
     let settings = app.get("/api/settings", &library).await;
-    assert_eq!(settings.body["message"], "apps can't do that: use Pley's web app");
+    assert_eq!(
+        settings.body["message"],
+        "this app wasn't allowed to manage the server (its libraries, accounts, Live TV and settings) where the \
+         account is an administrator: sign in to it again to allow it"
+    );
 }
 
 #[tokio::test]
@@ -575,6 +544,9 @@ async fn an_administrators_app_sees_everything_but_administers_nothing() {
     assert_eq!(app.delete(&format!("/api/playback/{session}"), &token).await.status, StatusCode::FORBIDDEN);
     let activity = app.get("/api/activity", &token).await;
     assert_eq!((activity.status, &activity.body["code"]), (StatusCode::FORBIDDEN, &json!("insufficient_scope")));
+    let paths = &app.get("/api/libraries", &token).await.body[0]["paths"];
+    assert_eq!(paths, &json!([]), "no folders");
+    assert_eq!(me.body["account_admin"], json!(true), "pley's own apps are told the account's role");
 
     // Empty curated collections are for administrators to fill.
     let empty = app.post(&format!("/api/libraries/{movies}/collections"), &admin, json!({"title": "Empty"})).await;
@@ -599,6 +571,88 @@ async fn an_administrators_app_sees_everything_but_administers_nothing() {
         assert_eq!((reply.status, &reply.body["code"]), (StatusCode::FORBIDDEN, &json!("insufficient_scope")));
         assert!(reply.body.get("token").is_none());
     }
+}
+
+#[tokio::test]
+async fn pleys_own_app_allowed_server_manages_it_on_an_administrators_account() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    app.media_file("movies/Film (2020).mkv", 2048);
+    let movies = app.library(&admin, "Movies", "movies", "movies").await;
+    let film = app.ids(movies, &admin).await["Film"];
+    let (_, bob_id) = app.user(&admin, "bob", json!({})).await;
+    let (token, _) = app.app_token(1, "library play server").await;
+
+    // Still no administrator itself, told the account's role.
+    let me = app.get("/api/auth/me", &token).await;
+    assert_eq!((&me.body["is_admin"], &me.body["account_admin"]), (&json!(false), &json!(true)));
+    assert_eq!(me.body["scope"], "library play server");
+
+    // What Settings in the web app do.
+    assert_eq!(app.get("/api/settings", &token).await.status, StatusCode::OK);
+    assert_eq!(app.get("/api/system", &token).await.status, StatusCode::OK);
+    let users = app.get("/api/users", &token).await;
+    assert_eq!((users.status, users.body.as_array().map(Vec::len)), (StatusCode::OK, Some(2)));
+    let carol = json!({"username": "carol", "password": "test-pass-1"});
+    assert_eq!(app.app_call(Method::POST, "/api/users", &token, Some(carol)).await.status, StatusCode::CREATED);
+    let library = format!("/api/libraries/{movies}");
+    let renamed = app.app_call(Method::PATCH, &library, &token, Some(json!({"name": "Films"}))).await;
+    assert_eq!(renamed.status, StatusCode::OK, "{:?}", renamed.body);
+    let invite = app.app_call(Method::POST, "/api/invites", &token, Some(json!({}))).await;
+    assert_eq!(invite.status, StatusCode::CREATED, "{:?}", invite.body);
+    // With the folders it changes, and the dashboard's view of playback.
+    let paths = &app.get("/api/libraries", &token).await.body[0]["paths"];
+    assert_eq!(paths, &json!([app.media_path("movies")]));
+    for user in [1, bob_id] {
+        sqlx::query("INSERT INTO play_history (user_id, item_id, viewed_at) VALUES (?, ?, 1)")
+            .bind(user)
+            .bind(film)
+            .execute(&app.state.db.write)
+            .await
+            .unwrap();
+    }
+    assert_eq!(app.get("/api/history?all=1", &token).await.body["total"], json!(2));
+    assert_eq!(app.get("/api/activity", &token).await.status, StatusCode::OK);
+
+    // Its own sign-in stays in Account, as for the web's administrators.
+    let own = [
+        app.app_call(Method::PATCH, "/api/users/1", &token, Some(json!({"password": "another-pass-2"}))).await,
+        app.app_call(Method::PATCH, "/api/users/1", &token, Some(json!({"pin": "1234"}))).await,
+        app.app_call(Method::DELETE, "/api/users/1/two-step", &token, None).await,
+        app.app_call(Method::DELETE, "/api/users/1/devices", &token, None).await,
+        app.app_call(Method::DELETE, "/api/users/1", &token, None).await,
+    ];
+    for reply in own {
+        assert_eq!(reply.status, StatusCode::BAD_REQUEST, "{:?}", reply.body);
+    }
+    for (method, uri, body) in [
+        (Method::PUT, "/api/auth/password", Some(json!({"current_password": "secret-one", "new_password": "x"}))),
+        (Method::GET, "/api/me/devices", None),
+        (Method::POST, "/api/auth/switch", Some(json!({"user_id": 1}))),
+        (Method::PATCH, "/api/collections/1", Some(json!({"title": "X"}))),
+    ] {
+        let reply = app.app_call(method, uri, &token, body).await;
+        assert_eq!((reply.status, &reply.body["code"]), (StatusCode::FORBIDDEN, &json!("insufficient_scope")), "{uri}");
+    }
+
+    // Nothing for an account that isn't an administrator, an app by another
+    // publisher, or once the role is gone.
+    let (bobs, _) = app.app_token(bob_id, "library play server").await;
+    assert_eq!(app.get("/api/auth/me", &bobs).await.body["account_admin"], json!(false));
+    let other = third_party_token(&app, 1, "library play server").await;
+    assert_eq!(app.get("/api/auth/me", &other).await.body.get("account_admin"), None, "only pley's own apps are told");
+    let (dora, dora_id) = app.user(&admin, "dora", json!({"is_admin": true})).await;
+    let (doras, _) = app.app_token(dora_id, "library play server").await;
+    assert_eq!(app.get("/api/settings", &doras).await.status, StatusCode::OK);
+    let demoted = app.patch(&format!("/api/users/{dora_id}"), &admin, json!({"is_admin": false})).await;
+    assert_eq!(demoted.status, StatusCode::OK, "{:?}", demoted.body);
+    for refused in [&bobs, &other, &doras] {
+        let reply = app.get("/api/settings", refused).await;
+        assert_eq!(reply.status, StatusCode::FORBIDDEN, "{:?}", reply.body);
+        assert_eq!(app.get("/api/libraries", refused).await.body[0]["paths"], json!([]));
+    }
+    assert_eq!(app.get("/api/history?all=1", &bobs).await.body["total"], json!(1), "her own");
+    drop(dora);
 }
 
 /// Tokens of an app by another publisher acting as `user_id`, allowed `scope`.
