@@ -1,10 +1,122 @@
 ' Home's hero and the info block over its rows, as on Android TV and the
-' native Samsung app (their HomeState and Home.cs): the title they show,
-' and what they say about it.
+' native Samsung app (their HomeState and Home.cs): the titles they show,
+' and what they say about them.
 
-' The title the hero shows, from GET /api/hubs/home's hubs: the first of
-' Continue Watching, else the newest video in the rows, else the newest
-' title; invalid with nothing to show.
+' How many titles the hero takes turns showing, as on the other apps.
+function homeFeaturedCount() as integer
+    return 6
+end function
+
+' The titles the hero features, as the web picks them (apps/web/src/lib/
+' featured.ts) and the other apps: the newest unwatched movies and shows
+' with a backdrop, taken in turn from each library's Recently Added (so
+' movies and shows alternate), then from My List when that's too few;
+' when everything has been watched, the newest all the same.
+' packages/tv/test/fixtures/featured.json pins it. From GET
+' /api/hubs/home's hubs, count at most: [{ item, fromList }].
+function homeFeatured(hubs as dynamic, count as integer) as object
+    picked = homeFeaturedPick(hubs, count, true)
+    if picked.Count() = 0 then picked = homeFeaturedPick(hubs, count, false)
+    return picked
+end function
+
+' homeFeatured's pick, of the unwatched titles only (unwatched) or of all.
+function homeFeaturedPick(hubs as dynamic, count as integer, unwatched as boolean) as object
+    sources = []
+    listed = invalid
+    for each hub in httpArray(hubs)
+        if GetInterface(hub, "ifAssociativeArray") <> invalid
+            key = httpString(hub.key)
+            if Left(key, 14) = "recently_added"
+                source = []
+                for each item in httpArray(hub.items)
+                    if homeFeaturable(item, unwatched) then source.Push(item)
+                end for
+                sources.Push(source)
+            else if key = "my_list" and listed = invalid
+                listed = httpArray(hub.items)
+            end if
+        end if
+    end for
+    picked = []
+    seen = {}
+    ' The newest of each library, then the next of each, and so on.
+    i = 0
+    while picked.Count() < count
+        more = false
+        for each source in sources
+            if i < source.Count()
+                more = true
+                homeFeaturedTake(picked, seen, source[i], false, count)
+            end if
+        end for
+        if not more then exit while
+        i = i + 1
+    end while
+    if listed <> invalid
+        for each item in listed
+            if homeFeaturable(item, unwatched) then homeFeaturedTake(picked, seen, item, true, count)
+        end for
+    end if
+    return picked
+end function
+
+' A movie or a show with a backdrop to fill the hero (and not watched,
+' with unwatched).
+function homeFeaturable(item as dynamic, unwatched as boolean) as boolean
+    if GetInterface(item, "ifAssociativeArray") = invalid then return false
+    kind = httpString(item.kind)
+    if kind <> "movie" and kind <> "show" then return false
+    if httpString(item.backdrop_url) = "" then return false
+    if not unwatched then return true
+    state = httpObject(item.user_state)
+    return state = invalid or not httpTrue(state.watched)
+end function
+
+' Puts item among the picked, once, while there's room.
+sub homeFeaturedTake(picked as object, seen as object, item as object, fromList as boolean, count as integer)
+    key = urlValue(httpNumber(item.id, 0))
+    if picked.Count() >= count or seen.DoesExist(key) then return
+    seen[key] = true
+    picked.Push({ item: item, fromList: fromList })
+end sub
+
+' Why a featured title is there, as the other apps say it: "On your list"
+' (fromList), else "New in Movies", its library's name (libraryId among
+' libraries, [{ id, name }]), or "New" without it.
+function homeFeaturedLabel(fromList as boolean, libraryId as dynamic, libraries as dynamic) as string
+    if fromList then return t("browse.home.featured.onList")
+    id = httpNumber(libraryId, 0)
+    if id > 0
+        for each library in httpArray(libraries)
+            if GetInterface(library, "ifAssociativeArray") <> invalid and httpNumber(library.id, 0) = id
+                name = httpString(library.name)
+                if name <> "" then return t("browse.home.featured.newIn", { library: name })
+            end if
+        end for
+    end if
+    return t("browse.home.featured.new")
+end function
+
+' How long a featured title stays in the hero while no key is pressed, as
+' on the other apps.
+function homeTurnSeconds() as integer
+    return 9
+end function
+
+' Whether the hero turns to its next title now: it has several (titles),
+' its buttons have the focus (focused: not the rows, the rail, a dialog or
+' a screen over Home), and the last key (idleSeconds ago, as Roku's
+' TimeSinceLastKeypress counts them) and the last turn (shownMs ago) are
+' both 9 s old.
+function homeTurnsNow(titles as integer, focused as boolean, idleSeconds as integer, shownMs as integer) as boolean
+    if titles < 2 or not focused then return false
+    return idleSeconds >= homeTurnSeconds() and shownMs >= homeTurnSeconds() * 1000
+end function
+
+' The title the hero shows with nothing featured, from GET
+' /api/hubs/home's hubs: the first of Continue Watching, else the newest
+' video in the rows, else the newest title; invalid with nothing to show.
 function homeHeroItem(hubs as dynamic) as dynamic
     for each hub in httpArray(hubs)
         if GetInterface(hub, "ifAssociativeArray") <> invalid and contentContinueWatching(httpString(hub.key))
@@ -150,8 +262,9 @@ end function
 ' The hero's buttons: { labels, actions }. A movie or an episode plays
 ' (Resume and From start while in progress); a show or a season plays its
 ' next episode ("next"), as on Android TV; anything else opens. Info opens
-' the title's page, and the watched mark toggles.
-function homeHeroButtons(info as object) as object
+' the title's page; then My List for a movie or a show (Add to My List,
+' or Remove when inList), the watched mark for an episode or a season.
+function homeHeroButtons(info as object, inList = false as boolean) as object
     labels = []
     actions = []
     if info.video
@@ -171,7 +284,15 @@ function homeHeroButtons(info as object) as object
         labels = [t("common.actions.open")]
         actions = ["info"]
     end if
-    if info.kind = "movie" or info.kind = "episode" or info.kind = "show" or info.kind = "season"
+    if info.kind = "movie" or info.kind = "show"
+        if inList
+            labels.Push(t("browse.title.removeFromMyList"))
+            actions.Push("listRemove")
+        else
+            labels.Push(t("browse.title.addToMyList"))
+            actions.Push("listAdd")
+        end if
+    else if info.kind = "episode" or info.kind = "season"
         if info.watched
             labels.Push(t("browse.title.markUnwatched"))
             actions.Push("unwatched")
@@ -202,11 +323,11 @@ end function
 ' How the hero's buttons (homeHeroButtons' actions) look, as on Android
 ' TV's hero: [{ icon, round }]. The first is a pill with its words, Play's
 ' icon before Resume or Play (a show's next episode too); the others are
-' round, an icon alone (From start, Info, the watched mark), their words
-' shown under them while focused. icon: its name in images/icons, "" for
-' none.
+' round, an icon alone (From start, Info, My List's plus or check, the
+' watched mark), their words shown under them while focused. icon: its
+' name in images/icons, "" for none.
 function homeHeroLooks(actions as object) as object
-    icons = { start: "rotate-ccw", info: "info", watched: "circle-check", unwatched: "circle-check" }
+    icons = { start: "rotate-ccw", info: "info", watched: "circle-check", unwatched: "circle-check", listAdd: "plus", listRemove: "check" }
     looks = []
     for i = 0 to actions.Count() - 1
         action = actions[i]

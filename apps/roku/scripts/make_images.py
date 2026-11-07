@@ -15,6 +15,8 @@ at rest; images/tile.9.png a tile's well (4 dp corners), and
 images/tile-corners.9.png the page's colour outside those corners, over
 a poster, which rounds it; images/tile-ring.9.png the focus ring around
 a tile (3 dp wide, as Android's PleyFocus, and 2 dp out).
+images/dash.png and images/dash-long.png are the dashes beside Home's
+hero's buttons (Android TV's 14 and 36 dp by 4, rounded), one per title.
 images/scrim-left.png and images/scrim-bottom.png are the gradients over
 a backdrop (Android TV's TvSurfaces.kt: from the left 100 %, 92 %, 85 %
 then nothing; from the top nothing to all), and images/fade-right.png a
@@ -174,7 +176,8 @@ def render_corners(radius, box):
 
 def render_rounded(width, height, radius):
     """RGBA rows of a white box width × height with corners of radius, its
-    edge smoothed: a MaskGroup's mask that rounds a picture's corners."""
+    edge smoothed: a MaskGroup's mask that rounds a picture's corners, or a
+    shape drawn at its own size."""
     samples = 4
     rows = []
     for row in range(height):
@@ -345,6 +348,10 @@ def main():
     for name, width, height in (("poster-mask.png", 420, 630), ("cover-mask.png", 420, 420)):
         write_png(os.path.join(folder, name), width, height, render_rounded(width, height, TILE_RADIUS))
         print("images/" + name, width, "x", height)
+    # Home's hero's dashes, ends round.
+    for name, width in (("dash.png", 28), ("dash-long.png", 72)):
+        write_png(os.path.join(folder, name), width, 8, render_rounded(width, 8, 4))
+        print("images/" + name, width, "x", 8)
     write_png(os.path.join(folder, "globe.png"), GLOBE_SIZE, GLOBE_SIZE, render_globe(GLOBE_SIZE))
     print("images/globe.png", GLOBE_SIZE, "x", GLOBE_SIZE)
 

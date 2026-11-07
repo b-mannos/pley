@@ -91,24 +91,49 @@ focus to it and it opens over the page, which dims: the names fade in
 beside the icons, the focused entry on the accent pill, Home on a raised
 one, and the requests' number after their name.
 
-Beside it, as on Android TV and the native Samsung app, a hero shows the
-first of Continue Watching, else the newest title in the rows, over its
-backdrop: its title (a show's name over an episode's "S2 · E5 · Title"),
-year, length, content rating, stars and quality ("4K", "DV"), the time
-left, its summary, then Resume (or Play) on a pill, and From start, Info
-and the watched mark as round buttons, whose names show under them while
-they have the focus; a show's (or a season's) Play plays its next
-episode, as on Android TV, and "Nothing to play" says when it has none.
-Resume has the focus as Home first shows. Down goes to the server's rows:
+Beside it, as on Android TV and the native Samsung app, a hero features
+what the web's banner does: the newest movies and shows not yet watched
+that have a backdrop, a library's at a time (so movies and shows take
+turns), then My List's when that's too few, and the newest ones all the
+same once everything has been watched; six at most
+(`packages/tv/test/fixtures/featured.json` pins the pick). Over its
+backdrop it says why the title is there, in spaced capitals ("NEW IN
+MOVIES", "NEW" when the library isn't known yet, "ON YOUR LIST"), then
+its title (a show's name over an episode's "S2 · E5 · Title"), year,
+length or seasons, content rating, stars and quality ("4K", "DV"), the
+time left, its summary, then Resume (or Play) on a pill, and From start,
+Info and My List (Add to My List, or Remove with a check once it's
+there) as round buttons, whose names show under them while they have the
+focus. My List goes to the server as the Options key's does, and Home
+asks for its rows again after. A show's Play plays its next episode, as
+on Android TV, and "Nothing to play" says when it has none.
+
+The hero takes turns through its titles: dashes beside the buttons, one
+per title, the one on longer and white, show which is on. Right from the
+last button goes on to the next title, the focus back on Play, and the
+hero turns to the next by itself every 9 s while no key is pressed (Roku
+counts the time since the last key in whole seconds), each key starting
+the time over, so it never turns as OK is pressed. It turns only while
+its buttons have the focus: not in the rows, the rail, a dialog or a
+card, nor under another screen. Taking turns, the summary keeps its
+three lines' room and a title of two lines grows upward, so the buttons
+stay where they are. With nothing to feature, the hero is the first of
+Continue Watching, else the newest title in the rows, and stays; for an
+episode or a season the watched mark takes My List's place.
+
+Play (or Resume) has the focus as Home first shows. Down goes to the
+server's rows:
 there an info block about the title focus rests on (0.4 s) takes the
 hero's place, the rows come up under it, the focused row staying just
 under it as the others move, and the backdrop follows it. Up from the
-first row goes back to the hero; Left or Back, to the rail, the hero
-shown again.
-The hero's summary, content rating and quality come with its details
-(`GET /api/items/{id}`, which the API task reduces to what Home says), as
-do the info block's. With nothing to show, Home says why: No libraries
-yet, Scanning your libraries…, or Nothing here yet.
+first row goes back to the hero, on the title it was on; Left or Back,
+to the rail, the hero shown again.
+The featured titles' summaries, content ratings and quality come with
+their details (`GET /api/items/{id}`, which the API task reduces to what
+Home says), all asked for as the rows come (six small requests), so
+turning to one shows it whole; so do the info block's. With nothing to
+show, Home says why: No libraries yet, Scanning your libraries…, or
+Nothing here yet.
 
 Tiles are captioned as on the other TVs, in rows and grids: a title in
 progress says the time left ("26 min left"), else what it is: a movie's
@@ -1286,7 +1311,9 @@ bun run fonts     # Roboto, from @fontsource/roboto
   User-Agent, an API request without `Accept-Language`, a token in an
   address, a token before the server proved
   itself (a refresh token without a proof made then), or a refresh token
-  used twice. On the way it plays an episode whose PGS subtitles the app
+  used twice. On the way it waits for Home's hero to turn by itself, puts
+  its title on My List and takes it off, turns it with Right, plays an
+  episode whose PGS subtitles the app
   draws (their list asked for where it starts, then again until whole, and
   a picture loaded), then the same episode on a server without their
   pictures, which burns them in, and picks its subtitles from the
@@ -1322,7 +1349,8 @@ bun run fonts     # Roboto, from @fontsource/roboto
 - **Images:** `bun run images` runs `scripts/make_images.py` (Python
   standard library): the nine-patch shapes Roku tints (pills, a tile's
   well, the corners that round it and its focus ring), the gradients over
-  backdrops, the watched mark and the guide's cells. `bun run icons`
+  backdrops, the watched mark, the hero's dashes and the guide's cells.
+  `bun run icons`
   draws Lucide's icons through Chrome (`scripts/svg-render.mjs` at the
   repository root), white for a Poster's `blendColor` to tint, the USB
   drive page's at a message's size, and `bun

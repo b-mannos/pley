@@ -4,11 +4,12 @@
      where the server has them, Live TV, the libraries, Playlists,
      Collections, Now Playing, USB drive while one is plugged in,
      Settings), icons only while the focus is in the page and opening over
-     it with the focus; then a hero for the first of Continue Watching (its
-     backdrop, what it is, Resume or Play, From start, Info and the watched
-     mark) over the server's home rows (GET /api/hubs/home). In the rows,
-     an info block about the title focus rests on takes the hero's place,
-     and the backdrop follows it. -->
+     it with the focus; then a hero taking turns through the featured
+     titles, else showing the first of Continue Watching (its backdrop,
+     why it's there, what it is, Resume or Play, From start, Info, and My
+     List or the watched mark) over the server's home rows (GET
+     /api/hubs/home). In the rows, an info block about the title focus
+     rests on takes the hero's place, and the backdrop follows it. -->
 <component name="HomeScreen" extends="Group">
     <interface>
         <field id="route" type="string" />
@@ -53,6 +54,11 @@
         <!-- At rest: the hero, the first row under it. Only the labels with
              text stay in it (layOut). -->
         <LayoutGroup id="hero" translation="[192, 104]" layoutDirection="vert" visible="false">
+            <!-- Why a featured title is there ("NEW IN MOVIES"), in
+                 capitals spaced out, as on Android TV. -->
+            <Label id="heroWhy" width="928" maxLines="1" color="0xEBEBEBD9">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="28" />
+            </Label>
             <Label id="heroTitle" width="928" wrap="true" maxLines="2" color="0xEBEBEBFF">
                 <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="76" />
             </Label>
@@ -68,9 +74,14 @@
             <Label id="heroSummary" width="928" wrap="true" maxLines="3" lineSpacing="8" color="0xD5D8DEFF">
                 <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="30" />
             </Label>
-            <!-- Play (or Resume) on a pill, then From start, Info and the
-                 watched mark as round buttons; Left and Right between them. -->
-            <ChipRow id="heroButtons" height="80" minWidth="256" pad="80" onArt="true" />
+            <!-- Play (or Resume) on a pill, then From start, Info, and My
+                 List or the watched mark as round buttons; Left and Right
+                 between them. Beside them while titles take turns, a dash
+                 for each, the one on longer and white. -->
+            <Group id="heroBar">
+                <ChipRow id="heroButtons" height="80" minWidth="256" pad="80" onArt="true" />
+                <Group id="heroTurns" visible="false" />
+            </Group>
         </LayoutGroup>
         <!-- In the rows: what the title focus rests on is, over them. -->
         <LayoutGroup id="info" translation="[192, 56]" layoutDirection="vert" visible="false">
@@ -114,5 +125,8 @@
         </Animation>
         <!-- Focus resting on a tile: the info block and the backdrop follow. -->
         <Timer id="rest" duration="0.4" />
+        <!-- Whether the hero turns to its next title yet, looked at twice a
+             second while titles take turns. -->
+        <Timer id="turnClock" duration="0.5" repeat="true" />
     </children>
 </component>

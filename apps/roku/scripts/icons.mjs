@@ -25,7 +25,7 @@ const SIZE = 40;
 const ICONS = [
   ["Search"], ["House"], ["Compass"], ["ListVideo"], ["TvMinimal"], ["Clapperboard"], ["Tv"],
   ["Music"], ["Film"], ["Layers"], ["ListMusic"], ["AudioLines"], ["Settings"],
-  ["Play", true], ["RotateCcw"], ["Info"], ["CircleCheck"],
+  ["Play", true], ["RotateCcw"], ["Info"], ["CircleCheck"], ["Check"],
   ["Plus"], ["EyeOff"], ["Captions"], ["BookmarkPlus"], ["BookmarkCheck"], ["ListPlus"], ["Ellipsis"],
   ["CalendarDays"], ["LayoutGrid"], ["Clock"], ["Star"], ["Star", true], ["ChevronRight"], ["ChevronDown"],
 ];
