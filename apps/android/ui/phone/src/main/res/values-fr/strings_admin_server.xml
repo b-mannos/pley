@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="admin_server_title">Serveur</string>
+    <string name="admin_server_general">Général</string>
+    <string name="admin_server_name">Nom du serveur</string>
+    <string name="admin_server_name_hint">Affiché sur l’écran de connexion.</string>
+    <string name="admin_server_language">Langue du serveur</string>
+    <string name="admin_server_language_hint">La langue des textes du serveur lui-même, et des appareils dans une langue que Pley ne parle pas encore. Chacun peut choisir la sienne sur sa page Compte.</string>
+    <string name="admin_server_saved">Enregistrée</string>
+    <string name="admin_server_not_set">Non défini</string>
+    <string name="admin_server_testing">Test en cours…</string>
+
+    <string name="admin_server_metadata">Métadonnées</string>
+    <string name="admin_server_metadata_description">Affiches, résumés, notes, distribution et titres des épisodes.</string>
+    <string name="admin_server_tmdb_key">Clé d’API TMDB</string>
+    <string name="admin_server_tmdb_key_hint">Les films, les collections et « Corriger la correspondance » utilisent TMDB. Clé gratuite sur themoviedb.org/settings/api. Sans clé, les films gardent le nom de leur fichier et leurs illustrations locales, ou ce que disent leurs fichiers NFO.</string>
+    <string name="admin_server_test_tmdb">Tester la clé TMDB</string>
+    <string name="admin_server_tv_shows">Séries</string>
+    <string name="admin_server_tv_shows_hint">Automatique utilise TMDB s’il a une clé, sinon TheTVDB s’il en a une, sinon TVmaze, qui n’en demande pas. Changer de source récupère à nouveau toutes les séries.</string>
+    <string name="admin_server_automatic">Automatique (%1$s)</string>
+    <string name="admin_server_tvmaze_no_key">TVmaze (sans clé)</string>
+    <string name="admin_server_test_tvmaze">Tester TVmaze</string>
+    <string name="admin_server_tvdb_key">Clé d’API TheTVDB</string>
+    <string name="admin_server_tvdb_key_hint">Nécessaire seulement pour utiliser TheTVDB pour les séries. Obtenez-en une sur thetvdb.com/api-information.</string>
+    <string name="admin_server_tvdb_pin">Code PIN TheTVDB</string>
+    <string name="admin_server_tvdb_pin_hint">Les clés « user-supported » demandent aussi votre code PIN d’abonné. Laissez vide pour les autres clés.</string>
+    <string name="admin_server_test_tvdb">Tester la clé TheTVDB</string>
+    <string name="admin_server_music_toggle">Métadonnées musicales depuis MusicBrainz</string>
+    <string name="admin_server_music_hint">Genres et dates de sortie depuis MusicBrainz, et pochettes depuis le Cover Art Archive pour les albums qui n’en ont pas. Les tags des fichiers priment. Aucune clé requise ; la première recherche prend environ une seconde par album.</string>
+    <string name="admin_server_test_musicbrainz">Tester MusicBrainz</string>
+    <string name="admin_server_nfo_toggle">Lire les fichiers NFO</string>
+    <string name="admin_server_nfo_hint">Les fichiers NFO que Kodi, Jellyfin, Radarr et Sonarr gardent à côté des films et des séries : leurs identifiants décident de la correspondance, et leurs informations l’emportent sur celles de la source de métadonnées. Vos modifications l’emportent sur elles. Pley ne les modifie jamais.</string>
+    <string name="admin_server_metadata_language">Langue des métadonnées</string>
+    <string name="admin_server_metadata_language_hint">Pour TMDB et TheTVDB. TVmaze est en anglais.</string>
+    <string name="admin_server_attribution">Ce produit utilise l’API TMDB mais n’est ni approuvé ni certifié par TMDB. Métadonnées TV de TheTVDB. Les données TV de TVmaze sont sous licence CC BY-SA ; les données musicales de MusicBrainz sont dans le domaine public.</string>
+
+    <string name="admin_server_subtitles">Sous-titres</string>
+    <string name="admin_server_subtitles_description">Trouvez des sous-titres pour un film ou un épisode sur OpenSubtitles, depuis le menu des sous-titres du lecteur.</string>
+    <string name="admin_server_os_key">Clé d’API OpenSubtitles</string>
+    <string name="admin_server_os_key_hint">Chaque serveur a besoin de sa propre clé : créez un « consumer » sur opensubtitles.com/consumers. Sans clé, la recherche de sous-titres est désactivée.</string>
+    <string name="admin_server_os_account">Compte OpenSubtitles</string>
+    <string name="admin_server_os_account_hint">Facultatif. Les téléchargements sont décomptés du quota quotidien de ce compte plutôt que du quota plus petit de la clé.</string>
+    <string name="admin_server_os_username">Nom d’utilisateur OpenSubtitles</string>
+    <string name="admin_server_os_password">Mot de passe OpenSubtitles</string>
+    <string name="admin_server_os_password_keep">Laissé vide, le mot de passe enregistré est conservé.</string>
+    <string name="admin_server_test_os">Tester OpenSubtitles</string>
+
+    <string name="admin_server_scanning">Analyse des bibliothèques</string>
+    <string name="admin_server_watch">Surveiller les dossiers</string>
+    <string name="admin_server_watch_hint">Prendre en compte automatiquement les fichiers nouveaux, modifiés et supprimés.</string>
+    <string name="admin_server_markers">Détecter les intros et les génériques</string>
+    <string name="admin_server_markers_hint">Comparer l’audio des épisodes en arrière-plan pour proposer Passer l’intro et Passer le générique. Les chapitres nommés Intro ou Credits sont toujours utilisés.</string>
+    <string name="admin_server_no_chromaprint">Ce FFmpeg n’a pas Chromaprint : seuls les chapitres peuvent marquer les intros et les génériques.</string>
+    <string name="admin_server_seek_previews">Aperçus de navigation</string>
+    <string name="admin_server_seek_previews_hint">Créer en arrière-plan les miniatures affichées au-dessus de la barre de lecture, la première fois qu’un film ou un épisode est ouvert.</string>
+    <string name="admin_server_whole_libraries">Aperçus de bibliothèques entières</string>
+    <string name="admin_server_whole_libraries_hint">Après chaque analyse, créer les aperçus de navigation et les images de chapitres manquants.</string>
+    <string name="admin_server_needs_seek_previews">Nécessite Aperçus de navigation.</string>
+    <string name="admin_server_interval">Intervalle d’analyse périodique</string>
+    <string name="admin_server_interval_hint">Minutes entre deux analyses complètes. 0 désactive les analyses périodiques.</string>
+    <plurals name="admin_server_minutes">
+        <item quantity="one">%d minute</item>
+        <item quantity="many">%d de minutes</item>
+        <item quantity="other">%d minutes</item>
+    </plurals>
+
+    <string name="admin_server_work">Quand travailler sur les bibliothèques</string>
+    <string name="admin_server_work_hint">La détection des intros et des génériques, et les aperçus de bibliothèques entières. Ce travail attend toujours pendant une lecture ; ce que quelqu’un ouvre ou regarde passe en premier, à toute heure.</string>
+    <string name="admin_server_work_auto">Automatiquement</string>
+    <string name="admin_server_work_hours">Entre des heures définies</string>
+    <string name="admin_server_work_idle">Quand rien n’est en lecture</string>
+    <string name="admin_server_work_needs">Nécessite Détecter les intros et les génériques, ou Aperçus de bibliothèques entières.</string>
+    <string name="admin_server_work_auto_note">Les séries en cours de visionnage, les titres des listes et les nouveautés passent en premier, à toute heure. Le reste attend les heures où l’on regarde rarement, que le serveur apprend.</string>
+    <string name="admin_server_work_from">De</string>
+    <string name="admin_server_work_to">À</string>
+    <string name="admin_server_work_server_time">À l’heure du serveur.</string>
+    <string name="admin_server_when_people_watch">Quand on regarde</string>
+    <string name="admin_server_learned">Appris de ce qui a été lu ces dernières semaines, les plus récentes comptant le plus, à l’heure du serveur.</string>
+    <string name="admin_server_learning">Apprentissage en cours : tant qu’environ une semaine de lecture n’est pas connue, le reste des bibliothèques avance dès que rien n’est en lecture.</string>
+    <string name="admin_server_next_from">Reprise à partir du %1$s.</string>
+    <string name="admin_server_wait_others">Attendre les autres programmes</string>
+    <string name="admin_server_wait_others_hint">Le travail sur les bibliothèques attend tant que d’autres programmes occupent les processeurs davantage que ceci.</string>
+    <string name="admin_server_never">Jamais</string>
+    <string name="admin_server_over">Quand ils dépassent %1$d %%</string>
+    <string name="admin_server_rarely">Rarement regardé</string>
+    <string name="admin_server_often">Souvent</string>
+    <string name="admin_server_not_seen_yet">Pas encore observé</string>
+    <string name="admin_server_may_begin">Le reste des bibliothèques peut commencer</string>
+    <string name="admin_server_chart_touch">Touchez une heure pour la voir.</string>
+    <string name="admin_server_hour">%1$s %2$s : %3$s</string>
+    <string name="admin_server_hour_open">%1$s %2$s : %3$s, le travail sur les bibliothèques peut commencer</string>
+    <string name="admin_server_not_seen_enough">pas encore assez observé</string>
+    <string name="admin_server_played">en lecture %1$d %% du temps</string>
+
+    <string name="admin_server_sign_in">Connexion</string>
+    <string name="admin_server_require_two_step">Exiger la connexion en deux étapes</string>
+    <string name="admin_server_require_two_step_hint">Toute personne ayant un mot de passe se connecte avec un code d’une application d’authentification. Celles qui ne l’ont pas configurée le font à leur prochaine connexion, dans le navigateur (pour une TV, sur le téléphone avec lequel elles se connectent).</string>
+    <string name="admin_server_own_first">Activez d’abord la connexion en deux étapes pour votre propre compte, dans Compte de l’application web.</string>
+    <string name="admin_server_everyone_has_it">Toutes les personnes ayant un mot de passe l’utilisent déjà.</string>
+    <plurals name="admin_server_signs_out">
+        <item quantity="one">L’activer déconnecte %d personne qui ne l’a pas configurée, sur tous les appareils et applications, jusqu’à ce qu’elle la configure.</item>
+        <item quantity="many">L’activer déconnecte %d de personnes qui ne l’ont pas configurée, sur tous les appareils et applications, jusqu’à ce qu’elles la configurent.</item>
+        <item quantity="other">L’activer déconnecte %d personnes qui ne l’ont pas configurée, sur tous les appareils et applications, jusqu’à ce qu’elles la configurent.</item>
+    </plurals>
+    <string name="admin_server_no_secret_key">Le serveur ne peut pas utiliser son fichier secret.key : les applications d’authentification ne peuvent être ni configurées ni vérifiées. En attendant, les personnes qui n’ont pas configuré la connexion en deux étapes ne peuvent pas se connecter, et celles qui l’ont configurée se connectent avec un code de secours. Son journal en donne la raison.</string>
+    <string name="admin_server_require_title">Exiger la connexion en deux étapes ?</string>
+    <string name="admin_server_require_confirm">L’exiger</string>
+
+    <string name="admin_server_apps">Applications</string>
+    <string name="admin_server_third_party">Applications d’autres éditeurs</string>
+    <string name="admin_server_third_party_hint">Les applications de Pley peuvent toujours se connecter. Activez cette option pour permettre d’autoriser les applications d’autres éditeurs ; la désactiver les déconnecte.</string>
+    <string name="admin_server_third_party_off_title">Désactiver les applications d’autres éditeurs ?</string>
+    <string name="admin_server_third_party_off_body">Les applications d’autres éditeurs que les gens ont autorisées sont déconnectées aussitôt.</string>
+    <string name="admin_server_third_party_off">Désactiver</string>
+
+    <string name="admin_server_backups">Sauvegardes de la base de données</string>
+    <string name="admin_server_back_up_now">Sauvegarder maintenant</string>
+    <string name="admin_server_backed_up">Sauvegarde effectuée (%1$s)</string>
+    <string name="admin_server_no_backups">Aucune sauvegarde pour l’instant.</string>
+    <string name="admin_server_damaged">La base de données est endommagée</string>
+    <string name="admin_server_damaged_hint">%1$s. Arrêtez Pley, mettez de côté pley.db et ses fichiers -wal et -shm, et copiez la dernière sauvegarde à leur place.</string>
+</resources>
