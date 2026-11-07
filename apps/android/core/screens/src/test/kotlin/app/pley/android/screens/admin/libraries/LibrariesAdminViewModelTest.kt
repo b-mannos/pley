@@ -125,6 +125,27 @@ class LibrariesAdminViewModelTest {
     }
 
     @Test
+    fun theListReadsAgainEachTimeItShowsAfterTheFirst() = runTest {
+        var libraries = "[" + library(1, "Films") + "]"
+        val server = FakeServerAdmin()
+        server.answer("GET /api/libraries") { PleyJson.parseToJsonElement(libraries) }
+        server.answer("GET /api/activity", """{"scans":[]}""")
+        val page = LibrariesAdminViewModel(server)
+        // Shown the first time: what it read as it opened is enough.
+        val first = backgroundScope.launch { page.watchScans() }
+        testScheduler.runCurrent()
+        first.cancel()
+        assertEquals(1, server.callsTo("GET /api/libraries").size)
+        // Back from a library's page, where one was added.
+        libraries = "[" + library(1, "Films") + "," + library(2, "Shows") + "]"
+        val again = backgroundScope.launch { page.watchScans() }
+        testScheduler.runCurrent()
+        again.cancel()
+        assertEquals(listOf("Films", "Shows"), page.libraries.state.value.valueOrNull?.map { it.name })
+        assertEquals(2, server.callsTo("GET /api/activity").size)
+    }
+
+    @Test
     fun aPollThatFailsKeepsWhatWasShown() = runTest {
         val server = server(library(1, "Films", scanning = true), scans = """[{"library_id":1,"phase":"walking"}]""")
         val page = LibrariesAdminViewModel(server)

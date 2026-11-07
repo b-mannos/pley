@@ -38,8 +38,11 @@ class LibrariesAdminViewModel(admin: ServerAdmin) : AdminViewModel(admin) {
     /** One move is saved at a time, in the order they were made. */
     private val saving = Mutex()
 
-    /** Moves made and not saved yet: only the last one's answer is shown. */
+    /** Moves made and not saved yet: only the last one's answer is shown, and no other read replaces the order meanwhile. */
     private var moving = 0
+
+    /** The list has shown before: showing again, it reads what a library's page (or anyone else) changed. */
+    private var shown = false
 
     /** Scans [library]; [force] probes every file again and refreshes the metadata. */
     fun scan(library: Library, force: Boolean) = change(
@@ -82,8 +85,15 @@ class LibrariesAdminViewModel(admin: ServerAdmin) : AdminViewModel(admin) {
         if (from >= 0) move(from, from + by)
     }
 
-    /** Reads the scans again every few seconds while one is under way; run it while the page is on screen. */
+    /**
+     * Run while the page is on screen: the libraries and scans are read
+     * again each time it shows after the first (a library added, changed
+     * or deleted on its page, a scan started elsewhere), then the scans
+     * every few seconds while one is under way.
+     */
     suspend fun watchScans() {
+        if (shown) readAgain()
+        shown = true
         while (true) {
             delay(LibraryAdmin.SCAN_POLL_MS)
             if (scanning().isNotEmpty()) poll()
@@ -107,7 +117,7 @@ class LibrariesAdminViewModel(admin: ServerAdmin) : AdminViewModel(admin) {
         scans.set(now)
         val running = now.filter { it.running }.mapTo(HashSet()) { it.libraryId }
         val list = libraries.state.value.valueOrNull.orEmpty()
-        if ((before - running).isNotEmpty() || list.any { it.scanning && it.id !in running }) libraries.reload()
+        if (moving == 0 && ((before - running).isNotEmpty() || list.any { it.scanning && it.id !in running })) libraries.reload()
     }
 
     /** The libraries with a scan under way, as the list and the scans say. */
@@ -118,7 +128,7 @@ class LibrariesAdminViewModel(admin: ServerAdmin) : AdminViewModel(admin) {
 
     private fun readAgain() {
         scans.reload()
-        libraries.reload()
+        if (moving == 0) libraries.reload()
     }
 
     companion object {
