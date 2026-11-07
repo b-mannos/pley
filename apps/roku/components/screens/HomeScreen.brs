@@ -2,6 +2,7 @@ sub init()
     m.menu = m.top.findNode("menu")
     m.rows = m.top.findNode("rows")
     m.message = m.top.findNode("message")
+    m.message.text = t("common.states.loading")
     m.backdrop = m.top.findNode("backdrop")
     m.hero = m.top.findNode("hero")
     m.heroTitle = m.top.findNode("heroTitle")
@@ -160,7 +161,7 @@ sub load()
     ' What is known of the titles may have moved on (watched, played):
     ' it shows until their details come again.
     m.loads = m.loads + 1
-    if m.rowKeys.Count() = 0 then showMessage("", "Loading…")
+    if m.rowKeys.Count() = 0 then showMessage("", t("common.states.loading"), "", true)
     uiGet("/api/libraries", "onLibraries")
     uiGet("/api/live", "onLive")
     if not m.householdAsked and authAllows(m.global.session.scope, "profiles")
@@ -202,7 +203,7 @@ function profileEntry() as object
     end if
     m.avatarName = profile.title
     title = profile.title
-    if title = "" then title = "Profile"
+    if title = "" then title = t("browse.menu.profile")
     return { title: title, action: "profile", icon: "", profile: true, initial: profile.initial, color: profile.color, picture: profile.picture }
 end function
 
@@ -257,7 +258,7 @@ sub onRows(event as object)
         ' A refresh that fails leaves the rows as they were; with none,
         ' Home says so, with Retry, as on Android TV.
         if m.rowKeys.Count() = 0 and not uiFailed(answer)
-            showMessage("Couldn't load your home screen", answer.message, "Retry")
+            showMessage(t("browse.home.failed"), answer.message, t("common.actions.retry"))
             if m.top.isInFocusChain() then focusPage()
         end if
         return
@@ -347,8 +348,9 @@ sub onRequestSummary()
 end sub
 
 ' In place of the page: title and text, and the button of action (Retry)
-' where it has one.
-sub showMessage(title as string, text as string, action = "" as string)
+' where it has one. loading: the message only says Home is on its way;
+' any other means the screen can be used (Roku's launch beacon).
+sub showMessage(title as string, text as string, action = "" as string, loading = false as boolean)
     m.emptyShown = false
     m.inRows = false
     if m.rows.isInFocusChain() or m.heroButtons.isInFocusChain() or (m.message.isInFocusChain() and action = "") then m.menu.setFocus(true)
@@ -360,7 +362,7 @@ sub showMessage(title as string, text as string, action = "" as string)
     typeSet(m.message, text)
     m.message.action = action
     m.message.visible = true
-    if text <> "Loading…" then uiLaunched()
+    if not loading then uiLaunched()
 end sub
 
 ' Retry: Home asks again, the focus in the menu until the page shows.
@@ -702,7 +704,7 @@ sub onHeroNext(event as object)
     ' Left meanwhile: nothing starts behind the screen now on top.
     if not m.top.active then return
     if episode = invalid
-        uiToast("Nothing to play")
+        uiToast(t("titles.nothingToPlay"))
         return
     end if
     tile = contentTile(episode, m.global.session.server, true)
@@ -740,7 +742,7 @@ sub onMenu(event as object)
     else if action = "libraries"
         uiNavigate({ to: "libraries", params: { libraries: m.libraries } })
     else if action = "playlists"
-        uiNavigate({ to: "grid", params: { kind: "playlists", id: 0, title: "Playlists" } })
+        uiNavigate({ to: "grid", params: { kind: "playlists", id: 0, title: t("browse.menu.playlists") } })
     else if action = "collections"
         uiNavigate({ to: "collections", params: { libraries: m.libraries } })
     else if action = "search"

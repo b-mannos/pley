@@ -22,6 +22,7 @@
         <field id="requestSummary" type="assocarray" onChange="onRequestSummary" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/screens/HomeScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/I18n.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
@@ -88,7 +89,7 @@
         </RowList>
         <!-- Loading, why Home is empty, or what failed with Retry, in the
              middle of the page right of the rail. -->
-        <PageMessage id="message" translation="[1056, 440]" width="1536" text="Loading…" />
+        <PageMessage id="message" translation="[1056, 440]" width="1536" />
         <!-- The rail. Closed, the page's colour under its icons, fading into
              the page; open, a panel over the page, which dims. The panel
              slides in over 200 ms, eased out, as Android TV's opens. -->

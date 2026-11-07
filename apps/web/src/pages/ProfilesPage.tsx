@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router";
-import { ArrowLeft, Delete, Lock } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { Lock } from "lucide-react";
 import { errorMessage, isApiError } from "@/api/client";
 import { useProfiles, useServer, useSwitchProfile } from "@/api/hooks";
 import type { ServerStatus, TwoStepSetup, User } from "@/api/types";
@@ -8,7 +9,9 @@ import { useOptionalAudioPlayer } from "@/audio/AudioPlayer";
 import { useAuth } from "@/auth";
 import { Avatar } from "@/components/Avatar";
 import { Logo } from "@/components/Logo";
+import { PinPad } from "@/components/PinPad";
 import { Button, Spinner, TextInput } from "@/components/ui";
+import { t as translate } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { useDocumentTitle } from "@/lib/hooks";
 import { codeKind, mustSetUpTwoStep, twoStepSetupOf } from "@/lib/twoStep";
@@ -59,102 +62,7 @@ export function challenge(target: User, me: User, server?: ServerStatus): "none"
 
 /** The server explains 403 (wrong PIN or password) and 429 (too many tries). */
 function switchError(err: unknown): string {
-  return isApiError(err, 0) ? "Can't reach the server" : errorMessage(err);
-}
-
-const PAD = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "back", "0", "ok"] as const;
-
-function PinPad({
-  target,
-  busy,
-  locked,
-  error,
-  onSubmit,
-  onCancel,
-}: {
-  target: User;
-  busy: boolean;
-  /** The PIN is locked after too many wrong ones: the keys stop. */
-  locked: boolean;
-  error: string | null;
-  /** Called with the PIN once it has at least 4 digits. */
-  onSubmit: (pin: string) => void;
-  onCancel: () => void;
-}) {
-  const [pin, setPinState] = useState("");
-  // Keys can arrive faster than renders (quick typing, password managers):
-  // the ref always holds what was typed so far.
-  const pinRef = useRef("");
-  const setPin = useCallback((next: string) => {
-    pinRef.current = next;
-    setPinState(next);
-  }, []);
-
-  const press = useCallback(
-    (key: (typeof PAD)[number]) => {
-      if (busy || locked) return;
-      const current = pinRef.current;
-      if (key === "back") setPin(current.slice(0, -1));
-      else if (key === "ok") {
-        if (current.length >= 4) onSubmit(current);
-      } else if (current.length < 8) setPin(current + key);
-    },
-    [busy, locked, onSubmit, setPin],
-  );
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (/^\d$/.test(e.key)) press(e.key as (typeof PAD)[number]);
-      else if (e.key === "Backspace") press("back");
-      else if (e.key === "Enter") press("ok");
-      else if (e.key === "Escape") onCancel();
-      else return;
-      e.preventDefault();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [press, onCancel]);
-
-  return (
-    <div className="flex flex-col items-center">
-      <Avatar user={target} size="lg" />
-      <div className="mt-3 text-lg font-semibold">{target.name}</div>
-      <div className="mt-1 flex items-center gap-1.5 text-sm text-muted">
-        <Lock className="size-3.5" /> Enter the profile PIN
-      </div>
-      <div className="mt-5 flex h-4 items-center gap-3" aria-label={`${pin.length} digits entered`}>
-        {Array.from({ length: Math.max(4, pin.length) }, (_, i) => (
-          <span
-            key={i}
-            className={cn("size-3 rounded-full border transition-colors", i < pin.length ? "border-accent bg-accent" : "border-border-strong")}
-          />
-        ))}
-      </div>
-      <p role="alert" className="mt-3 min-h-5 text-sm text-danger">
-        {error}
-      </p>
-      <div className="mt-2 grid grid-cols-3 gap-3">
-        {PAD.map((key) => (
-          <button
-            key={key}
-            type="button"
-            disabled={busy || locked || (key === "ok" && pin.length < 4)}
-            onClick={() => press(key)}
-            aria-label={key === "back" ? "Delete digit" : key === "ok" ? "Switch" : key}
-            className={cn(
-              "flex size-16 items-center justify-center rounded-full text-xl font-semibold transition-colors disabled:opacity-40",
-              key === "ok" ? "bg-accent text-accent-fg hover:bg-accent-hover" : "bg-surface-2 text-fg hover:bg-surface-3",
-            )}
-          >
-            {key === "back" ? <Delete className="size-5" /> : key === "ok" ? busy ? <Spinner className="size-5 text-accent-fg" /> : "OK" : key}
-          </button>
-        ))}
-      </div>
-      <Button variant="ghost" className="mt-6" icon={<ArrowLeft className="size-4" />} onClick={onCancel}>
-        Back to profiles
-      </Button>
-    </div>
-  );
+  return isApiError(err, 0) ? translate("profiles.cantReach", { ns: "pages" }) : errorMessage(err);
 }
 
 function PasswordPrompt({
@@ -174,6 +82,7 @@ function PasswordPrompt({
   onSubmit: (password: string, code?: string) => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation(["pages", "common"]);
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const ready = !!password && (!target.two_step || !!codeKind(code));
@@ -187,18 +96,16 @@ function PasswordPrompt({
       <div className="mt-3 text-lg font-semibold">{target.name}</div>
       <p className="mt-1 text-center text-sm text-muted">
         {setUp
-          ? `This server requires two-step sign-in, which ${target.name} hasn't set up yet. Enter the profile's password to set it up now.`
-          : `${target.is_admin ? "This is an administrator profile." : "This profile can see more than yours."} ${
-              target.two_step
-                ? "Enter its password and the code from its authenticator app to switch."
-                : "Enter its password to switch."
+          ? t("profiles.mustSetUp", { name: target.name })
+          : `${target.is_admin ? t("profiles.adminProfile") : t("profiles.seesMore")} ${
+              target.two_step ? t("profiles.enterPasswordAndCode") : t("profiles.enterPassword")
             }`}
       </p>
       <TextInput
         autoFocus
         type="password"
         autoComplete="current-password"
-        aria-label="Password"
+        aria-label={t("fields.password")}
         className="mt-5"
         value={password}
         onChange={(e) => setPassword(e.target.value)}
@@ -208,8 +115,8 @@ function PasswordPrompt({
           autoComplete="one-time-code"
           autoCapitalize="off"
           spellCheck={false}
-          aria-label="Code from the authenticator app"
-          placeholder="Code from the authenticator app"
+          aria-label={t("profiles.codeFromApp")}
+          placeholder={t("profiles.codeFromApp")}
           className="mt-2"
           value={code}
           onChange={(e) => setCode(e.target.value)}
@@ -220,10 +127,10 @@ function PasswordPrompt({
       </p>
       <div className="mt-2 flex w-full gap-2">
         <Button variant="ghost" className="flex-1" onClick={onCancel} disabled={busy}>
-          Cancel
+          {t("common:actions.cancel")}
         </Button>
         <Button type="submit" variant="primary" className="flex-1" loading={busy} disabled={!ready}>
-          Switch
+          {t("profiles.switch")}
         </Button>
       </div>
     </form>
@@ -239,7 +146,8 @@ type SettingUp = { kind: "scan"; password: string; setup: TwoStepSetup } | { kin
 
 /** "Who's watching?": pick a home profile for this device. */
 export function ProfilesPage() {
-  useDocumentTitle("Who's watching?");
+  const { t } = useTranslation(["pages", "common"]);
+  useDocumentTitle(t("profiles.title"));
   const me = useAuth();
   const server = useServer();
   const [params] = useSearchParams();
@@ -292,7 +200,7 @@ export function ProfilesPage() {
     if (user.id === me.id) return navigate(next, { replace: true });
     setError(null);
     setPinLocked(false);
-    if (needs === "locked") setError(`${user.name} can see more than your profile: an administrator can give it a PIN to switch to it.`);
+    if (needs === "locked") setError(t("profiles.locked", { name: user.name }));
     else if (needs === "none") doSwitch(user);
     else setTarget(user);
   };
@@ -321,7 +229,7 @@ export function ProfilesPage() {
         <Logo className="mb-10 h-9" />
         {settingUp?.kind === "codes" ? (
           <div className="w-full max-w-md text-left">
-            <h1 className="mb-4 text-xl font-semibold tracking-tight">Save the recovery codes</h1>
+            <h1 className="mb-4 text-xl font-semibold tracking-tight">{t("profiles.saveCodes")}</h1>
             <RecoveryCodesView
               codes={settingUp.codes}
               username={settingUp.username}
@@ -331,17 +239,15 @@ export function ProfilesPage() {
           </div>
         ) : target && settingUp?.kind === "scan" ? (
           <div className="w-full max-w-md text-left">
-            <h1 className="text-xl font-semibold tracking-tight">Set up two-step sign-in for {target.name}</h1>
-            <p className="mb-5 mt-1.5 text-sm text-muted">
-              {target.name} will sign in with a code from an authenticator app after the password, from now on.
-            </p>
+            <h1 className="text-xl font-semibold tracking-tight">{t("profiles.setUpFor", { name: target.name })}</h1>
+            <p className="mb-5 mt-1.5 text-sm text-muted">{t("profiles.setUpHint", { name: target.name })}</p>
             <ScanSetup
               key={settingUp.setup.secret}
               appsHint
               setup={settingUp.setup}
               busy={switchProfile.isPending}
               error={error}
-              submitLabel="Turn on and switch"
+              submitLabel={t("profiles.turnOnAndSwitch")}
               onCode={(code) => doSwitch(target, { password: settingUp.password, code, setup_id: settingUp.setup.id })}
               onCancel={cancel}
             />
@@ -368,16 +274,16 @@ export function ProfilesPage() {
           />
         ) : (
           <>
-            <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">Who's watching?</h1>
+            <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">{t("profiles.title")}</h1>
             {profiles.isPending ? (
               <Spinner className="mt-12 size-8" />
             ) : profiles.isError ? (
               <div role="alert" className="mt-10 flex flex-col items-center text-center">
-                <p className="font-semibold text-fg">Couldn't load the profiles</p>
+                <p className="font-semibold text-fg">{t("profiles.cantLoad")}</p>
                 <p className="mt-1.5 max-w-md text-sm text-muted">{errorMessage(profiles.error)}</p>
                 <Button
                   className="mt-5" onClick={() => void profiles.refetch()} loading={profiles.isFetching}>
-                  Retry
+                  {t("common:actions.retry")}
                 </Button>
               </div>
             ) : (
@@ -417,7 +323,7 @@ export function ProfilesPage() {
               </p>
             ) : null}
             <Button variant="ghost" className="mt-10" onClick={() => void navigate(next, { replace: true })}>
-              Continue as {me.name}
+              {t("profiles.continueAs", { name: me.name })}
             </Button>
           </>
         )}

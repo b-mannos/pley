@@ -105,13 +105,14 @@ sub uiUnreachable(retry = invalid as dynamic, reason = "" as string)
 end sub
 
 ' What a failed answer leads to: true when it was handled here (the server
-' doesn't answer, or the sign-in ended and the scene shows sign-in).
+' doesn't answer, the sign-in ended and the scene shows sign-in, or the
+' request was the profile's before a switch, and the screens start again).
 function uiFailed(answer as object) as boolean
     if answer.error = "network"
         uiUnreachable(invalid, httpString(answer.message))
         return true
     end if
-    return answer.error = "signed_out"
+    return answer.error = "signed_out" or answer.error = "profile_changed"
 end function
 
 ' Roku's launch beacon, once: the first screen can be used.
@@ -129,12 +130,33 @@ sub uiToast(text as string, isError = false as boolean, seconds = 0 as float)
     m.top.getScene().toast = { text: text, error: isError, seconds: seconds }
 end sub
 
+' What picks the language shown (I18n.brs's i18nShown and i18nRow): the
+' sign-in's and the server's, the Roku's own and the one picked on it.
+function uiLanguageFacts() as object
+    session = m.global.session
+    scene = m.top.getScene()
+    if scene = invalid then scene = m.top
+    refused = scene.languageRefused
+    if refused = invalid then refused = ""
+    return {
+        signedIn: session.signedIn,
+        accountHeard: session.accountHeard,
+        account: session.accountLanguage,
+        server: session.server,
+        serverHeard: session.serverHeard,
+        serverLanguage: session.serverLanguage,
+        refused: refused <> "" and refused = session.server,
+        device: CreateObject("roDeviceInfo").GetCurrentLocale(),
+        choice: CreateObject("roRegistrySection", "language").Read("choice")
+    }
+end function
+
 ' A message with an OK button.
 sub uiMessage(title as string, lines as object)
     dialog = CreateObject("roSGNode", "StandardMessageDialog")
     dialog.title = title
     dialog.message = lines
-    dialog.buttons = ["OK"]
+    dialog.buttons = [t("common.actions.ok")]
     dialog.observeField("buttonSelected", "uiCloseDialog")
     m.top.getScene().dialog = dialog
 end sub

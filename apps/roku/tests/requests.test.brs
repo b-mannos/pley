@@ -374,7 +374,7 @@ sub test_requests_actions_in_the_server_s_order()
     removed = reqActions(reqTestRequest({ status: "declined", stage: "declined", actions: ["withdraw"] }), 0)
     tkEqual(removed, [{ label: "Remove", action: "withdraw" }], "a declined one is removed")
     ready = reqActions(reqTestRequest({ status: "available", stage: "available", actions: ["ask_again", "unwatch", "retry", "bogus"] }), 12)
-    tkEqual(ready, [{ label: "Watch", action: "watch" }, { label: "Request again", action: "ask_again" }, { label: "Stop following", action: "unwatch" }, { label: "Try again", action: "retry" }])
+    tkEqual(ready, [{ label: "Watch", action: "watch" }, { label: "Request again", action: "ask_again" }, { label: "Stop following", action: "unwatch" }, { label: "Retry", action: "retry" }])
 end sub
 
 ' OK on a request's card opens its panel: Open where a library has it for
@@ -451,7 +451,7 @@ sub test_requests_problems_say_what_to_do()
     tkInvalid(reqProblem({ status: 0, error: "network" }, false))
 end sub
 
-' Search's Discover row says every problem, and offers Try again only where
+' Search's Discover row says every problem, and offers Retry only where
 ' asking again may help.
 sub test_requests_search_says_what_stops_tmdb()
     down = reqSearchProblemTile({ status: 503, error: "tmdb_down" }, false)
@@ -544,7 +544,7 @@ sub test_requests_sign_in_again_asks_first()
 end sub
 
 ' A title's page that can't show: gone from TMDB (Back), what stops
-' requests, or any other failure with Try again.
+' requests, or any other failure with Retry.
 sub test_requests_title_page_problems()
     gone = reqTitleProblem({ status: 404, error: "not_found", message: "This isn't on the server any more." }, false)
     tkEqual(gone, { title: "This title isn't on TMDB", text: "It may have been taken off since.", retry: false, signIn: false, back: true })
@@ -769,7 +769,7 @@ sub test_requests_hero_comes_from_the_first_list_with_a_title()
 end sub
 
 ' Without a hero, Discover says why in place of its page: a list that
-' failed, with Try again, else that TMDB's lists have nothing to ask for.
+' failed, with Retry, else that TMDB's lists have nothing to ask for.
 sub test_requests_discover_without_a_hero_says_why()
     nothing = reqNoHero([{ key: "trending", state: "shown", first: invalid, failed: "" }, { key: "requests", state: "shown", first: invalid, failed: "Couldn't." }])
     tkEqual(nothing, { title: "Nothing here right now", text: "TMDB's lists have nothing this profile can ask for. Search for a title instead.", retry: false, signIn: false }, "Your requests aren't TMDB's")
@@ -964,4 +964,83 @@ sub test_requests_events_are_known()
     tkTrue(reqIsEvent({ type: "request_available" }))
     tkTrue(reqIsEvent({ type: "requests_settings_changed" }))
     tkFalse(reqIsEvent({ type: "library_changed" }))
+end sub
+
+' French: whole sentences with their own word order, no-break spaces
+' (Chr(160)) inside « » and before : and ?, counts in their plural form.
+sub test_requests_words_in_french()
+    i18nUse("fr")
+    nb = Chr(160)
+    now = reqTestNow()
+    both = reqAllowance({ moviesLeft: 2, seasonsLeft: 5, moviesLimit: 3, seasonsLimit: 10, moviesNextAt: 0, seasonsNextAt: 0 }, now)
+    tkEqual(both.text, "Vous pouvez encore demander 2 films et 5 saisons.")
+    tkEqual(both.limits, "Limites" + nb + ": 3 films et 10 saisons sur 7 jours.")
+    mixed = reqAllowance({ moviesLeft: 1, seasonsLeft: 0, moviesLimit: 3, seasonsLimit: 10, moviesNextAt: 0, seasonsNextAt: now + 86400 }, now)
+    tkEqual(mixed.text, "Vous pouvez encore demander 1 film, et d’autres saisons demain.")
+    movies = reqAllowance({ moviesLeft: 0, seasonsLeft: -1, moviesLimit: 1, seasonsLimit: -1, moviesNextAt: now + 3 * 86400, seasonsNextAt: 0 }, now)
+    tkEqual(movies.text, "Vous avez demandé tous les films possibles pour l’instant" + nb + ": vous pourrez en demander d’autres dans 3 jours.")
+    tkEqual(movies.limits, "Limite" + nb + ": 1 film sur 7 jours.")
+    tkEqual(reqDeclineQuestion("Dune", false).title, "Refuser «" + nb + "Dune" + nb + "»" + nb + "?")
+    tkEqual(reqSeasonsLabel([0, 1, 2]), "Saisons 1–2 et épisodes spéciaux")
+    severance = "«" + nb + "Severance" + nb + "»"
+    tkEqual(reqReadyText("Severance", "show", [2]), "Saison 2 de " + severance + " est prête à regarder.")
+    tkEqual(reqReadyText("Severance", "show", [1, 2]), "Saisons 1–2 de " + severance + " sont prêtes à regarder.")
+    tkEqual(reqReadyText("Severance", "show", [0]), "Les épisodes spéciaux de " + severance + " sont prêts à regarder.")
+    tkEqual(reqNotice([{}, {}, {}], "").text, "3 de vos demandes ont du nouveau")
+    tkEqual(reqPickerButton(1, 5, ""), { label: "Demander 1 saison", line: "" })
+    tkEqual(reqPickerButton(3, 2, "").line, "Vous pouvez encore demander 2 saisons.")
+    tkEqual(reqSeasonState(reqTestSeason(2, "partial"), {}, false, false, now, 0).text, "Déjà 3 épisodes sur 8")
+    tkEqual(reqWho(reqTestRequest({}), now, 0), "Demandé par vous · il y a 3 jours")
+    seasons = [reqTestSeason(1, "library"), reqTestSeason(2, "missing"), reqTestSeason(3, "missing")]
+    tkEqual(reqDetailLine(reqTestDetail({ kind: "show", seasons: seasons, runtime_minutes: invalid, certification: "TV-MA", rating: 8.9, year: 2008 })), "2008 · 3 saisons · TV-MA · ★ 8,9")
+end sub
+
+sub test_requests_stages_in_french()
+    i18nUse("fr")
+    nb = Chr(160)
+    now = reqTestNow()
+    show = reqTestRequest({ status: "approved", stage: "waiting", stage_at: now + 9 * 3600 + 300 })
+    tkEqual(reqStage(show, false, now, 0).text, "Diffusion à 21:05", "24 hours in French")
+    show.stage_at = now + 20 * 3600
+    tkEqual(reqStage(show, false, now, 0).text, "Diffusion demain à 08:00")
+    downloading = reqTestRequest({ status: "approved", stage: "downloading", download: { progress: 0.42, state: "downloading", eta: now + 20 * 60, episodes: 3 } })
+    tkEqual(reqStage(downloading, false, now, 0).text, "Téléchargement 42" + nb + "% · dans 20 min")
+    partial = reqTestRequest({ status: "approved", stage: "partial", available_seasons: [1, 2] })
+    tkEqual(reqStage(partial, false, now, 0).text, "Prêt à regarder" + nb + ": Saisons 1–2")
+    failed = reqTestRequest({ status: "failed", stage: "failed", reason: "Sonarr isn't answering", retry_at: now + 300 })
+    tkEqual(reqStage(failed, true, now, 0), { text: "Envoi impossible" + nb + ": Sonarr isn't answering", tone: "problem", line: "Nouvel essai dans 5 min.", progress: -1 })
+end sub
+
+' Spanish: «» and ¿…?, the tabs' shorter words, and what the server's
+' answers become.
+sub test_requests_words_in_spanish()
+    i18nUse("es")
+    now = reqTestNow()
+    labels = []
+    for each tab in reqTabs(true)
+        labels.Push(tab.label)
+    end for
+    tkEqual(labels, ["Por revisar", "Todas", "En espera", "Aprobadas", "Listas", "Rechazadas", "Fallidas", "Las tuyas"])
+    tkEqual(reqSeasonsLabel([2]), "Temporada 2")
+    tkEqual(reqSeasonsLabel([3, 1, 2, 5]), "Temporadas 1–3, 5")
+    tkEqual(reqEmpty("pending", false, true, false), { title: "Ninguna solicitud coincide", text: "Prueba con otros filtros.", find: false })
+    tkEqual(reqAsked(201, { status: "pending" }, "Dune"), "Solicitaste «Dune»: un administrador decidirá.")
+    limits = reqTestSummary({ moviesLimit: 1, seasonsLimit: 5 })
+    tooMany = { status: 429, error: "too_many_requests", message: "", data: { code: "too_many_requests", retry_at: invalid } }
+    tkEqual(reqAskProblem(tooMany, limits, "show", now), "Puedes solicitar como máximo 5 temporadas cada 7 días: elige menos.")
+    tkEqual(reqAskProblem(tooMany, limits, "movie", now), "Puedes solicitar como máximo 1 película cada 7 días: elige menos.")
+    tkEqual(reqConfirm("withdraw", "Dune", "declined"), { message: "¿Quitar «Dune» de tus solicitudes?", button: "Quitar" })
+    actions = []
+    for each option in reqActions(reqTestRequest({ status: "pending", actions: ["approve", "decline", "handled", "delete"] }), 0)
+        actions.Push(option.label)
+    end for
+    tkEqual(actions, ["Aprobar", "Rechazar", "Rechazar con un motivo…", "Marcar como añadido a mano", "Eliminar"])
+    tkEqual(reqMoreProblemTile({ status: 503, error: "tmdb_down" }, false).title, "TMDB no responde. OK para reintentar.")
+    tiles = reqTitleTiles([{ kind: "show", tmdb_id: 1396, title: "Breaking Bad", year: 2008, poster_url: invalid, status: "requested", item_id: invalid }], "", {})
+    tkEqual(tiles[0].subtitle, "2008 · Serie")
+    tkEqual(tiles[0].badge, "Solicitado")
+    tkEqual(reqDeclinedText({ reason: "Not in 4K", at: now, again_at: now + 12 * 86400 }, now), "Rechazado: «Not in 4K». Podrás volver a solicitarlo en 12 días.")
+    movie = reqTestRequest({ kind: "movie", status: "approved", stage: "waiting", stage_at: now + 3 * 86400 })
+    tkEqual(reqStage(movie, false, now, 0).text, "Se estrena el 4 nov")
+    tkEqual(reqSeeAll("", "dune").title, "Resultados de «dune»")
 end sub

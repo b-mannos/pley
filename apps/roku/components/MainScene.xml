@@ -60,8 +60,19 @@
              error }, Ui.brs's uiToast): what an action did, or why it
              didn't, as the other TVs' toasts say it. -->
         <field id="toast" type="assocarray" alwaysNotify="true" />
+        <!-- A language picked on this Roku ("fr"; "" for Automatic): with
+             the globe before signing in, or in Settings on a server that
+             keeps no account's language. The scene keeps it in the
+             registry and shows the language it leads to. -->
+        <field id="languageChoice" type="string" alwaysNotify="true" />
+        <!-- The server (its address) that answered a choice of the
+             account's language 404 or 405: it keeps none, and the
+             Language row is this Roku's while it is the one in use, though
+             Settings closes. -->
+        <field id="languageRefused" type="string" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/I18n.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />

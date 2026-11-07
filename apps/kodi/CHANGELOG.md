@@ -8,6 +8,34 @@ describes how they are made.
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-11-06
+
+### Added
+
+- The add-on is in French and Spanish too: in your profile's language,
+  else the one chosen in the add-on's settings (Screens → Language), else
+  Kodi's, else the server's. Profile language, in the profile's menu and
+  the add-on's settings, sets it for your profile on all your devices; on
+  a server from before languages it is kept on this device. Dates,
+  numbers and counts are written in the language shown, and what the
+  server writes itself, such as Home's rows, comes in it.
+- Sent from a device on another profile of your household, Kodi switches
+  to that profile first, and plays it as that profile. Needs a server from
+  the same release.
+
+### Changed
+
+- Pley's window opens straight on Home as the profile Kodi was left on
+  when it has no PIN, where a household of several profiles was asked
+  "Who's watching?" each time Kodi started. A profile with a PIN still
+  asks first, and Switch profile still shows every profile.
+- What your phone, the web or another device does to a film or episode
+  playing on Kodi shows for a moment as a quiet Kodi notification:
+  "Paused", "Playing", "+30 s", "Jumped to 12:34", or the audio,
+  subtitles or quality picked.
+
+## [0.1.6] - 2026-11-05
+
 ### Added
 
 - Your phone, the web and your other devices control what Kodi plays:
@@ -218,7 +246,9 @@ describes how they are made.
 - First release with a version of its own (builds before it carried 0.2.0,
   the version every app shared).
 
-[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-04...HEAD
+[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-06...HEAD
+[0.1.7]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-06
+[0.1.6]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-05
 [0.1.5]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-04
 [0.1.4]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-03
 [0.1.3]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-02.2

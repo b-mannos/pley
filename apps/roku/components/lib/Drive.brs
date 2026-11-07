@@ -29,7 +29,7 @@ end function
 
 ' What the page calls the drive when it gives no name.
 function driveDefaultName() as string
-    return "USB drive"
+    return t("drive.title")
 end function
 
 ' The drive the app shows, of the volumes Roku lists: the first USB one
@@ -71,7 +71,7 @@ function driveSpace(info as dynamic) as string
     if freeBlocks < 0 then return ""
     free = freeBlocks * size
     if total <= 0 or free < 0 or free > total then return ""
-    return fmtBytes(free) + " free of " + fmtBytes(total)
+    return t("drive.space", { free: fmtBytes(free), total: fmtBytes(total) })
 end function
 
 ' Where dir is on the drive, as a path: "/Films/2019"; at its top, "/".
@@ -275,7 +275,7 @@ function driveLine(entry as object, kept as object) as object
     subtitle = kind
     progress = 0
     if kept.positionMs > 0
-        subtitle = kind + " · Resumes at " + fmtClock(kept.positionMs)
+        subtitle = t("drive.resumes", { kind: kind, time: fmtClock(kept.positionMs) })
         if kept.durationMs > 0
             progress = kept.positionMs / kept.durationMs
             if progress < 0.02 then progress = 0.02
@@ -379,8 +379,8 @@ function driveSidecarName(sidecar as object) as string
         name = name + sidecar.title
     end if
     if sidecar.forced
-        if name = "" then return "Forced"
-        return name + " (Forced)"
+        if name = "" then return t("browse.subtitles.forced")
+        return t("browse.subtitles.namedForced", { name: name })
     end if
     if name <> "" then return name
     if sidecar.codec = "webvtt" then return "VTT"
@@ -392,10 +392,10 @@ end function
 ' then its format: "English (AC3)".
 function driveAudioName(track as dynamic, index as integer) as string
     data = httpObject(track)
-    if data = invalid then return "Track " + (index + 1).ToStr()
+    if data = invalid then return t("drive.track", { number: index + 1 })
     name = httpSentence(data.Name)
     if name = "" then name = fmtLanguageName(httpString(data.Language), "")
-    if name = "" then name = "Track " + (index + 1).ToStr()
+    if name = "" then name = t("drive.track", { number: index + 1 })
     format = UCase(httpString(data.Format))
     if format <> "" and Instr(1, UCase(name), format) = 0 then name = name + " (" + format + ")"
     return name
@@ -411,7 +411,7 @@ function driveTrackName(track as dynamic, index as integer) as string
         name = httpSentence(data.Description)
         if name = "" then name = fmtLanguageName(httpString(data.Language), "")
     end if
-    if name = "" then name = "Track " + (index + 1).ToStr()
+    if name = "" then name = t("drive.track", { number: index + 1 })
     return name
 end function
 
@@ -420,7 +420,7 @@ end function
 ' then the files beside it (sidecars: [{ label }]), which Pley draws.
 ' { labels, values }, values "off", "track:<TrackName>" and "file:<index>".
 function driveSubtitleChoices(tracks as dynamic, sidecars as object) as object
-    choices = { labels: ["Off"], values: ["off"] }
+    choices = { labels: [t("player.tracks.off")], values: ["off"] }
     list = httpArray(tracks)
     for i = 0 to list.Count() - 1
         track = httpObject(list[i])

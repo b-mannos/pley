@@ -7,6 +7,8 @@
 sub init()
     m.rows = m.top.findNode("rows")
     m.message = m.top.findNode("message")
+    m.message.text = t("common.states.loading")
+    m.top.findNode("title").text = t("browse.menu.collections")
     m.started = false
     m.rows.observeField("rowItemSelected", "onTile")
     m.message.observeField("chosen", "load")
@@ -45,10 +47,10 @@ sub load()
     m.message.action = ""
     if m.message.isInFocusChain() then m.top.setFocus(true)
     if m.waiting = 0
-        m.message.text = "No collections yet."
+        m.message.text = t("browse.collections.none")
         return
     end if
-    m.message.text = "Loading…"
+    m.message.text = t("common.states.loading")
     for each library in m.libraries
         uiRequest({ method: "GET", path: "/api/libraries/" + urlValue(library.id) + "/collections", build: "collections", libraryId: library.id }, "onCollections")
     end for
@@ -77,12 +79,12 @@ sub onCollections(event as object)
     end for
     if content.getChildCount() = 0
         if m.failed <> invalid
-            m.message.title = "Couldn't load collections"
+            m.message.title = t("titles.collections.loadFailed")
             typeSet(m.message, m.failed)
-            m.message.action = "Retry"
+            m.message.action = t("common.actions.retry")
             if m.top.hasFocus() or m.message.isInFocusChain() then m.message.setFocus(true)
         else
-            m.message.text = "No collections yet."
+            m.message.text = t("browse.collections.none")
         end if
         return
     end if

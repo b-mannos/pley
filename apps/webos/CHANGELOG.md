@@ -8,6 +8,61 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Fixed
+
+- Watch history, opened while the server is out of reach, shows the plays
+  saved from last time with focus on the newest, without "Can't reach your
+  server" showing for a moment first and leaving focus on a play further
+  down.
+- Marking a title watched no longer goes back to unwatched for a moment
+  when the page was being refreshed as you marked it.
+
+## [0.1.7] - 2026-11-06
+
+### Added
+
+- Pley in French and Spanish: the app shows your profile's language, else
+  the one picked on this TV, else the TV's, else the server's, and starts
+  in the last one it showed. A globe at the bottom right of Choose your
+  server and the address screen, and at the top right of the sign-in code,
+  picks the TV's language before anyone signs in: Automatic (the TV's
+  own), English, Français or Español. Settings → Profile → Language
+  chooses it for your profile on every device, or Automatic; on a server
+  from before languages, the row keeps your choice on this TV.
+- Someone on another profile of the household plays something on the TV
+  from their phone or browser: the TV switches to their profile first
+  (their own device asked for its PIN), then plays it. A switch that fails
+  says so and plays nothing.
+- What your phone or browser does to the film or episode on the TV is
+  said there for 2 s at the top right ("Paused", "+30 s", "Jumped to
+  12:34", "Audio: French"), without bringing up the player's controls; a
+  pause sent from it doesn't keep them up either.
+
+### Changed
+
+- Choose your server's logo is the size of the sign-in code's, the word
+  closer to the mark, as on the other TVs.
+- The TV starts straight into Home as the profile it was left on when it
+  has no PIN, where a household of several profiles was asked "Who's
+  watching?" each time. A profile with a PIN still asks first, and Switch
+  profile still shows every profile. Settings' Always start as
+  calls this Profile used last, where it said Ask who's watching.
+
+### Fixed
+
+- OK on a film or episode left untouched for a few seconds brings up the
+  player's controls for 5 s; they went again at once.
+- Your phone or browser changes Live TV's channel, or stops it, while the
+  channel is still starting on the TV, as it does once it plays.
+- Leaving Live TV, or the TV hiding the app, just as a channel starts lets
+  its connection go at once, not 45 s later.
+- On Requests, the first card is as far from the second as the others are
+  from each other, so its focus ring shows whole rather than under the
+  second card, and the last card of a long list scrolls up clear of the
+  screen's bottom edge.
+
+## [0.1.6] - 2026-11-05
+
 ### Added
 
 - Your phone or browser changes the quality of the film or episode on
@@ -38,6 +93,11 @@ describes how they are made.
   a library has whole opens its library page, where it plays, not a page
   with only Open on it. A show partly there still opens its Discover page,
   with Request more seasons.
+- A programme's details in Live TV have Watch and the favourite side by
+  side, the favourite a star as in the live player, where Remove from
+  favourites was a wide button under Watch. In the live player, the star
+  no longer shows its words under it, which ran under Channels; Audio
+  Guidance still reads them.
 
 ### Fixed
 
@@ -382,7 +442,9 @@ describes how they are made.
 - First release with a version of its own (builds before it carried 0.2.0,
   the version every app shared).
 
-[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-04...HEAD
+[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-06...HEAD
+[0.1.7]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-06
+[0.1.6]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-05
 [0.1.5]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-04
 [0.1.4]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-03
 [0.1.3]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-02.2

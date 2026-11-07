@@ -8,6 +8,52 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Added
+
+- Home's hero features the newest movies and shows you haven't watched,
+  as the web and Android do, each with why it's there, Play, Info and My
+  List. Right from its last button goes to the next title, and it turns
+  to the next by itself every few seconds while you aren't pressing
+  anything. Continue Watching is the first row under it.
+
+## [0.1.7] - 2026-11-06
+
+### Added
+
+- Pley in French and Spanish: the app shows your profile's language, else
+  the TV's, else the server's, and starts in the last one it showed. Settings
+  → Profile → Language chooses it for your profile on every device, or
+  Automatic. On a server from before languages, which can't keep your
+  account's, the Language row keeps your choice on this TV.
+- A globe at the bottom right of Choose your server and the address
+  screen, and at the top right of the sign-in code, picks the TV's language before anyone signs in:
+  Automatic (the TV's own), English, Français or Español. The TV keeps the
+  choice, and a profile set to Automatic uses it.
+- Someone else in your household can cast to the TV from their phone or
+  browser while it is on your profile: the TV switches to their profile
+  (their phone or browser asks their PIN, not the TV) and plays what they
+  sent. A switch that fails says so and plays nothing.
+
+### Changed
+
+- The TV starts straight into Home as the profile it was left on when it
+  has no PIN, where a household of several profiles was asked "Who's
+  watching?" each time. A profile with a PIN still asks first, and Switch
+  profile still shows every profile. Settings' Always start as
+  calls this Profile used last, where it said Ask who's watching.
+- Your phone or browser's play, pause, seek, skip, audio, subtitles or
+  quality on a film or episode playing on the TV says what it did for 2 s
+  at the top right ("Paused", "+30 s", "Jumped to 12:34", "Audio: …"),
+  without the player's controls; a pause from there doesn't keep the
+  controls on screen until you press a key on the TV.
+- A programme's details in Live TV have Watch and the favourite side by
+  side, the favourite a star as in the live player, filled for a
+  favourite, where Remove from favourites was a wide button under Watch.
+  In the live player, the star no longer shows its words under it, which
+  ran under Channels.
+
+## [0.1.6] - 2026-11-05
+
 ### Changed
 
 - Requests: a sign-in from before the app could ask says "Sign in again to ask for movies
@@ -451,5 +497,7 @@ describes how they are made.
 
 - The version of the builds made by hand before the app had releases.
 
-[Unreleased]: https://github.com/pley-media-server/pley/compare/5f6405a7af22a8102cb0ebfa414c66492e161102...HEAD
+[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-06...HEAD
+[0.1.7]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-06
+[0.1.6]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-05
 [0.0.1]: https://github.com/pley-media-server/pley/tree/5f6405a7af22a8102cb0ebfa414c66492e161102

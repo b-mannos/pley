@@ -59,12 +59,8 @@ function contentTile(item as object, server as string, wide as boolean, caption 
     else if kind = "season"
         subtitle = httpSentence(item.parent_title)
     else if kind = "artist"
-        albums = httpNumber(item.child_count, 0)
-        if albums = 1
-            subtitle = "1 album"
-        else if albums > 1
-            subtitle = urlValue(albums) + " albums"
-        end if
+        albums = Int(httpNumber(item.child_count, 0))
+        if albums > 0 then subtitle = t("browse.counts.albums", { count: albums })
     else if kind = "album"
         subtitle = httpSentence(item.parent_title)
         year = httpNumber(item.year, 0)
@@ -141,17 +137,19 @@ function contentCaption(item as object, tile as object) as string
     if left <> "" then return left
     year = ""
     if httpNumber(item.year, 0) > 0 then year = urlValue(Int(httpNumber(item.year, 0)))
+    episodes = Int(httpNumber(item.leaf_count, -1))
     if kind = "show"
-        seasons = httpNumber(item.child_count, 0)
-        if seasons > 0 then return fmtPlural(seasons, "season")
-        if httpNumber(item.leaf_count, -1) >= 0 then return fmtPlural(item.leaf_count, "episode")
+        seasons = Int(httpNumber(item.child_count, 0))
+        if seasons > 0 then return t("browse.counts.seasons", { count: seasons })
+        if episodes >= 0 then return t("browse.counts.episodes", { count: episodes })
         return year
     end if
     if kind = "season"
-        if httpNumber(item.leaf_count, -1) >= 0 then return fmtPlural(item.leaf_count, "episode")
+        if episodes >= 0 then return t("browse.counts.episodes", { count: episodes })
         return ""
     end if
-    if kind = "artist" and httpNumber(item.child_count, 0) > 0 then return fmtPlural(item.child_count, "album")
+    albums = Int(httpNumber(item.child_count, 0))
+    if kind = "artist" and albums > 0 then return t("browse.counts.albums", { count: albums })
     parts = []
     if kind = "album"
         parts = [httpSentence(item.parent_title), year]
@@ -250,7 +248,7 @@ end function
 ' See all at a row's end, in the row's shape: its library's Library tab in
 ' sort's order.
 function contentSeeAllTile(libraryId as dynamic, sort as string, wide as boolean, square as boolean) as object
-    return { title: "See all", subtitle: "", image: "", wide: wide, square: square, progress: 0.0, watched: false, itemId: 0, kind: "more", list: "", query: "", libraryId: libraryId, sort: sort }
+    return { title: t("common.actions.seeAll"), subtitle: "", image: "", wide: wide, square: square, progress: 0.0, watched: false, itemId: 0, kind: "more", list: "", query: "", libraryId: libraryId, sort: sort }
 end function
 
 ' Whether a row is Continue Watching: Home's ("continue_watching"), or a
@@ -346,11 +344,14 @@ end function
 ' with bitrate their bitrate and size take the year's place under them.
 function contentTiles(items as dynamic, server as string, badges = false as boolean, bitrate = false as boolean) as object
     tiles = []
+    ' Looked up once for the page, not once a tile.
+    unknown = ""
+    if bitrate then unknown = t("browse.title.bitrateUnknown")
     for each item in httpArray(items)
         if GetInterface(item, "ifAssociativeArray") <> invalid and contentShown(httpString(item.kind))
             tile = contentTile(item, server, false, true)
             if badges then tile.qualityBadges = contentQualityBadges(item.media)
-            if bitrate then tile.subtitle = contentMediaLine(item.media)
+            if bitrate then tile.subtitle = contentMediaLine(item.media, unknown)
             tiles.Push(tile)
         end if
     end for
@@ -374,16 +375,18 @@ function contentQualityBadges(media as dynamic) as object
 end function
 
 ' The line under a poster sorted by bitrate: "42 Mbps · 23.4 GB", or
-' "Bitrate unknown".
-function contentMediaLine(media as dynamic) as string
+' "Bitrate unknown" (unknown: those words, when the caller has them).
+function contentMediaLine(media as dynamic, unknown = "" as string) as string
     summary = httpObject(media)
-    if summary = invalid then return "Bitrate unknown"
     parts = []
-    for each part in [fmtBitrate(summary.bitrate), fmtBytes(summary.size)]
-        if part <> "" then parts.Push(part)
-    end for
-    if parts.Count() = 0 then return "Bitrate unknown"
-    return parts.Join(" · ")
+    if summary <> invalid
+        for each part in [fmtBitrate(summary.bitrate), fmtBytes(summary.size)]
+            if part <> "" then parts.Push(part)
+        end for
+    end if
+    if parts.Count() > 0 then return parts.Join(" · ")
+    if unknown = "" then unknown = t("browse.title.bitrateUnknown")
+    return unknown
 end function
 
 ' A show's seasons, its title page's tabs: [{ itemId, title, index,
@@ -438,7 +441,7 @@ function contentEpisodes(children as dynamic, server as string) as object
                 if part <> "" then parts.Push(part)
             end for
             aired = fmtDateText(item.release_date, 0, 0)
-            if aired <> "" then parts.Push("Aired " + aired)
+            if aired <> "" then parts.Push(t("titles.page.aired", { date: aired }))
             tile.name = name
             tile.line = parts.Join(" · ")
             tile.summary = httpClean(item.summary, 300, false)
@@ -515,71 +518,74 @@ function contentDetail(detail as object, server as string, onDeck = invalid as d
         if upcoming <> invalid
             ' "Play S1 · E3", "Resume S1 · E3".
             code = fmtEpisode(upcoming.parent_index, upcoming.index)
-            if code <> "" then code = " " + code
             upcomingState = httpObject(upcoming.user_state)
             if upcomingState <> invalid and not httpTrue(upcomingState.watched) and fmtResumable(upcomingState.position_ms, upcoming.duration_ms)
-                buttons = ["Resume" + code, "From start"]
+                resumeLabel = t("common.actions.resume")
+                if code <> "" then resumeLabel = t("browse.title.resumeEpisode", { episode: code })
+                buttons = [resumeLabel, t("browse.home.fromStart")]
                 actions = ["playNext", "nextFromStart"]
                 left = fmtLeft(upcomingState.position_ms, upcoming.duration_ms)
             else
-                buttons = ["Play" + code]
+                playLabel = t("common.actions.play")
+                if code <> "" then playLabel = t("browse.title.playEpisode", { episode: code })
+                buttons = [playLabel]
                 actions = ["playNext"]
             end if
         else if httpNumber(detail.leaf_count, 0) = 0
-            buttons = ["Unavailable"]
+            buttons = [t("titles.page.unavailable")]
             actions = ["unavailable"]
         else
             ' Nothing next, though it has episodes: Play says so.
-            buttons = ["Play"]
+            buttons = [t("common.actions.play")]
             actions = ["playNext"]
         end if
         if kind = "show" and httpTrue(page.askMore)
-            buttons.Push("Request more seasons")
+            buttons.Push(t("requests.buttons.requestMoreSeasons"))
             actions.Push("askMore")
         end if
     else if not contentPlayable(kind)
-        note = "Pley for Roku doesn't play this kind of title yet."
+        note = t("browse.title.cantPlayKind")
     else if files.Count() = 0
-        buttons = ["Unavailable"]
+        buttons = [t("titles.page.unavailable")]
         actions = ["unavailable"]
     else if not watched and fmtResumable(position, duration)
-        buttons = ["Resume", "From start"]
+        buttons = [t("common.actions.resume"), t("browse.home.fromStart")]
         actions = ["resume", "start"]
         left = fmtLeft(position, duration)
     else
-        buttons = ["Play"]
+        buttons = [t("common.actions.play")]
         actions = ["start"]
     end if
     if kind = "movie" or kind = "episode" or container
         if watched
-            buttons.Push("Mark as unwatched")
+            buttons.Push(t("browse.title.markUnwatched"))
             actions.Push("unwatched")
         else
-            buttons.Push("Mark as watched")
+            buttons.Push(t("browse.title.markWatched"))
             actions.Push("watched")
         end if
     end if
     if (kind = "movie" or kind = "episode") and contentHasTracks(detail)
-        buttons.Push("Audio and subtitles")
+        buttons.Push(t("browse.title.tracks"))
         actions.Push("tracks")
     end if
     if kind = "movie" or kind = "show"
         if inList
-            buttons.Push("Remove from My List")
+            buttons.Push(t("browse.title.removeFromMyList"))
             actions.Push("listRemove")
         else
-            buttons.Push("Add to My List")
+            buttons.Push(t("browse.title.addToMyList"))
             actions.Push("listAdd")
         end if
     end if
     trailerId = 0
     if kind = "movie" or kind = "show" or kind = "episode" then trailerId = contentTrailer(detail)
     if trailerId > 0
-        buttons.Push("Trailer")
+        buttons.Push(t("browse.title.trailer"))
         actions.Push("trailer")
     end if
     if kind = "movie" or kind = "episode" or container
-        buttons.Push("Add to playlist")
+        buttons.Push(t("browse.title.addToPlaylist"))
         actions.Push("playlist")
     end if
     stars = 0
@@ -595,12 +601,12 @@ function contentDetail(detail as object, server as string, onDeck = invalid as d
     else if kind = "season"
         showId = httpNumber(detail.parent_id, 0)
     end if
-    if showId > 0 then more.Push({ label: "Go to show", action: "show" })
-    if kind = "episode" and showId > 0 and seasonId > 0 then more.Push({ label: "Go to season", action: "season" })
-    if (kind = "movie" or kind = "episode") and files.Count() > 0 then more.Push({ label: "Media info", action: "info" })
-    if contentAbout(detail, 0, 0) <> "" then more.Push({ label: "Details", action: "about" })
+    if showId > 0 then more.Push({ label: t("browse.title.goToShow"), action: "show" })
+    if kind = "episode" and showId > 0 and seasonId > 0 then more.Push({ label: t("browse.title.goToSeason"), action: "season" })
+    if (kind = "movie" or kind = "episode") and files.Count() > 0 then more.Push({ label: t("browse.title.mediaInfo"), action: "info" })
+    if contentAbout(detail, 0, 0) <> "" then more.Push({ label: t("browse.title.details"), action: "about" })
     if more.Count() > 0
-        buttons.Push("More…")
+        buttons.Push(t("browse.title.more"))
         actions.Push("more")
     end if
     ' Unavailable can't be pressed, as on the other TVs: the focus starts on
@@ -618,7 +624,7 @@ function contentDetail(detail as object, server as string, onDeck = invalid as d
     for each collection in httpArray(page.partOf)
         name = httpSentence(collection)
         if name <> "" and collections < 3
-            genres.Push("Part of " + name)
+            genres.Push(t("titles.page.partOf", { name: name }))
             collections = collections + 1
         end if
     end for
@@ -656,9 +662,9 @@ function contentSeasonTitle(item as object) as string
     title = httpSentence(item.title)
     if title <> "" then return title
     index = httpNumber(item.index, -1)
-    if index = 0 then return "Specials"
-    if index > 0 then return "Season " + urlValue(index)
-    return "Season"
+    if index = 0 then return t("browse.title.specials")
+    if index > 0 then return t("browse.title.season", { number: urlValue(index) })
+    return t("titles.page.season")
 end function
 
 ' A title page's metadata line, as Android TV's: a show's seasons and years
@@ -671,8 +677,8 @@ function contentMeta(detail as object, file as dynamic, years as dynamic) as str
     kind = httpString(detail.kind)
     year = Int(httpNumber(detail.year, 0))
     if kind = "show"
-        seasons = httpNumber(detail.child_count, 0)
-        if seasons > 0 then parts.Push(fmtPlural(seasons, "season"))
+        seasons = Int(httpNumber(detail.child_count, 0))
+        if seasons > 0 then parts.Push(t("browse.counts.seasons", { count: seasons }))
         first = year
         last = year
         for each other in httpArray(years)
@@ -687,8 +693,8 @@ function contentMeta(detail as object, file as dynamic, years as dynamic) as str
         end if
     else if kind = "season"
         if year > 0 then parts.Push(urlValue(year))
-        episodes = httpNumber(detail.leaf_count, 0)
-        if episodes > 0 then parts.Push(fmtPlural(episodes, "episode"))
+        episodes = Int(httpNumber(detail.leaf_count, 0))
+        if episodes > 0 then parts.Push(t("browse.counts.episodes", { count: episodes }))
     else
         if kind = "episode"
             aired = fmtDateText(detail.release_date, 0, 0)
@@ -763,18 +769,13 @@ end function
 ' "Directed by Grace Hopper · Starring Ada Lovelace, Alan Turing" (a
 ' show's creators: "Created by"), two of the makers and three of the cast.
 function contentCredits(detail as object) as string
-    makers = contentCrew(detail, "director")
-    made = "Directed by "
-    if makers.Count() = 0
-        makers = contentCrew(detail, "creator")
-        made = "Created by "
-    end if
     parts = []
+    makers = contentCrew(detail, "director")
     if makers.Count() > 0
-        while makers.Count() > 2
-            makers.Pop()
-        end while
-        parts.Push(made + makers.Join(", "))
+        parts.Push(t("browse.title.directedBy", { names: contentFirstNames(makers, 2) }))
+    else
+        makers = contentCrew(detail, "creator")
+        if makers.Count() > 0 then parts.Push(t("browse.title.createdBy", { names: contentFirstNames(makers, 2) }))
     end if
     stars = []
     for each credit in httpArray(detail.cast)
@@ -782,8 +783,17 @@ function contentCredits(detail as object) as string
         if GetInterface(credit, "ifAssociativeArray") <> invalid then name = httpSentence(credit.name)
         if name <> "" and stars.Count() < 3 then stars.Push(name)
     end for
-    if stars.Count() > 0 then parts.Push("Starring " + stars.Join(", "))
+    if stars.Count() > 0 then parts.Push(t("browse.title.starring", { names: stars.Join(", ") }))
     return parts.Join(" · ")
+end function
+
+' The first `most` of names, joined: "Grace Hopper, Alan Turing".
+function contentFirstNames(names as object, most as integer) as string
+    shown = []
+    for each name in names
+        if shown.Count() < most then shown.Push(name)
+    end for
+    return shown.Join(", ")
 end function
 
 ' The names of a title's crew in role, each once, in the server's order.
@@ -803,6 +813,13 @@ function contentCrew(detail as object, role as string) as object
     return names
 end function
 
+' Four of names, then how many more: "A, B, C, D and 2 more".
+function contentNamesAndMore(names as object) as string
+    shown = contentFirstNames(names, 4)
+    if names.Count() <= 4 then return shown
+    return t("browse.about.andMore", { names: shown, count: names.Count() - 4 })
+end function
+
 ' A title's Details, its More's panel, as Android TV's Details section
 ' says them: the whole summary (the page cuts it), then who created,
 ' directed and wrote it (four names a role, then "and 2 more"), the
@@ -814,40 +831,32 @@ function contentAbout(detail as object, now as integer, zone as integer) as stri
     lines = []
     facts = []
     kind = httpString(detail.kind)
-    for each role in [["creator", "Created by", "Created by"], ["director", "Director", "Directors"], ["writer", "Writer", "Writers"]]
-        names = contentCrew(detail, role[0])
-        if names.Count() > 0
-            label = role[1]
-            if names.Count() > 1 then label = role[2]
-            shown = []
-            for i = 0 to names.Count() - 1
-                if i < 4 then shown.Push(names[i])
-            end for
-            text = shown.Join(", ")
-            if names.Count() > 4 then text = text + " and " + urlValue(names.Count() - 4) + " more"
-            facts.Push(label + ": " + text)
-        end if
-    end for
+    creators = contentCrew(detail, "creator")
+    if creators.Count() > 0 then facts.Push(t("browse.about.createdBy", { names: contentNamesAndMore(creators) }))
+    directors = contentCrew(detail, "director")
+    if directors.Count() > 0 then facts.Push(t("browse.about.directors", { count: directors.Count(), names: contentNamesAndMore(directors) }))
+    writers = contentCrew(detail, "writer")
+    if writers.Count() > 0 then facts.Push(t("browse.about.writers", { count: writers.Count(), names: contentNamesAndMore(writers) }))
     original = httpSentence(detail.original_title)
-    if original <> "" and original <> httpSentence(detail.title) then facts.Push("Original title: " + original)
+    if original <> "" and original <> httpSentence(detail.title) then facts.Push(t("browse.about.originalTitle", { title: original }))
     released = httpString(detail.release_date)
     if kind <> "episode" and released <> ""
         day = fmtDateText(released, now, zone)
         if day = "" then day = released
-        facts.Push("Released: " + day)
+        facts.Push(t("browse.about.released", { date: day }))
     end if
     studio = httpSentence(detail.studio)
     if studio <> ""
         if kind = "show" or kind = "episode"
-            facts.Push("Network: " + studio)
+            facts.Push(t("browse.about.network", { name: studio }))
         else
-            facts.Push("Studio: " + studio)
+            facts.Push(t("browse.about.studio", { name: studio }))
         end if
     end if
     state = httpObject(detail.user_state)
     plays = 0
-    if state <> invalid then plays = httpNumber(state.play_count, 0)
-    if plays > 0 then facts.Push("Plays: " + urlValue(plays))
+    if state <> invalid then plays = Int(httpNumber(state.play_count, 0))
+    if plays > 0 then facts.Push(t("browse.about.plays", { n: plays }))
     summary = httpClean(detail.summary, 4000, true)
     ' The page shows a line of the summary at the least (many buttons, and
     ' the lines over it): anything longer may be cut there.
@@ -901,15 +910,14 @@ end function
 
 ' "1 star", "4 stars"; "No rating" for none.
 function contentStarsLabel(stars as integer) as string
-    if stars = 0 then return "No rating"
-    if stars = 1 then return "1 star"
-    return urlValue(stars) + " stars"
+    if stars = 0 then return t("browse.title.noRating")
+    return t("browse.title.stars", { count: stars })
 end function
 
 ' A title page's rating button: Rate, or the stars given.
 function contentRatingLabel(stars as integer) as string
-    if stars = 0 then return "Rate"
-    return "Your rating: " + contentStarsLabel(stars)
+    if stars = 0 then return t("browse.title.rate")
+    return t("browse.title.yourRating", { stars: contentStarsLabel(stars) })
 end function
 
 ' The file a playback plays: the one with fileId, else the first.
@@ -982,16 +990,17 @@ function contentSubtitleName(track as object, language as string) as string
     if name = "" and language <> "und" then name = fmtLanguageName(language, language)
     forced = httpTrue(track.forced)
     if name = ""
-        if forced then return "Forced"
-        return "Unknown"
+        if forced then return t("browse.subtitles.forced")
+        return t("browse.subtitles.unknown")
     end if
-    if forced and not contentSaysForced(name) then return name + " (Forced)"
+    if forced and not contentSaysForced(name) then return t("browse.subtitles.namedForced", { name: name })
     return name
 end function
 
-' Whether a track's name says it is forced ("Forced", "English (Forced)").
+' Whether a track's name says it is forced, in English, French or Spanish
+' ("Forced", "English (Forced)", "Français (forcés)", "Forzados").
 function contentSaysForced(name as string) as boolean
-    re = CreateObject("roRegex", "(^|[^a-z0-9])forced($|[^a-z0-9])", "i")
+    re = CreateObject("roRegex", "(^|[^a-z0-9])(forced|forcée?s?|forzad[oa]s?)($|[^a-z0-9])", "i")
     return re.IsMatch(name)
 end function
 

@@ -4,8 +4,11 @@ import android.content.Context
 import android.graphics.Bitmap
 import androidx.media3.common.text.Cue
 import app.pley.android.caps.CapsGraph
+import app.pley.android.common.AppLanguage
 import app.pley.android.common.DeviceProfile
 import app.pley.android.common.Tier
+import app.pley.android.common.UiText
+import app.pley.android.common.UserFacing
 import app.pley.android.data.DataGraph
 import app.pley.android.data.LocalMedia
 import app.pley.android.data.drive.Drives
@@ -18,6 +21,7 @@ import app.pley.android.player.PlaybackServices
 import app.pley.android.player.PlayerEngine
 import app.pley.android.player.PlayerPhase
 import app.pley.android.player.PlayerUiState
+import app.pley.android.player.R
 import app.pley.android.player.engine.PlayTrace
 import app.pley.android.player.subtitles.OkHttpPictureSource
 import app.pley.android.player.subtitles.OkHttpSubtitleFetcher
@@ -48,6 +52,8 @@ class SessionPlaybackServices(
     private val dispatcher: CoroutineDispatcher = Dispatchers.Main.immediate,
     /** The environment of the video on a drive at a path. */
     private val drive: (path: String) -> PlaybackEnvironment = { throw IOException("No drives here") },
+    /** Where the playbacks' reports queue: [flush] waits for it, [drop] empties it. */
+    private val reporter: SessionReporter? = null,
 ) : PlaybackServices {
     private val controllers = LinkedHashMap<String, PlaybackController>()
     private var counter = 0
@@ -72,6 +78,18 @@ class SessionPlaybackServices(
     }
 
     override fun controller(key: String): PlaybackController? = controllers[key]
+
+    override fun closeAll() {
+        controllers.values.toList().forEach { it.close() }
+    }
+
+    override suspend fun flush() {
+        reporter?.flush()
+    }
+
+    override fun drop() {
+        reporter?.drop()
+    }
 
     companion object {
         /**
@@ -108,7 +126,7 @@ class SessionPlaybackServices(
                     capabilities = caps.capabilities,
                     policy = caps.policy,
                     details = ItemDetails { video.detail(it) },
-                    engines = { Media3EngineLink(engines.create(app, profile, music = false)) },
+                    engines = { Media3EngineLink(engines.create(app, profile, music = false), texts) },
                     texts = texts,
                     clientId = clientId,
                     reporter = reporter,
@@ -120,14 +138,14 @@ class SessionPlaybackServices(
                 )
             }
             return SessionPlaybackServices(environment = {
-                val session = data.session.session.value ?: error("Sign in to play")
+                val session = data.session.session.value ?: throw NotSignedIn()
                 val api = network.api(session.issuer, session.me?.id)
                 PlaybackEnvironment(
                     api = api,
                     capabilities = caps.capabilities,
                     policy = caps.policy,
                     details = ItemDetails.snapshotFirst(data.items, api),
-                    engines = { Media3EngineLink(engines.create(app, profile, music = false)) },
+                    engines = { Media3EngineLink(engines.create(app, profile, music = false), texts) },
                     texts = texts,
                     clientId = clientId,
                     reporter = reporter,
@@ -155,7 +173,7 @@ class SessionPlaybackServices(
                     tracksChosen = { itemId, c -> data.watchState.streamsChosen(itemId, c.fileId, c.audioIndex, c.subtitleIndex) },
                     warmer = OkHttpStreamWarmer(network::media),
                 )
-            }, drive = drive)
+            }, drive = drive, reporter = reporter)
         }
 
         /** Picture subtitles read beside a stream, in the app's cache while they show. */
@@ -164,6 +182,12 @@ class SessionPlaybackServices(
         /** The address a video on a drive's API answers for: none it reaches. */
         private const val NO_SERVER = "http://localhost"
     }
+}
+
+/** Play was pressed with no server signed in to. Its message is the words of [text] in the language shown. */
+private class NotSignedIn : IllegalStateException(), UserFacing {
+    override val text: UiText = UiText.res(R.string.session_sign_in_to_play)
+    override val message: String get() = AppLanguage.wordsOf(text)
 }
 
 /** A playback that couldn't start at all (nobody signed in): it says why, and nothing else. */
@@ -195,6 +219,8 @@ private class FailedPlayback(message: String, private val onClosed: () -> Unit) 
     override fun setDetailsOpen(open: Boolean) = Unit
 
     override fun dismissNotice() = Unit
+
+    override fun dismissRemoteNotice() = Unit
 
     override suspend fun thumbnail(positionMs: Long): Bitmap? = null
 

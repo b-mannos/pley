@@ -20,6 +20,9 @@ sub init()
     m.buttons = m.top.findNode("buttons")
     m.grid = m.top.findNode("grid")
     m.message = m.top.findNode("message")
+    m.message.text = t("common.states.loading")
+    m.kindLabel.text = t("titles.collection.label")
+    m.top.findNode("smartText").text = t("titles.smart")
     m.started = false
     ' The page as the API task made it (lib/Pages.brs pageCollection), and
     ' the libraries once the server said ([{ id, name, kind }]).
@@ -38,7 +41,7 @@ end sub
 ' Retry, after the collection couldn't load.
 sub onRetry()
     m.message.title = ""
-    m.message.text = "Loading…"
+    m.message.text = t("common.states.loading")
     m.message.action = ""
     m.top.setFocus(true)
     load()
@@ -83,9 +86,9 @@ sub onCollection(event as object)
     answer = event.getData()
     if not answer.ok or answer.data = invalid
         if m.collection = invalid and not uiFailed(answer)
-            m.message.title = "Couldn't load this collection"
+            m.message.title = t("titles.collection.loadFailed")
             typeSet(m.message, answer.message)
-            m.message.action = "Retry"
+            m.message.action = t("common.actions.retry")
             if m.top.hasFocus() or m.message.isInFocusChain() then m.message.setFocus(true)
         end if
         return
@@ -96,7 +99,7 @@ sub onCollection(event as object)
     typeSet(m.heading, collection.title)
     typeSet(m.summary, collection.summary)
     m.note.text = ""
-    if collection.shown = 0 then m.note.text = "Nothing in this collection yet."
+    if collection.shown = 0 then m.note.text = t("titles.collection.empty")
     showBadges()
     showFacts()
     if m.backdrop.uri <> collection.backdrop
@@ -171,11 +174,11 @@ sub showButtons()
     labels = []
     if playable > 0
         actions.Push("play")
-        labels.Push("Play")
+        labels.Push(t("common.actions.play"))
     end if
     if playable > 1
         actions.Push("shuffle")
-        labels.Push("Shuffle")
+        labels.Push(t("titles.actions.shuffle"))
     end if
     if FormatJson(labels) <> FormatJson(m.buttons.buttons) then m.buttons.buttons = labels
     m.actions = actions
@@ -221,7 +224,7 @@ sub onOnDeck(event as object)
     ' Left meanwhile: nothing starts behind the screen now on top.
     if not m.top.active then return
     if episode = invalid
-        uiToast("Nothing to play")
+        uiToast(t("titles.nothingToPlay"))
         return
     end if
     tile = contentTile(episode, m.global.session.server, true)

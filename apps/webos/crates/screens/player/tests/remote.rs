@@ -149,6 +149,11 @@ impl TestApp {
     fn shows(&self, text: &str) -> bool {
         self.list.texts().any(|t| t == text)
     }
+
+    /// Whether the last frame drew a text that starts with `start`.
+    fn shows_start(&self, start: &str) -> bool {
+        self.list.texts().any(|t| t.starts_with(start))
+    }
 }
 
 /// Where a phone's remote casts from.
@@ -166,6 +171,8 @@ fn cast_of(receiver: &str, item: i64) -> ServerEvent {
         audio_index: None,
         subtitle_index: None,
         from: Some("Pley for Android".into()),
+        profile_id: None,
+        switch_ticket: None,
     }
 }
 
@@ -185,6 +192,18 @@ fn sign_in(server: &FixtureServer, profile: i64, store: &Store, http: &Http) {
         StoredTokens::new(&parsed, url, &format!("{url}/api/oauth/token"), &format!("{url}/api/oauth/revoke"), now_ms);
     Tokens::shared(url, store, http).install(stored, &parsed.scope).unwrap();
     store.set_active_server(Some(url)).unwrap();
+}
+
+/// The remote's `command` for `session`, with where to or how far.
+fn command(session: &str, command: &str, position_ms: Option<i64>, offset_ms: Option<i64>) -> ServerEvent {
+    ServerEvent::PlayerCommand {
+        session_id: session.into(),
+        command: command.into(),
+        position_ms,
+        offset_ms,
+        stream_index: None,
+        quality: None,
+    }
 }
 
 /// The remote picking track `index` of the kind of `command` for `session`.
@@ -217,10 +236,12 @@ fn the_remotes_tracks_switch_as_the_menus_do_and_every_report_says_which_play() 
     let engine = app.engine().expect("the player made an engine");
     assert!(app.until(|_| engine.playing()), "the film never played");
 
-    // The French picture subtitles, drawn here from the server's .mks: said at once.
+    // The French picture subtitles, drawn here from the server's .mks: said at once, to the
+    // remote and on the TV.
     let before = app.reports(ids::PGS_MOVIE).len();
     app.server.emit(pick(&session, "subtitles", ids::PGS_MOVIE_SUBTITLE));
     assert!(app.until(|a| a.reports(ids::PGS_MOVIE).len() > before), "the pick wasn't said at once");
+    assert!(app.until(|a| a.shows_start("Subtitles: French")), "the TV didn't say the pick");
     assert_eq!(tracks(&app.reports(ids::PGS_MOVIE)[before]), (Some(1), Some(ids::PGS_MOVIE_SUBTITLE)));
     let shown = |a: &TestApp| a.server.sessions_of(ids::ALEX).into_iter().find(|s| s["session_id"] == *session);
     let kept = shown(&app).unwrap();
@@ -231,6 +252,7 @@ fn the_remotes_tracks_switch_as_the_menus_do_and_every_report_says_which_play() 
     app.server.emit(pick(&session, "audio", 2));
     assert!(app.until(|a| a.reports(ids::PGS_MOVIE).len() > before), "the pick wasn't said at once");
     assert_eq!(tracks(&app.reports(ids::PGS_MOVIE)[before]), (Some(2), Some(4)));
+    assert!(app.until(|a| a.shows_start("Audio: French")), "the TV didn't say the pick");
     assert_eq!(engine.switched().last(), Some(&1), "the second audio track wasn't switched to");
     assert_eq!(app.server.writes("POST", "/api/playback").len(), 1, "the audio took a new session");
 
@@ -253,6 +275,34 @@ fn the_remotes_tracks_switch_as_the_menus_do_and_every_report_says_which_play() 
 }
 
 #[test]
+fn the_remotes_commands_are_said_for_2_s_at_the_top_right_and_never_bring_up_the_controls() {
+    let mut app = TestApp::start();
+    app.open(Route::Player(PlayRequest::item(ids::SAMPLE_HDR10)));
+    let session = app.session_of(ids::SAMPLE_HDR10)["session_id"].as_str().unwrap().to_string();
+    let engine = app.engine().expect("the player made an engine");
+    assert!(app.until(|_| engine.playing()), "the film never played");
+
+    // Paused, the controls would say when it ends: they don't show.
+    app.server.emit(command(&session, "pause", None, None));
+    assert!(app.until(|a| a.shows("Paused")), "the TV didn't say the pause");
+    assert!(!engine.playing(), "the remote's pause didn't pause");
+    assert!(!app.shows_start("Ends at"), "the remote's pause brought up the controls");
+    app.advance(1.8);
+    assert!(app.shows("Paused"), "the notice went early");
+    app.advance(0.4);
+    assert!(!app.shows("Paused"), "the notice stayed");
+
+    app.server.emit(command(&session, "skip", None, Some(-10_000)));
+    assert!(app.until(|a| a.shows("−10 s")), "the TV didn't say the skip");
+    app.server.emit(command(&session, "seek", Some(12_000), None));
+    assert!(app.until(|a| a.shows("Jumped to 0:12")), "the TV didn't say the seek");
+    assert!(!app.shows_start("Ends at"), "the remote's seek brought up the controls");
+    app.server.emit(command(&session, "play", None, None));
+    assert!(app.until(|a| a.shows("Playing")), "the TV didn't say the play");
+    assert!(engine.playing(), "the remote's play didn't play");
+}
+
+#[test]
 fn a_cast_film_plays_from_where_the_remote_said_with_where_it_came_from_over_it() {
     let mut app = TestApp::start();
     assert!(app.until(|a| a.receiving()), "the TV never took casts");
@@ -261,18 +311,29 @@ fn a_cast_film_plays_from_where_the_remote_said_with_where_it_came_from_over_it(
     assert_eq!(app.server.cast(ids::ALEX, &id, &film, Some(PHONE)), 202);
 
     // The player opens over the page, asks the server for the film from there, and the TV's
-    // player loads it there.
-    assert!(app.until(|a| a.engine().is_some_and(|e| !e.loads().is_empty())), "the film never loaded");
+    // player loads it there. "Playing from" shows from the frame the cast came, the server's
+    // answer still on its way.
+    let notice = "Playing from Pley for Android";
+    let (mut began, mut drawn) = (None, false);
+    let loaded = app.until(|a| {
+        if began.is_none() && a.shell.toast() == Some(notice) {
+            began = Some(a.time);
+        }
+        drawn |= a.shows(notice);
+        a.engine().is_some_and(|e| !e.loads().is_empty())
+    });
+    assert!(loaded, "the film never loaded");
     assert!(matches!(app.shell.top_route(), Some(Route::Player(r)) if r.item_id == ids::SAMPLE_HDR10));
     let asked: Value = serde_json::from_str(&app.server.writes("POST", "/api/playback")[0].body).unwrap();
     assert_eq!((asked["item_id"].as_i64(), asked["start_ms"].as_i64()), (Some(ids::SAMPLE_HDR10), Some(6_000)));
     assert_eq!(app.engine().unwrap().loads()[0].start_ms, 6_000);
-    // "Playing from" over the player, for about 4 s.
-    assert!(app.until(|a| a.shows("Playing from Pley for Android")), "no word of where it came from");
-    app.advance(pley_shell::CAST_NOTICE_SECONDS - 0.5);
-    assert!(app.shows("Playing from Pley for Android"), "the notice went early");
-    app.advance(1.0);
-    assert!(!app.shows("Playing from Pley for Android"), "the notice stayed");
+    // "Playing from" over the player, for about 4 s from then: a busy machine can take longer
+    // than that to load the film, so the notice is timed from the frame it began.
+    let began = began.expect("no word of where it came from");
+    assert!(drawn || app.until(|a| a.shows(notice)), "the notice was never drawn");
+    assert_eq!(app.shell.toast_ends(), Some(began + pley_shell::CAST_NOTICE_SECONDS), "the notice's time");
+    app.advance((began + pley_shell::CAST_NOTICE_SECONDS + 0.5 - app.time).max(0.0));
+    assert!(!app.shows(notice), "the notice stayed");
 
     // Another cast replaces it: the film before ends on the server, and the other plays.
     let first = app.session_of(ids::SAMPLE_HDR10)["session_id"].as_str().unwrap().to_string();

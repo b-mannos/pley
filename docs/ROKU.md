@@ -54,11 +54,12 @@ way to a new one without a word, three times (half an hour of codes);
 then OK gets the next. When the server doesn't answer, the screen says
 when it tries again, counting down the seconds. When the server requires
 two-step sign-in, the sign-in screen says so: the phone that approves the
-code sets it up for whoever hasn't yet. It asks "Who's watching?" at start when the household has more
-than one profile, unless Settings' Always start as names one. Going on
-there as the profile it was left on asks that profile's PIN when it has
-one, as on the other TVs, and so does Always start as: the start opens on
-that profile's PIN pad, and Use another profile shows the other profiles.
+code sets it up for whoever hasn't yet. It starts straight into Home as the profile it was left on when
+that profile has no PIN. In a household of more than one profile, it
+asks "Who's watching?" at start when that profile has a PIN, where
+going on as it asks the PIN, as on the other TVs; with Always start
+as, the start opens on that profile's PIN pad, and Use another
+profile shows the other profiles.
 Choosing a saved server (Settings' Switch server too) is a start on it:
 it asks the same, whatever was answered on the server before. A PIN is
 typed on Roku's own PIN pad ("Enter Anna's PIN"): a wrong one, or too
@@ -783,12 +784,30 @@ puts Up Next away, as Rewind does. The rule is
 pinned by `packages/tv/test/fixtures/remote.json`, which the tests read
 (the tracks and the quality by cases of their own).
 
+A command never brings up the player's controls. Paused, the Video node
+shows its title, clock and bar whoever paused it, so for the remote's
+pause the player turns them off (`enableUI`) until the video plays again,
+from either side, or the person presses a key: Play plays on, and the
+Video node's other keys are its own again from the next press. That
+first OK, left, right or skip only brings its controls back, where the
+other TVs act on it at once: the Video node hasn't had its controls to
+take it. What the
+remote did shows instead for 2 s in the player's notice at the top:
+"Paused", "Playing", the skip asked for ("+30 s", "−10 s"), where a seek
+went ("Jumped to 12:34"), and the audio, subtitles ("Subtitles off") or
+quality picked, named as the player's menus name them
+(`remoteNotice` and its neighbours in `components/lib/Remote.brs`). A
+command that changes nothing shows nothing; next shows the title as it
+begins, and Live TV's channel up and down the channel's card, as Up and
+Down do. Music shows nothing of a command: Now Playing is its controls.
+
 **Casts.** While its event stream is open (an `http://` server, as for
 the commands), the Roku is one of the devices the profile's remotes play
 things on ([API.md](API.md#casting)): the stream names it a receiver by
 the `client_id` its players send, a TV with the name its players give,
 taking titles and playlists (`casts=item`) and channels while Home's rail
-has Live TV (`live`), and opens again when Live TV comes or goes. What a
+has Live TV (`live`), and switching to the profile of a remote of another
+profile that casts to it (`switch`), and opens again when Live TV comes or goes. What a
 remote sends plays as the Roku's own Play would, in place of what plays:
 
 - a movie or an episode in the player, from the place sent, else where
@@ -814,6 +833,25 @@ watching, does nothing (a cast never gets past a profile's PIN), and of
 two sent close together the later plays. The rules are
 `components/lib/Cast.brs`; the scene (`components/MainScene.brs`)
 fetches what a cast needs and plays it.
+
+A remote on another profile of the household casts here too
+([API.md](API.md#casting)): its cast names that profile (`profile_id`)
+and carries a ticket (`switch_ticket`), and the Roku switches to the
+remote's profile before it plays, with the switch-profile grant and the
+ticket in place of a PIN (the remote gave its PIN, if it has one). What
+plays stops first, and the switch waits for its last progress, its
+stopped report and its session's end to reach the server as the profile
+that watched it, within 5 s: what hasn't gone by then is dropped, never
+sent as the remote's profile. Once switched, the Roku keeps the new
+sign-in as a switch from "Who's watching?" does, starts again from Home
+as that profile, and the cast plays over it, once. A switch the server
+refuses (the ticket expired or was used: `ticket_spent`) or that fails
+says "Couldn't switch to the remote's profile" for 4 s, and nothing
+plays. A cast naming another profile without a ticket does nothing, and
+any other cast that comes while the Roku switches is dropped; once
+switched, casts play as ever, the new profile's own too. "Who's
+watching?" still takes no casts: the person at the TV is choosing who
+watches.
 
 ### Requests and Discover
 
@@ -1011,7 +1049,7 @@ didn't.
 
 - **Profile:** who is signed in (the picture, the name, "Managed profile ·
   192.168.1.20:7539"), then Switch profile (for a sign-in that may switch
-  them), the audio and subtitle defaults, Watch history, Sort libraries,
+  them), Language ([Language](#language)), the audio and subtitle defaults, Watch history, Sort libraries,
   Always start as (a household of several) and Manage your account on the
   web, which shows the address to type on a phone or computer. The other
   TVs draw its QR code too; the server draws QR codes of sign-in codes
@@ -1037,15 +1075,75 @@ Android TV's Audio (passthrough by format) has no place: the Roku's own
 settings decide what goes to a receiver.
 
 Always start as, for a household of several profiles, names the profile
-the app starts as, or Ask who's watching. As on the other TVs it only
-skips "Who's watching?" at a start: the app starts as the profile it was
-left on, but never past its PIN, which it asks first when that profile has
-one. Whether it has one is kept in the registry section `household` each
-time `GET /api/auth/me` answers, and forgotten when a sign-in or a switch
-changes the profile; until the Roku knows, the start asks "Who's
-watching?". A profile since gone from the household (deleted, or another
-account's, signed in since) counts as Ask who's watching, as Settings
-then shows it. It is kept on the Roku for each server.
+the app starts as, or Profile used last. As on the other TVs, the app
+starts as the profile it was left on, but never past its PIN: without a
+PIN it goes straight in either way, and with one Always start as opens
+its PIN pad first, where Profile used last shows the profiles. Whether it
+has one is kept in the registry section `household` each time `GET
+/api/auth/me` answers, and forgotten when a sign-in or a switch changes
+the profile; until the Roku knows, the start asks "Who's watching?". A
+profile since gone from the household (deleted, or another account's,
+signed in since) counts as Profile used last, as Settings then shows it.
+It is kept on the Roku for each server.
+
+### Language
+
+The app is in English, French and Spanish ([API.md](API.md#language)),
+as the other TVs: the account's language, else the one picked on this
+Roku, else the Roku's own (`roDeviceInfo`'s `GetCurrentLocale`, where
+`fr_CA` counts as French), else the server's (`GET /api/server`), else
+English. `packages/tv/test/fixtures/language.json` pins that order, and
+the unit tests run against it.
+
+- **The globe:** Choose your server has a small globe at the bottom
+  right, on the forget hint's line; the sign-in code has it at the top
+  right, on the logo's line. It names the language shown by its two
+  letters ("FR"), filled with the accent only while it has the focus.
+  Down reaches it on Choose your server and Up on the sign-in code; Left
+  and Right never do. OK opens a panel: Automatic, with what that is on
+  this Roku (its language, else the server's, else English), then
+  English, Français and Español, the choice in force checked. A choice
+  shows at once and is kept on the Roku (registry section `language`);
+  Automatic forgets it. Typing an address is Roku's own keyboard dialog,
+  which has no room for the globe.
+- **At a start** the app shows the language it showed last, never another
+  while it waits, which would flash. Signed in, it changes once the
+  account has been heard (`GET /api/auth/me`); on a Roku in a language
+  Pley doesn't have with none picked, once the server has said its own,
+  asked again when the event stream comes up if it didn't answer.
+- **A change** (another profile, signing out, Settings, the globe) draws
+  the sign-in screens, "Who's watching?" and Settings again in place, the
+  focus where it was. Any other screen is made again, the one on top at
+  once and those under it as they show again, so Home's and the
+  libraries' rows, whose titles the server writes, are asked for anew.
+  The players play on, and their words come in the new language as they
+  show them.
+- **Settings → Language:** Automatic, with what that is on this Roku (the
+  one picked with the globe, else its language, else the server's), then
+  English, Français and Español, each in itself. A choice is the
+  account's, on all its devices (`PUT /api/me/language`), and shows once
+  the server has it. A Pley from before languages keeps no account's
+  language (its `GET /api/server` names none, and the route answers 404
+  or 405): there the row is this Roku's, as the globe picks it, with
+  Automatic the Roku's own language, and a choice shows at once and is
+  kept on the Roku. A server that answers 404 or 405 though it names a
+  language is taken as one for as long as it is the server in use.
+- **Requests** to the server carry `Accept-Language` with the language
+  shown. What the server writes in its own words, such as an error's
+  message the app has none for, comes in English.
+- **Dates, times and numbers** are written by the app in the language
+  shown (`components/lib/I18n.brs`, `Format.brs`): "12,345", "12 345" or
+  "12.345"; "Nov 4" or "4 nov."; a 12-hour clock in English when the Roku
+  uses one. Counts take CLDR's plural forms: one and other in English,
+  one, many and other in French and Spanish.
+- **The words** are in `locales/<language>/<area>.json`, in the other
+  apps' format (i18next's: `{{name}}`, `_one`, `_many`, `_other`), read
+  with `ParseJson` an area at a time and looked up with the app's own
+  `t()`: Roku's `tr()` follows the device's language only, so it can't
+  show the account's. English stands in for a word missing elsewhere. The
+  tests check that every language has every key, with the same values in
+  it, that every key the code names is there, and that every word is
+  shown somewhere.
 
 ## Building and testing
 
@@ -1057,7 +1155,7 @@ then shows it. It is kept on the Roku for each server.
 | `components/MainScene.*` | The screen stack, the HTTP agent for pictures, sign-in when the server ends it, "Pley is offline" and the question whether the server answers again, what the user's remotes cast here |
 | `components/MusicPlayer.*` | The music queue on the scene's Audio node |
 | `components/screens/` | One component per screen |
-| `components/shared/` | Screen helpers (`Ui.brs`), title actions (`Titles.brs`) |
+| `components/shared/` | Screen helpers (`Ui.brs`), title actions (`Titles.brs`), the language's globe and panel |
 | `components/items/` | Tiles (a playlist's mosaic too), rows, a page's message with its Retry, the player's skip button, the ready-to-watch card |
 | `components/tasks/ApiTask` | The only code that talks to the server |
 | `components/tasks/DiscoveryTask` | `pley?` to UDP port 7539 (`apps/server/src/discovery.rs`) |
@@ -1068,7 +1166,8 @@ then shows it. It is kept on the Roku for each server.
 | `components/shared/Type.brs`, `components/lib/Type.brs` | Roboto at Android TV's sizes, and Roku's font for text Roboto can't draw |
 | `fonts/` | Roboto 400, 500 and 700 (`scripts/fonts.mjs`) |
 | `images/` | The shapes and gradients (`scripts/make_images.py`), Lucide's icons in `images/icons` (`scripts/icons.mjs`) |
-| `scripts/` | Test runner, smoke run, preview, bench, fonts, icons, images |
+| `scripts/` | Test runner, smoke run, preview, bench, fonts, icons, images, the words' check (`locales.mjs`) |
+| `locales/` | The words, in English, French and Spanish (`<language>/<area>.json`) |
 | `licenses/` | Notices for what the package bundles: BrighterScript's `bslib.brs`, Roboto (OFL-1.1) and Lucide (ISC, and MIT for the icons from Feather) |
 
 Rules the code keeps:
@@ -1098,13 +1197,17 @@ Rules the code keeps:
   pictures of PGS subtitles and their list, fetched without the token.
 - Refreshes run one at a time per server, and the new token pair is saved
   before use (a refresh token works once).
+- A request goes with the tokens of the profile it was made for, or not
+  at all: one waiting for a refresh or a proof, or refused while a profile
+  switch was under way, is dropped once the switch has changed the
+  profile, never sent with the new profile's pair.
 - The User-Agent is `pleyRoku/<version> (Roku OS <version>; <model>)`; the
   server's `/link` page shows it.
 - The event stream (`GET /api/events`) works with `http://` servers only:
   Roku's sockets have no TLS.
 - Settings and views are kept in registry sections: `playback`,
   `subtitleSync`, `libraryViews`, `liveViews`, `household`, `startAs`,
-  `requests`, `searches`, `driveResume`.
+  `requests`, `searches`, `driveResume`, `language`.
 - Sign-in asks for `library play playlists profiles`, and `requests
   approvals` when the server's metadata lists them in `scopes_supported`
   (an older server refuses scopes it doesn't know). A sign-in from before
@@ -1134,7 +1237,8 @@ Rules the code keeps:
   four times a second while a notice waits; a screen changing and a
   card closing count as presses.
 - **Times** come as unix seconds, and the app writes them ("in 20 min",
-  "3 days ago", "Nov 4", "9:05 PM") in the Roku's time zone; TMDB's days
+  "3 days ago", "Nov 4", "9:05 PM") in the Roku's time zone and the
+  language shown; TMDB's days
   ("2026-11-04") are written as they are.
 - **Discover's pictures** come through the server at the size they are
   drawn (`w`), with the scene's HTTP agent like library artwork.
@@ -1153,7 +1257,7 @@ bun run check     # bsc's compile check, bslint, the unit tests (CI runs this)
 bun run smoke     # the whole app in brs-node, against a fake server
 bun run bench     # the list work timed in brs-node
 bun run preview   # the app in a browser, the keyboard as its remote
-bun run images    # the shapes, gradients and watched mark
+bun run images    # the shapes, gradients, watched mark and globe
 bun run icons     # Lucide's icons, drawn by Chrome
 bun run fonts     # Roboto, from @fontsource/roboto
 ```
@@ -1169,7 +1273,8 @@ bun run fonts     # Roboto, from @fontsource/roboto
   requests and TMDB titles, all made up, in
   `scripts/fixture-requests.mjs`) and walks every screen, saving each in
   `out/smoke/`. It fails on a BrightScript error, a request without the
-  User-Agent, a token in an address, a token before the server proved
+  User-Agent, an API request without `Accept-Language`, a token in an
+  address, a token before the server proved
   itself (a refresh token without a proof made then), or a refresh token
   used twice. On the way it plays an episode whose PGS subtitles the app
   draws (their list asked for where it starts, then again until whole, and
@@ -1184,10 +1289,12 @@ bun run fonts     # Roboto, from @fontsource/roboto
   under an album's "Disc 2", opens the See all of Search's Discover row,
   asks for a movie and three seasons from Discover, approves a request,
   opens a title from its ready-to-watch card on Home (which waited while
-  the requests showed), plugs in a USB drive (a zip brs-node mounts as
-  `ext1:`) and walks its page, a folder, an empty one and a video's menu,
-  then pulls it out, opens the drive's page from the screen saying the
-  server is out of reach, and checks that a server
+  the requests showed), chooses Español in Settings → Language for the
+  account (Home asked for again in it) and Automatic again, plugs in a
+  USB drive (a zip brs-node mounts as `ext1:`) and walks its page, a
+  folder, an empty one and a video's menu, then pulls it out, opens the
+  drive's page from the screen saying the server is out of reach, and
+  checks that a server
   without requests is asked nothing but the summary. The fake server also
   checks that a video's reports say which audio and subtitles play, and
   music's don't.

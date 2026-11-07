@@ -9,7 +9,8 @@ use std::rc::Rc;
 use common::{TestApp, device, fixtures, http, registry, sign_in, store};
 use pley_base::{Key, KeyEvent};
 use pley_core::device::Drive;
-use pley_shell::{NavCommand, PLACEHOLDER_TEXT, Rail, Registry, Route};
+use pley_core::model::ServerEvent;
+use pley_shell::{NavCommand, Rail, Registry, Route, placeholder_text};
 use pley_ui::InputEvent;
 
 fn heard() -> common::Heard {
@@ -151,13 +152,10 @@ fn the_start_gate_picks_the_first_page_from_what_the_tv_kept() {
     // "Always start as" asks too while the TV doesn't know whether the profile has a PIN…
     app.state.set_always_start_as(Some(pley_fixtures::ids::ALEX));
     assert_eq!(app.state.start_route(), Route::Profiles);
-    // …and goes on as it once that is known and it has none.
+    // …and goes on as it once that is known and it has none, as a start without it does.
     assert!(app.until(|a| a.state.me().is_some()));
     assert_eq!(app.state.start_route(), Route::Home);
     app.state.set_always_start_as(None);
-    assert_eq!(app.state.start_route(), Route::Profiles);
-    // Answered in this launch: Home.
-    app.state.pass_profile_gate();
     assert_eq!(app.state.start_route(), Route::Home);
     drop(app);
 
@@ -170,6 +168,12 @@ fn the_start_gate_picks_the_first_page_from_what_the_tv_kept() {
     app.state.set_always_start_as(Some(pley_fixtures::ids::SAM));
     assert!(app.until(|a| a.state.me().is_some()));
     assert_eq!(app.state.start_route(), Route::Pin { profile: pley_fixtures::ids::SAM });
+    // Without "Always start as", "Who's watching?" asks first, until it is answered in this launch.
+    app.state.set_always_start_as(None);
+    assert_eq!(app.state.start_route(), Route::Profiles);
+    app.state.pass_profile_gate();
+    assert_eq!(app.state.start_route(), Route::Home);
+    app.state.set_always_start_as(Some(pley_fixtures::ids::SAM));
     // Who it is is saved off the main thread: the next start finds it once it is on disk.
     let snapshots = app.state.snapshots().clone();
     let start = std::time::Instant::now();
@@ -333,6 +337,12 @@ fn pages_under_the_top_hear_what_changed_when_they_show_again() {
     sign_in(&server, pley_fixtures::ids::ALEX, &store, &http);
     let heard = heard();
     let mut app = TestApp::new(device, store, http, registry(&heard, &[]));
+    // The event stream opens on its own thread: connected, it asks for everything again (a
+    // `Changed`), and the server names the TV a receiver (`sessions_changed`). Both come before
+    // the steps below, or they land among what the pages hear.
+    let receiver_named = pley_shell::AppEvent::Server(ServerEvent::SessionsChanged);
+    assert!(app.until(|_| heard.borrow().iter().any(|(_, e)| *e == receiver_named)), "the events never connected");
+    app.settle();
     app.press(Key::Ok);
     heard.borrow_mut().clear();
     app.state.refresh();
@@ -351,7 +361,7 @@ fn every_route_has_a_screen_and_placeholders_name_theirs() {
         app.navigate(NavCommand::Reset(route.clone()));
         assert_eq!(app.shell.top_route(), Some(&route));
         assert_eq!(app.shell.top().unwrap().screen().chrome(), route.chrome(), "{}", route.name());
-        assert!(app.list.says(PLACEHOLDER_TEXT), "{}", route.name());
+        assert!(app.list.says(placeholder_text()), "{}", route.name());
         assert!(app.list.says(&route.title()), "{}", route.name());
         // Its one button does what Back does.
         assert!(app.focused().is_some(), "{}", route.name());

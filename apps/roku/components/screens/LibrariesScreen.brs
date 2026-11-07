@@ -5,6 +5,7 @@
 
 sub init()
     m.list = m.top.findNode("list")
+    typeSet(m.top.findNode("title"), t("browse.menu.libraries"))
     m.started = false
     m.libraries = []
     m.list.observeField("itemSelected", "onLibrary")

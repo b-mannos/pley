@@ -1,5 +1,6 @@
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, useContext, useEffect, type ReactNode } from "react";
 import { Navigate, Outlet, useLocation } from "react-router";
+import { useTranslation } from "react-i18next";
 import { errorMessage, isApiError } from "@/api/client";
 import { useMe, useServer } from "@/api/hooks";
 import { useServerEvents } from "@/api/events";
@@ -9,6 +10,7 @@ import { CastReceiver } from "@/components/CastReceiver";
 import { Logo } from "@/components/Logo";
 import { RequestNotices } from "@/components/RequestNotices";
 import { Button, EmptyState, Spinner } from "@/components/ui";
+import { rememberProfile } from "@/lib/lastProfile";
 import { TriangleAlert } from "lucide-react";
 
 const AuthContext = createContext<User | null>(null);
@@ -16,6 +18,11 @@ const AuthContext = createContext<User | null>(null);
 /** Provides the signed-in user (what `<RequireAuth>` does once it is known). */
 export function AuthUserProvider({ user, children }: { user: User; children: ReactNode }) {
   return <AuthContext.Provider value={user}>{children}</AuthContext.Provider>;
+}
+
+/** The signed-in user where there is one (`null` on the pages shown before signing in). */
+export function useOptionalAuth(): User | null {
+  return useContext(AuthContext);
 }
 
 export function useAuth(): User {
@@ -33,17 +40,18 @@ export function Splash() {
   );
 }
 
-export function ErrorScreen({ title = "Something went wrong", message, onRetry }: { title?: string; message: string; onRetry?: () => void }) {
+export function ErrorScreen({ title, message, onRetry }: { title?: string; message: string; onRetry?: () => void }) {
+  const { t } = useTranslation();
   return (
     <div className="flex min-h-screen items-center justify-center">
       <EmptyState
         icon={<TriangleAlert />}
-        title={title}
+        title={title ?? t("states.somethingWentWrong")}
         description={message}
         action={
           onRetry ? (
             <Button variant="primary" onClick={onRetry}>
-              Try again
+              {t("actions.tryAgain")}
             </Button>
           ) : undefined
         }
@@ -54,19 +62,25 @@ export function ErrorScreen({ title = "Something went wrong", message, onRetry }
 
 /** Route guard: needs a finished setup and a valid session. */
 export function RequireAuth() {
+  const { t } = useTranslation("pages");
   const location = useLocation();
   const server = useServer();
   const setupRequired = server.data?.setup_required ?? false;
   // Asked for together with the server status (not after it): one round trip
   // less before the first page. Its answer is only used once setup is done.
   const me = useMe(!setupRequired);
-  useServerEvents(me.data?.id ?? null);
+  const profileId = me.data?.id ?? null;
+  useServerEvents(profileId);
+  // Signing in here again goes straight in as it (LoginPage).
+  useEffect(() => {
+    if (profileId !== null) rememberProfile(profileId);
+  }, [profileId]);
 
   if (server.isPending) return <Splash />;
   if (server.isError) {
     return (
       <ErrorScreen
-        title="Can't reach the Pley server"
+        title={t("auth.cantReachServer")}
         message={errorMessage(server.error)}
         onRetry={() => void server.refetch()}
       />
@@ -97,14 +111,15 @@ export function RequireAuth() {
 }
 
 export function RequireAdmin({ children }: { children: ReactNode }) {
+  const { t } = useTranslation("pages");
   const user = useAuth();
   if (!user.is_admin) {
     return (
       <EmptyState
         className="min-h-[60vh]"
         icon={<TriangleAlert />}
-        title="Admins only"
-        description="You need an administrator account to manage this server."
+        title={t("auth.adminsOnly")}
+        description={t("auth.adminsOnlyHint")}
       />
     );
   }

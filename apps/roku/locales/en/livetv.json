@@ -1,0 +1,132 @@
+{
+  "title": "Live TV",
+  "tabs": {
+    "guide": "Guide",
+    "channels": "Channels"
+  },
+  "categories": {
+    "title": "Categories",
+    "all": "All channels",
+    "favourites": "Favourites",
+    "recent": "Recently watched",
+    "regions": "Regions",
+    "groups": "Groups",
+    "moreGroups": "More groups",
+    "noGroup": "No group",
+    "found": "Groups found",
+    "region_one": "{{region}}  ·  {{count, number}} group",
+    "region_other": "{{region}}  ·  {{count, number}} groups",
+    "resultsFor": "Results for “{{search}}”"
+  },
+  "search": {
+    "rail": "Search",
+    "railWith": "Search: “{{search}}”",
+    "title": "Search Live TV",
+    "prompt": "Channels, groups and what's on",
+    "search": "Search",
+    "clear": "Clear",
+    "channelsTitle": "Search channels",
+    "channelsPrompt": "Channels and what's on"
+  },
+  "page": {
+    "notOpen": "Live TV isn't open to this profile",
+    "notOpenHint": "An administrator can open it in Pley's web app, under Settings → Live TV.",
+    "failed": "Live TV didn't load",
+    "noChannels": "No channels yet",
+    "noChannelsHint": "Channels appear here once an administrator adds an IPTV provider in Pley's web app.",
+    "loadingGuide": "Loading the guide…",
+    "channelCount_one": "{{count, number}} channel",
+    "channelCount_other": "{{count, number}} channels",
+    "noMatch": "No channels match",
+    "noMatchHint": "No channel's name, number or programme on now has “{{search}}” in it.",
+    "noFavourites": "No favourites yet",
+    "noFavouritesHint": "Press Options (*) on a channel and add it to your favourites to find it here.",
+    "nothingWatched": "Nothing watched yet",
+    "nothingWatchedHint": "The channels you watch show here, the last first.",
+    "emptyGroup": "No channels in this group.",
+    "guideHint": "OK: watch   ·   Options (*): details   ·   Rewind and fast forward: earlier and later   ·   Play: now   ·   Replay: search",
+    "cardsHint": "OK: watch   ·   Options (*): details   ·   Replay: search"
+  },
+  "channelRange": "Channels {{from, number}}–{{to, number}} of {{total, number}}",
+  "unnamedChannel": "Channel {{id}}",
+  "nothingNow": "Nothing in the guide now",
+  "noGuide": "No guide",
+  "noGuideHere": "No guide for this channel",
+  "guide": {
+    "noInformation": "No information for this time",
+    "onNow": "On now"
+  },
+  "program": {
+    "untitled": "Untitled",
+    "live": "Live",
+    "new": "New"
+  },
+  "details": {
+    "watchNow": "Watch now",
+    "watchChannel": "Watch channel",
+    "nothingMore": "The guide says nothing more of it.",
+    "ended": "It has ended."
+  },
+  "time": {
+    "today": "Today",
+    "tomorrow": "Tomorrow",
+    "yesterday": "Yesterday",
+    "days": {
+      "sunday": "Sunday",
+      "monday": "Monday",
+      "tuesday": "Tuesday",
+      "wednesday": "Wednesday",
+      "thursday": "Thursday",
+      "friday": "Friday",
+      "saturday": "Saturday"
+    },
+    "dayAndTime": "{{day}} {{time}}",
+    "minutesLeft_one": "{{count}} min left",
+    "minutesLeft_other": "{{count}} min left",
+    "hoursLeft_one": "{{count}} h left",
+    "hoursLeft_other": "{{count}} h left",
+    "hoursMinutesLeft": "{{hours}} h {{minutes}} min left"
+  },
+  "favourites": {
+    "add": "Add to favourites",
+    "remove": "Remove from favourites",
+    "mark": "Favourite",
+    "notSaved": "The favourite wasn't saved.",
+    "notSavedBecause": "The favourite wasn't saved: {{reason}}"
+  },
+  "player": {
+    "tuning": "Tuning…",
+    "radio": "Sound only",
+    "next": "Next   {{time}}   {{title}}",
+    "channels": "Channels",
+    "listHint": "OK: watch   ·   Options (*): favourite   ·   Back: close",
+    "listMoreHint": "Left: categories   ·   Replay: search",
+    "categoriesHint": "OK: its channels   ·   Back: the channels",
+    "stalled": "It stopped and couldn't get going again.",
+    "channelStopped": "{{channel}} stopped",
+    "watchAgain": "Watch again",
+    "otherChannels": "Other channels",
+    "backToGuide": "Back to the guide",
+    "watchHere": "Watch here instead"
+  },
+  "trouble": {
+    "busy": "All connections are in use",
+    "didntStart": "{{channel}} didn't start",
+    "notPlaying": "{{channel}} isn't playing",
+    "gone": "This channel isn't here any more",
+    "goneHint": "It may have been hidden, or its source removed.",
+    "notOpen": "Live TV isn't open to this profile",
+    "notOpenHint": "An administrator can open it in Pley's web app, under Settings → Live TV.",
+    "stopped": "Live TV stopped",
+    "notWatched": "This channel isn't being watched any more.",
+    "stoppedByAdmin": "Live TV was stopped by the server's administrator.",
+    "stoppedElsewhere": "Live TV was stopped from another device.",
+    "you": "You, on another device",
+    "someoneElse": "Someone else",
+    "people_one": "{{count, number}} person",
+    "people_other": "{{count, number}} people",
+    "connectionsWatching_one": "Its one connection is watching:",
+    "connectionsWatching_other": "Its {{count, number}} connections are watching:",
+    "joinHint": "A channel already being watched can be joined, or try again once one is stopped."
+  }
+}

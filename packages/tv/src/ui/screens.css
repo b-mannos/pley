@@ -85,6 +85,15 @@
 .status-line { display: flex; align-items: center; min-height: 20px; }
 .status-line .breathing-dot { margin-right: 12px; }
 
+/* The globe before signing in: small, "FR" at the screen's right edge (48 less its own 10). At the
+   bottom right of Choose your server and the address screen, centred on the forget hint's line (17
+   tall, 27 from the bottom); on the sign-in code at the top right, centred on the logo's line (40
+   tall from 56). */
+.globe-btn { height: 32px; min-width: 0; padding: 0 10px; }
+.globe-btn .icon { margin-right: 6px; }
+.globe-corner { position: absolute; right: 38px; bottom: 20px; }
+.link-globe { position: absolute; right: 38px; top: 60px; }
+
 /* Servers */
 .servers { position: absolute; left: 96px; top: 27px; right: 48px; bottom: 27px; }
 .servers-header { display: flex; align-items: center; height: 38px; }
@@ -276,6 +285,18 @@
 .hero-title { height: 72px; display: flex; flex-direction: column; justify-content: flex-end; }
 .hero-summary { margin-top: 10px; color: rgba(233, 235, 239, 0.85); }
 .hero-buttons { margin-top: 20px; }
+/* A featured title: why it is there, over its name. */
+.hero-label {
+  margin-bottom: 12px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: rgba(233, 235, 239, 0.85);
+}
+/* Taking turns, the summary keeps its three lines' room: the buttons stay where they are. */
+.hero.turns .hero-summary { min-height: 66px; }
+.hero-turns { display: flex; gap: 8px; margin: 18px 0 0 24px; height: 4px; }
+.hero-turns span { width: 14px; height: 4px; border-radius: 2px; background: rgba(233, 235, 239, 0.3); }
+.hero-turns span.on { width: 36px; background: var(--fg); }
 .info-block {
   position: absolute;
   left: 96px;
@@ -1347,6 +1368,7 @@ html.avplay .engine-host { background: transparent; }
 .live-panel-facts > * + * { margin-left: 8px; }
 .live-panel-facts .live-mark { margin-right: 0; }
 .live-panel-progress { display: flex; align-items: center; margin-top: 10px; }
+.live-panel-buttons { padding: 0 16px; }
 
 /* The search at the head of the categories: the field, a line's height. */
 .live-cats-search { position: absolute; left: 12px; right: 16px; }

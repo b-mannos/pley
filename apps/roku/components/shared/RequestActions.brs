@@ -31,7 +31,7 @@ sub uiRequestAct(target as object, action as string)
         m.requestConfirmed = action
         dialog = CreateObject("roSGNode", "StandardMessageDialog")
         dialog.title = confirm.message
-        dialog.buttons = [confirm.button, "Cancel"]
+        dialog.buttons = [confirm.button, t("common.actions.cancel")]
         dialog.observeField("buttonSelected", "uiRequestConfirmed")
         m.top.getScene().dialog = dialog
         return
@@ -52,7 +52,7 @@ sub uiRequestReason(target as object, callback as string)
     dialog = CreateObject("roSGNode", "StandardKeyboardDialog")
     dialog.title = question.title
     dialog.message = question.message
-    dialog.buttons = ["Decline", "Cancel"]
+    dialog.buttons = [t("requests.actions.decline"), t("common.actions.cancel")]
     dialog.observeField("buttonSelected", callback)
     m.top.getScene().dialog = dialog
 end sub
@@ -107,7 +107,7 @@ sub uiSignInAgain(reason as string)
     dialog = CreateObject("roSGNode", "StandardMessageDialog")
     dialog.title = question.title
     dialog.message = [question.message]
-    dialog.buttons = ["Sign in", "Cancel"]
+    dialog.buttons = [t("requests.buttons.signIn"), t("common.actions.cancel")]
     dialog.observeField("buttonSelected", "uiSignInAgainChosen")
     m.top.getScene().dialog = dialog
 end sub

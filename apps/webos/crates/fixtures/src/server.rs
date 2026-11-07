@@ -139,12 +139,20 @@ pub(crate) struct State {
     pub subtitle_search: bool,
     /// The server requires two-step sign-in of every account with a password.
     pub two_step_required: bool,
+    /// The server language `GET /api/server` names (`en` until a test changes it); none, as a
+    /// Pley from before languages.
+    pub server_language: Option<String>,
+    /// What `PUT /api/me/language` answers instead of changing the language, as a server without
+    /// the route: 404, or 405.
+    pub language_route_refusal: Option<u16>,
     /// How often each text subtitle track was asked for, by (file, index).
     pub subtitle_asks: HashMap<(i64, i64), u32>,
     /// Subtitles added to files, by file.
     pub added_subtitles: HashMap<i64, Vec<AddedSubtitle>>,
     /// When casts went to each receiver in the last second, by profile and receiver.
     pub casts_sent: HashMap<(i64, String), Vec<i64>>,
+    /// The switch tickets of casts to another profile's receiver, waiting to be spent.
+    pub cast_tickets: HashMap<String, crate::cast::Ticket>,
 }
 
 impl State {

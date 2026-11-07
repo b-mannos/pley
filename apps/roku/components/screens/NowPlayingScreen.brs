@@ -26,11 +26,33 @@ sub init()
     m.message = m.top.findNode("message")
     m.upNextTitle = m.top.findNode("upNextTitle")
     m.upNext = m.top.findNode("upNext")
+    typeSet(m.upNextTitle, t("player.upNext.title"))
     m.watching = false
     ' The buttons' words, and what each does: "shuffle" (or "unshuffle"),
     ' "previous", "toggle", "next", "sleep".
     m.labels = []
     m.buttonActions = []
+    ' The buttons' words, and how wide each is, by what it does: wide
+    ' enough for either of its words, as wide as English's at least, so the
+    ' row stays still as they change; the sleep timer's, as wide as what it
+    ' says.
+    m.words = {
+        shuffle: t("player.nowPlaying.shuffle"),
+        unshuffle: t("player.nowPlaying.stopShuffling"),
+        previous: t("player.nowPlaying.previous"),
+        pause: t("player.nowPlaying.pause"),
+        play: t("common.actions.play"),
+        next: t("player.nowPlaying.next")
+    }
+    shuffleWidth = chipWidth([m.words.shuffle, m.words.unshuffle], 300)
+    m.widths = {
+        shuffle: shuffleWidth,
+        unshuffle: shuffleWidth,
+        previous: chipWidth([m.words.previous], 220),
+        toggle: chipWidth([m.words.pause, m.words.play], 180),
+        next: chipWidth([m.words.next], 160),
+        sleep: 0
+    }
     ' Up next: the queue it lists (its queueId) and its tracks, read once,
     ' the part of it listed ({ first, last }, invalid before any), its
     ' rows, and the track marked as playing (-1 for none).
@@ -168,27 +190,25 @@ end sub
 ' The focus stays on the button it was on; on Next as it goes, on Play.
 sub showButtons()
     music = m.global.music
-    shuffle = "Shuffle"
+    words = m.words
+    shuffle = words.shuffle
     shuffleAction = "shuffle"
     if music.shuffled
-        shuffle = "Stop shuffling"
+        shuffle = words.unshuffle
         shuffleAction = "unshuffle"
     end if
-    toggle = "Pause"
-    if music.state = "paused" then toggle = "Play"
-    sleep = "Sleep timer"
+    toggle = words.pause
+    if music.state = "paused" then toggle = words.play
+    sleep = t("player.sleep.title")
     if music.sleep <> invalid then sleep = music.sleep.button
-    labels = [shuffle, "Previous", toggle]
+    labels = [shuffle, words.previous, toggle]
     actions = [shuffleAction, "previous", "toggle"]
-    widths = [300, 220, 180]
     if music.at + 1 < music.queueSize
-        labels.Push("Next")
+        labels.Push(words.next)
         actions.Push("next")
-        widths.Push(160)
     end if
     labels.Push(sleep)
     actions.Push("sleep")
-    widths.Push(0)
     if FormatJson(labels) = FormatJson(m.labels) then return
     focused = ""
     if m.buttons.focusIndex < m.buttonActions.Count() then focused = m.buttonActions[m.buttons.focusIndex]
@@ -197,7 +217,7 @@ sub showButtons()
     m.buttonActions = actions
     chips = []
     for i = 0 to labels.Count() - 1
-        chips.Push({ label: labels[i], width: widths[i] })
+        chips.Push({ label: labels[i], width: m.widths[actions[i]] })
     end for
     m.buttons.chips = chips
     at = buttonAt(focused)
@@ -214,6 +234,17 @@ function buttonAt(action as string) as integer
         if shown = action then return i
     end for
     return -1
+end function
+
+' A chip as wide as the longest of words needs (as ChipRow draws them, in
+' Android TV's label style with its pad around them), least at least.
+function chipWidth(words as object, least as integer) as integer
+    width = least
+    for each text in words
+        need = Int(typeWidth(typeStyleFont("label"), text)) + m.buttons.pad
+        if need > width then width = need
+    end for
+    return width
 end function
 
 sub onPosition()
@@ -247,9 +278,9 @@ sub showStatus()
         typeSet(m.message, music.message)
         m.message.color = "0xEB6B70FF"
     else if music.state = "loading"
-        m.message.text = "Loading…"
+        typeSet(m.message, t("common.states.loading"))
     else if m.noticing
-        typeSet(m.message, "Pausing in " + urlValue(music.sleep.secondsLeft) + " s")
+        typeSet(m.message, t("player.sleep.pausingIn", { seconds: music.sleep.secondsLeft }))
         m.message.color = "0xA1A9B6FF"
     else
         m.message.text = ""

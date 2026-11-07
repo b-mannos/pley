@@ -17,6 +17,7 @@
     <script type="text/brightscript" uri="pkg:/components/items/RailItem.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/I18n.brs" />
     <children>
         <Group id="cell" scaleRotateCenter="[256, 40]">
             <!-- Open, grown from the closed entry's width as the rail opens. -->
@@ -31,7 +32,7 @@
                     <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="28" />
                 </Label>
             </Group>
-            <Label id="hint" translation="[48, 42]" width="380" text="Switch profile" color="0xA1A9B6FF" opacity="0" visible="false">
+            <Label id="hint" translation="[48, 42]" width="380" color="0xA1A9B6FF" opacity="0" visible="false">
                 <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="24" />
             </Label>
             <Poster id="dot" translation="[66, 16]" width="14" height="14" uri="pkg:/images/round.png" visible="false" />

@@ -10,8 +10,12 @@
         <!-- The server answers again (the scene's question): profiles
              that couldn't load are asked for again. -->
         <field id="reached" type="boolean" alwaysNotify="true" />
+        <!-- The language shown changed: the screen draws its words again,
+             a PIN pad it opened staying. -->
+        <field id="language" type="string" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/screens/ProfilesScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/I18n.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
@@ -22,11 +26,11 @@
     <script type="text/brightscript" uri="pkg:/components/lib/Auth.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Profiles.brs" />
     <children>
-        <Label id="title" translation="[0, 200]" width="1920" horizAlign="center" text="Who's watching?" color="0xEBEBEBFF">
+        <Label id="title" translation="[0, 200]" width="1920" horizAlign="center" color="0xEBEBEBFF">
             <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="56" />
         </Label>
         <MarkupGrid id="profiles" translation="[0, 400]" itemComponentName="ProfileTile" numRows="1" numColumns="6" itemSize="[220, 330]" itemSpacing="[48, 0]" drawFocusFeedback="false" />
-        <Label id="message" translation="[360, 780]" width="1200" wrap="true" maxLines="3" horizAlign="center" color="0xA1A9B6FF" text="Loading…">
+        <Label id="message" translation="[360, 780]" width="1200" wrap="true" maxLines="3" horizAlign="center" color="0xA1A9B6FF">
             <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
         </Label>
         <Buttons id="buttons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[660, 900]" minWidth="600" visible="false" />

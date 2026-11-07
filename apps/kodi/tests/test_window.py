@@ -353,6 +353,20 @@ class WindowTest(unittest.TestCase):
         win.close()
         self.assertEqual(window.kodi.get_property(window.profiles.PICKING), "")
 
+    def test_kodi_starts_as_the_profile_in_use_unless_it_has_a_pin(self):
+        household = [{"id": 1, "name": "Anna", "current": True, "needs": "none"}, {"id": 2, "name": "Kid", "needs": "pin"}]
+        asks = window.profiles.asks_at_start
+        # No PIN: straight in.
+        self.assertFalse(asks(household, {"id": 1, "has_pin": False}, False))
+        # A PIN, or a server that doesn't say: "Who's watching?", until it is answered.
+        self.assertTrue(asks(household, {"id": 1, "has_pin": True}, False))
+        self.assertTrue(asks(household, {"id": 1}, False))
+        self.assertFalse(asks(household, {"id": 1, "has_pin": True}, True))
+        # A household of one, or none: nothing to ask.
+        self.assertFalse(asks(household[:1], {"id": 1, "has_pin": True}, False))
+        self.assertFalse(asks([], {"id": 1, "has_pin": True}, False))
+        self.assertFalse(asks(None, {"id": 1, "has_pin": True}, False))
+
     def test_whos_watching(self):
         household = [
             {"id": 1, "name": "Anna", "current": True, "needs": "none"},
@@ -543,7 +557,7 @@ class WindowTest(unittest.TestCase):
         self.assertTrue(win.made[L.LIBRARY_GENRE_ON].label.endswith("Science Fiction"))
         self.assertTrue(win.made[L.LIBRARY_YEAR].visible)
         self.assertFalse(win.made[L.LIBRARY_YEAR_ON].visible)
-        self.assertEqual(win.made[L.LIBRARY_COUNT].label, window.T("count_of") % ("23", "342 movies"))
+        self.assertEqual(win.made[L.LIBRARY_COUNT].label, "23 of 342 movies")
         # Clear filters, from the Filter menu (All, Unwatched, Watched, Genre, Year, Clear, Save as).
         library.reload = lambda: None
         with Dialogs(picks=[5]) as asked:
@@ -608,7 +622,7 @@ class WindowTest(unittest.TestCase):
         self.assertTrue(win.made[L.LIBRARY_FILTER_ON].visible)
         self.assertEqual(win.made[L.LIBRARY_FILTER_ON].label, window.ICON_ROOM + "4K")
         self.assertEqual(win.focused, L.LIBRARY_FILTER_ON)
-        self.assertEqual(win.made[L.LIBRARY_COUNT].label, window.T("count_of") % ("2", "342 movies"))
+        self.assertEqual(win.made[L.LIBRARY_COUNT].label, "2 of 342 movies")
         with Dialogs(picks=[6, 2]) as dialogs:
             library.click(L.LIBRARY_FILTER_ON)
         self.assertEqual(dialogs.shown[0][0][5:], ["Resolution: 4K", "Dynamic range: All dynamic ranges", window.T("clear_filters"), window.T("save_as")])
@@ -822,13 +836,14 @@ class WindowTest(unittest.TestCase):
         window.kodi.xbmcaddon.settings["server_name"] = "Living room"
         self.addCleanup(window.kodi.xbmcaddon.settings.pop, "server_name", None)
         requests_off(self)
-        # The profile's menu: Choose a server, Audio and subtitles, Sign out.
-        with Dialogs(picks=[2], yes=[False]) as asked:
+        # The profile's menu: Choose a server, Audio and subtitles, Profile
+        # language, Sign out.
+        with Dialogs(picks=[3], yes=[False]) as asked:
             win.account()
         # Short: the question, the server, and Sign out to say yes.
         self.assertEqual(asked.asked, [("Sign out?", "You'll be signed out of Living room.", window.T("cancel"), window.T("sign_out"))])
         self.assertEqual(left, [])
-        with Dialogs(picks=[2], yes=[True]):
+        with Dialogs(picks=[3], yes=[True]):
             win.account()
         self.assertEqual(left, ["sign_out"])
 
@@ -1042,7 +1057,8 @@ class WindowTest(unittest.TestCase):
             win.account()
         red = "[COLOR %s](3)[/COLOR]" % window.requests.RED
         self.assertEqual(asked.shown[0][0], [
-            window.T("discover"), window.T("requests_page") + " " + red, window.T("choose_server"), window.T("tracks"), window.T("sign_out"),
+            window.T("discover"), window.T("requests_page") + " " + red, window.T("choose_server"), window.T("tracks"),
+            window.T("profile_language"), window.T("sign_out"),
         ])
         # Kodi's own list of them, once the window has closed.
         self.assertEqual((left, win.listing), (["listing"], "plugin://plugin.video.pley/?route=requests"))

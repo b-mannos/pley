@@ -31,6 +31,8 @@ export interface User {
   /** `null`: the audio language. */
   subtitle_language: string | null;
   subtitle_mode: SubtitleMode;
+  /** The language Pley is in for this account (`en`, `fr`, `es`); `null`: automatic (the device's, else the server language). Absent from servers before it. */
+  language?: string | null;
   /** `false`: a managed profile, or an account without a password. */
   has_password: boolean;
   /** Signs in with a code from an authenticator app after the password. */
@@ -55,6 +57,8 @@ export interface ProfilePatch {
   audio_language?: string | null;
   subtitle_language?: string | null;
   subtitle_mode?: SubtitleMode;
+  /** `null`: automatic. */
+  language?: string | null;
 }
 
 /** A signed-in session (browser, app). */
@@ -87,6 +91,8 @@ export interface InviteCheck {
 
 export interface ServerStatus {
   name: string;
+  /** The server language, for devices in a language Pley doesn't have. Absent from servers before it. */
+  language?: string | null;
   version: string;
   /** The server build's short commit hash; "unknown" without the repository. */
   commit?: string;
@@ -217,8 +223,10 @@ export interface ItemDetail extends ItemSummary {
   tmdb_id: number | null;
   imdb_id: string | null;
   files: MediaFile[];
-  /** Fields edited by hand; metadata refreshes keep them. */
+  /** Fields edited by hand; metadata refreshes keep them. "match" after Fix Match. */
   locked_fields?: string[];
+  /** Fields the item's NFO file sets, named as `locked_fields` are, and "rating". Absent from servers before it. */
+  nfo_fields?: string[];
   /** Intro and credits of the files (absent on servers without detection). */
   markers?: Marker[];
   /** Trailers and other bonus material (movies and shows). */
@@ -336,7 +344,7 @@ export interface Marker {
   kind: MarkerKind;
   start_ms: number;
   end_ms: number;
-  source: "chapter" | "fingerprint";
+  source: "chapter" | "fingerprint" | "frames";
 }
 
 export interface MediaFile {
@@ -702,12 +710,17 @@ export interface PlayingSession {
   quality?: string | null;
   /** What its Quality menu offers for the file, which `quality` picks from; empty for music and on live. */
   qualities?: { id: string; label: string }[];
+  /** Its file's intro and credits, which a remote offers to skip; empty on live (absent from servers before them). */
+  markers?: Marker[];
 }
 
 /** What a device plays when cast to: titles, music and playlists (`item`), Live TV channels (`live`). */
 export type CastKind = "item" | "live";
 
-/** One of the user's devices that takes casts (`GET /api/remote/devices`). */
+/**
+ * A device that takes casts (`GET /api/remote/devices`): one of the user's,
+ * or one of their household's other profiles is on.
+ */
 export interface RemoteDevice {
   /** The app's own id for the device: where casts go. */
   receiver_id: string;
@@ -716,6 +729,11 @@ export interface RemoteDevice {
   name: string | null;
   kind: DeviceKind;
   casts: CastKind[];
+  /**
+   * The household profile it is on, when it isn't the user's own: a cast
+   * switches it to the user's first. What it plays isn't listed.
+   */
+  profile?: { id: Id; name: string };
 }
 
 /**
@@ -733,6 +751,12 @@ export interface CastRequest {
   /** A movie or an episode: the audio track and subtitles (-1: off) picked on the page, by stream index. */
   audio_index?: number;
   subtitle_index?: number;
+  /** A device on another profile: that profile (its `profile.id`), which the device switches from. */
+  profile_id?: Id;
+  /** With `profile_id`: the device listed (its `device_id`), which the cast goes to or doesn't go at all. */
+  device_id?: string;
+  /** The user's PIN, when their profile has one and the device is on another profile. */
+  pin?: string;
 }
 
 export interface Activity {
@@ -820,7 +844,10 @@ export type ServerEvent =
   /**
    * The user's remote sent their device of `receiver_id` something to play
    * (`from`: the remote's device name). The desktop app takes casts
-   * (components/CastReceiver.tsx); a browser tab is a remote only.
+   * (components/CastReceiver.tsx); a browser tab is a remote only. Sent
+   * from another profile of the household, it names that profile
+   * (`profile_id`) and the ticket this device switches to it with first
+   * (`switch_ticket`).
    */
   | {
       type: "cast";
@@ -833,6 +860,8 @@ export type ServerEvent =
       audio_index?: number | null;
       subtitle_index?: number | null;
       from: string | null;
+      profile_id?: Id;
+      switch_ticket?: string;
     }
   /** Live TV's sources, channels or guide changed. */
   | { type: "live_channels_changed" }
@@ -902,6 +931,8 @@ export type LibraryWork = "auto" | "hours" | "idle";
 
 export interface Settings {
   server_name: string;
+  /** The server language; `""`: not chosen, which reads as English. */
+  language: string;
   tmdb_api_key: string;
   metadata_language: string;
   tv_metadata: TvMetadata;
@@ -910,6 +941,11 @@ export interface Settings {
   tvdb_pin: string;
   /** Artists and albums from MusicBrainz, covers from the Cover Art Archive. */
   music_metadata: boolean;
+  /**
+   * Ids and details from the NFO files next to movies, shows, seasons and
+   * episodes, over the online source's. Absent from servers before it.
+   */
+  read_nfo?: boolean;
   hwaccel: HwAccel;
   hardware_decoding: boolean;
   tonemapping: ToneMapping;

@@ -40,10 +40,16 @@ sub test_format_long_episode_numbers()
     tkEqual(fmtEpisodeLong(invalid, invalid), "")
 end sub
 
-sub test_format_plurals()
-    tkEqual(fmtPlural(1, "season"), "1 season")
-    tkEqual(fmtPlural(3, "season"), "3 seasons")
-    tkEqual(fmtPlural(0, "episode"), "0 episodes")
+sub test_format_episode_numbers_in_french_and_spanish()
+    i18nUse("fr")
+    tkEqual(fmtEpisode(1, 2), "S1 · É2")
+    tkEqual(fmtEpisode(1, invalid), "S1")
+    tkEqual(fmtEpisodeLong(2, 5), "Saison 2 · Épisode 5")
+    tkEqual(fmtEpisodeLong(0, 1), "Épisodes spéciaux · Épisode 1")
+    i18nUse("es")
+    tkEqual(fmtEpisode(1, 2), "T1 · E2")
+    tkEqual(fmtEpisode(1, invalid), "T1")
+    tkEqual(fmtEpisodeLong(2, 5), "Temporada 2 · Episodio 5")
 end sub
 
 sub test_format_resume_points()

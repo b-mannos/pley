@@ -8,9 +8,12 @@
 ' once itself.
 
 sub init()
+    m.title = m.top.findNode("title")
     m.text = m.top.findNode("text")
     m.server = m.top.findNode("server")
     m.buttons = m.top.findNode("buttons")
+    ' What each button does, in order: "retry", "switchServer", "drive".
+    m.actions = []
     m.buttons.observeField("buttonSelected", "onButton")
     ' It went back, or to the servers: nothing more to do.
     m.left = false
@@ -25,8 +28,9 @@ sub onActive()
     if not m.top.active then return
     session = m.global.session
     reason = httpSentence(m.top.params.reason)
-    if reason = "" then reason = "The server can't be reached."
-    typeSet(m.text, reason + " Check that the server is on and that this device is on its network.")
+    if reason = "" then reason = t("common.errors.unreachable")
+    typeSet(m.title, t("signin.unreachable.title"))
+    typeSet(m.text, t("signin.unreachable.body", { reason: reason }))
     typeSet(m.server, session.serverName + " · " + urlDisplayAddress(session.server))
     ' A drive plugged in that told nothing gets its button too.
     uiDrive({ op: "look" }, "")
@@ -50,9 +54,15 @@ end sub
 ' Retry and Switch server; and USB drive while one is plugged in, whose
 ' videos play with no server, as on Android TV.
 sub showButtons()
-    labels = ["Retry", "Switch server"]
+    actions = ["retry", "switchServer"]
     drive = m.global.drive.drive
-    if drive <> invalid and httpString(drive.volume) <> "" then labels.Push("USB drive")
+    if drive <> invalid and httpString(drive.volume) <> "" then actions.Push("drive")
+    words = { retry: "common.actions.retry", switchServer: "signin.unreachable.switchServer", drive: "signin.unreachable.drive" }
+    labels = []
+    for each action in actions
+        labels.Push(t(words[action]))
+    end for
+    m.actions = actions
     if FormatJson(labels) = FormatJson(m.buttons.buttons) then return
     focused = m.buttons.buttonFocused
     m.buttons.buttons = labels
@@ -60,13 +70,15 @@ sub showButtons()
 end sub
 
 sub onButton(event as object)
-    label = m.buttons.buttons[event.getData()]
-    if label = "Switch server"
+    at = event.getData()
+    if at < 0 or at >= m.actions.Count() then return
+    action = m.actions[at]
+    if action = "switchServer"
         m.left = true
         uiNavigate({ to: "servers", reset: true })
         return
     end if
-    if label = "USB drive"
+    if action = "drive"
         uiNavigate({ to: "drive", params: { folder: "" } })
         return
     end if

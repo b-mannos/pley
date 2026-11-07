@@ -10,6 +10,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, Weak};
 
+use pley_i18n::t;
 use serde::{Deserialize, Serialize};
 
 use super::proof::{self, ServerProof};
@@ -130,7 +131,7 @@ impl fmt::Debug for TokenAnswerParsed {
 
 /// A token endpoint's answer `body`, for a request that asked `asked_scope`.
 pub fn parse_token_answer(body: &[u8], asked_scope: &str) -> Result<TokenAnswerParsed, AuthError> {
-    let unreadable = || AuthError::Failed("the server's answer can't be read: try again".into());
+    let unreadable = || AuthError::Failed(t!("errors.signIn.unreadable").into());
     let a: TokenAnswer = serde_json::from_slice(body).map_err(|_| unreadable())?;
     if a.access_token.is_empty() {
         return Err(unreadable());
@@ -177,6 +178,8 @@ pub enum SwitchRefusal {
     CantSwitch,
     /// An older server that can't check a PIN: the person goes through.
     CantCheckPin,
+    /// A cast's switch ticket that expired, was spent, or isn't this TV's.
+    TicketSpent,
     Unreachable(String),
     SignedOut,
     /// Anything else, as a sentence.
@@ -193,15 +196,16 @@ impl SwitchRefusal {
                 let description = oauth.as_ref().and_then(|o| o.error_description.clone()).filter(|d| !d.is_empty());
                 match (e.code(), e.reason()) {
                     (_, Some("wrong_pin")) => SwitchRefusal::WrongPin,
-                    (_, Some("throttled")) => SwitchRefusal::Throttled(
-                        description.unwrap_or_else(|| "too many wrong PINs: try again in a few minutes".into()),
-                    ),
+                    (_, Some("throttled")) => {
+                        SwitchRefusal::Throttled(description.unwrap_or_else(|| t!("errors.profiles.throttled").into()))
+                    }
                     (_, Some("pin_locked")) => SwitchRefusal::PinLocked,
                     (_, Some("browser")) => SwitchRefusal::Browser,
                     (_, Some("not_allowed")) => SwitchRefusal::NotAllowed,
+                    (_, Some("ticket_spent")) => SwitchRefusal::TicketSpent,
                     (Some("unauthorized_client"), _) => SwitchRefusal::CantSwitch,
                     (Some("invalid_request"), None) => SwitchRefusal::CantCheckPin,
-                    _ if *status >= 500 => SwitchRefusal::Other("The server refused: try again.".into()),
+                    _ if *status >= 500 => SwitchRefusal::Other(t!("errors.profiles.refused").into()),
                     _ => SwitchRefusal::Other(sentence(&e.to_string())),
                 }
             }
@@ -212,18 +216,16 @@ impl SwitchRefusal {
     /// The words the PIN pad shows.
     pub fn message(&self) -> String {
         match self {
-            SwitchRefusal::WrongPin => "Wrong PIN.".into(),
+            SwitchRefusal::WrongPin => t!("errors.profiles.wrongPin").into(),
             SwitchRefusal::Throttled(m) => sentence(m),
-            SwitchRefusal::PinLocked => {
-                "This profile's PIN is locked after too many wrong tries. Its owner or an administrator can reset it."
-                    .into()
-            }
-            SwitchRefusal::Browser => "This profile needs its password: sign in again to use it.".into(),
-            SwitchRefusal::NotAllowed => "You can't switch to this profile.".into(),
-            SwitchRefusal::CantSwitch => "This sign-in can't switch profiles: sign in again to allow it.".into(),
+            SwitchRefusal::PinLocked => t!("errors.profiles.pinLocked").into(),
+            SwitchRefusal::Browser => t!("errors.profiles.needsPassword").into(),
+            SwitchRefusal::NotAllowed => t!("errors.profiles.notAllowed").into(),
+            SwitchRefusal::CantSwitch => t!("errors.profiles.cantSwitch").into(),
             SwitchRefusal::CantCheckPin => String::new(),
-            SwitchRefusal::Unreachable(reason) => format!("Can't reach your server: {reason}."),
-            SwitchRefusal::SignedOut => "You were signed out: sign in again.".into(),
+            SwitchRefusal::TicketSpent => t!("errors.profiles.ticketSpent").into(),
+            SwitchRefusal::Unreachable(reason) => t!("errors.profiles.unreachable", reason = reason),
+            SwitchRefusal::SignedOut => t!("errors.profiles.signedOut").into(),
             SwitchRefusal::Other(m) => m.clone(),
         }
     }
@@ -497,6 +499,19 @@ impl Tokens {
     /// switch-profile grant), or checks the PIN of the one it acts as. A
     /// refusal changes nothing, unless the refresh token itself is spent.
     pub fn switch_profile(&self, profile: i64, pin: Option<&str>) -> Result<(), AuthError> {
+        self.switch(profile, pin.map(|pin| ("pin", pin)))
+    }
+
+    /// Moves the sign-in to the profile of a remote that cast to this TV,
+    /// with the cast's switch ticket in place of a PIN (docs/API.md,
+    /// "Casting"). A ticket expired, spent or another device's is refused
+    /// with `ticket_spent` ([`SwitchRefusal::TicketSpent`]).
+    pub fn switch_profile_with_ticket(&self, profile: i64, ticket: &str) -> Result<(), AuthError> {
+        self.switch(profile, Some(("ticket", ticket)))
+    }
+
+    /// The switch-profile grant to `profile`, with what stands for its PIN.
+    fn switch(&self, profile: i64, proof: Option<(&str, &str)>) -> Result<(), AuthError> {
         let _one = lock(&self.serial);
         let tokens = self.load().ok_or(AuthError::SignedOut(SignOutReason::Ended))?;
         let Some(refresh) = tokens.refresh_token.clone() else { return Err(self.end(SignOutReason::Ended)) };
@@ -507,8 +522,8 @@ impl Tokens {
             ("refresh_token", refresh.as_str()),
             ("profile", profile.as_str()),
         ];
-        if let Some(pin) = pin {
-            fields.push(("pin", pin));
+        if let Some(field) = proof {
+            fields.push(field);
         }
         self.proved(&tokens, true)?;
         let answer = match post_form(&self.http, &tokens.token_endpoint, &fields) {
@@ -535,7 +550,7 @@ impl Tokens {
     pub fn install(&self, fresh: StoredTokens, asked_scope: &str) -> Result<(), AuthError> {
         let _one = lock(&self.serial);
         if fresh.issuer != self.issuer {
-            return Err(AuthError::Failed("these tokens are another server's".into()));
+            return Err(AuthError::Failed(t!("errors.signIn.otherServer").into()));
         }
         if !extra_scopes(&fresh.scope, asked_scope).is_empty() {
             revoke(&self.http, &self.client_id, &fresh);

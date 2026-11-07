@@ -330,6 +330,23 @@ sub test_drive_subtitles_list_the_file_s_own_tracks_then_the_files_beside_it()
     tkEqual(driveTrackName({ TrackName: "mkv/4", Language: "", Description: "" }, 3), "Track 4")
 end sub
 
+sub test_drive_in_french_and_spanish()
+    video = { path: "ext1:/Ad Astra.mkv", name: "Ad Astra.mkv", folder: false, size: 1503238554 }
+    i18nUse("fr")
+    tkEqual(driveName({ label: "" }), "Périphérique USB")
+    tkEqual(driveSpace({ blocksize: 1, blocks: 2048, freeblocks: 1024 }), "1,0 Ko libres sur 2,0 Ko")
+    tkEqual(driveLine(video, { positionMs: 2530000, durationMs: 7380000 }).subtitle, "MKV · Reprise à 42:10")
+    tkEqual(driveSidecarName({ codec: "subrip", language: "eng", title: "", forced: true }), "Anglais (forcés)")
+    tkEqual(driveAudioName(invalid, 0), "Piste 1")
+    tkEqual(driveSubtitleChoices(invalid, []).labels, ["Désactivés"])
+    i18nUse("es")
+    tkEqual(driveName(invalid), "Dispositivo USB")
+    tkEqual(driveSpace({ blocksize: 1, blocks: 2048, freeblocks: 1024 }), "1,0 KB libres de 2,0 KB")
+    tkEqual(driveLine(video, { positionMs: 2530000, durationMs: 7380000 }).subtitle, "MKV · Se reanuda en 42:10")
+    tkEqual(driveSidecarName({ codec: "webvtt", language: "", title: "", forced: true }), "Forzados")
+    tkEqual(driveTrackName({ TrackName: "mkv/4", Language: "", Description: "" }, 3), "Pista 4")
+end sub
+
 sub test_drive_the_subtitles_shown_are_the_file_drawn_else_the_roku_s()
     tkEqual(driveSubtitleShown(0, "Off", ""), "file:0", "a file beside it, drawn")
     tkEqual(driveSubtitleShown(-1, "On", "mkv/2"), "track:mkv/2", "the file's own, with captions on")

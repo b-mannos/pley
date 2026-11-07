@@ -67,12 +67,13 @@ with Dev Manager.
 Sign-in, server discovery (a broadcast, then a sweep of the TV's subnet),
 the screens, the player's keys and panels, music and offline behaviour
 follow the Android TV app. The TV shows a code to type on the server's
-`/link` page (or a QR code to it), and asks "Who's watching?" at start
-when the household has more than one profile. With Always start as, a
-start never goes on as a profile with a PIN without it: the TV keeps the
-profile it was left on (`GET /api/auth/me`, with `has_pin`), opens on its
-PIN pad when it has one, and until it knows, asks "Who's watching?". What
-differs on LG:
+`/link` page (or a QR code to it), and starts straight into Home as the
+profile it was left on when that profile has no PIN (`GET /api/auth/me`,
+with `has_pin`, kept from the last launch). In a household of more than
+one profile, a start never goes on as a profile with a PIN without it: it
+asks "Who's watching?", or opens on that profile's PIN pad with Always
+start as, and asks "Who's watching?" too until the TV knows. What differs
+on LG:
 
 ### Remote and Magic Remote
 
@@ -144,6 +145,56 @@ line, a row with what supports it, a field with what it holds), a dialog
 or the ready-to-watch notice as it opens, and toasts. Each control names
 itself as it draws (`Ui::name`); a new reading cuts off the one before,
 as the TV's menus do.
+
+### Language
+
+The app is in English, French and Spanish, in the language
+[API.md](API.md#language) describes, as the Samsung apps choose it: the
+account's, else the one picked on this TV, else the TV's own when Pley has
+it (the language of its menus, `localeInfo` in webOS's system settings;
+fr-CA counts as French), else the server's (`GET /api/server`), else
+English. `packages/tv/test/fixtures/language.json` pins that order for the
+LG app's tests as for the Samsung apps'. Its words are in
+`crates/i18n/locales/<language>/<area>.json`, in i18next's format, built
+into the app; English stands in for a word a language lacks.
+
+Choose your server and typing an address have a small globe at the bottom
+right, on the forget hint's line; the sign-in code has it at the top
+right, on the logo's line. It is 32 tall with no fill until focused, and
+names the language shown by its two letters ("FR"); Down or Up reaches
+it, Left and Right never do. OK opens a side panel: "Automatic (English)"
+(the TV's language where Pley has it, else the server's, else English),
+then English, Français and Español, the choice in force checked. A choice
+shows at once, the screen drawn again in it with the globe focused (an
+address being typed and the code are kept), and is kept on the TV
+(`pley.deviceLanguage`); Automatic forgets it. Signed in, an account's own
+language comes first, and its Automatic is this choice.
+
+The language shown last is kept on the TV (`pley.language`), so a start
+shows it from the first frame rather than the TV's for a moment; once the
+account, or on a TV in a language Pley doesn't have the server, has been
+heard and names another, the app changes to it. A change draws the pages
+again where they were, Settings on the row that had focus, and asks for
+Home's rows again, since the server writes their titles; a film or a
+channel keeps its words until it closes. Diagnostics' lines follow at the
+next check.
+
+Settings → Profile → Language lists "Automatic (Français)" (the one picked
+with the globe, else the TV's language, else the server's), then English,
+Français and Español, each in itself. Choosing one sends
+`PUT /api/me/language`, and the app shows it once the server has it. A
+Pley from before languages keeps no account's language (its
+`GET /api/server` names none, and the route answers 404 or 405): there the
+row is this TV's, as the globe picks it, with Automatic the TV's own
+language, and a choice shows at once and is kept on the TV, as the Android
+and Samsung apps have it.
+
+Requests carry `Accept-Language` with the language shown, so what the
+server writes itself (Home's rows, its refusals) comes in it. Dates,
+times, numbers and counts follow the language shown (`pley_i18n::number`
+and `decimal`; counts by CLDR's plural forms, one and other in English,
+one, many and other in French and Spanish), times of day in the TV's
+12- or 24-hour clock.
 
 ### Audio and subtitles
 
@@ -319,10 +370,11 @@ so the server names the TV from its `User-Agent`. They obey:
   again.
 - **Live TV:** next and previous, channel up and down through the
   category the player was opened from, round its ends, as CH+ and CH− go.
-  It has no pause or seek. Stopped from another device or by an
-  administrator (`session_stopped`), it shows **Live TV stopped** with
-  who stopped it and, on a line of its own, their message, with Watch
-  again, as for a connection taken over.
+  A channel obeys from the moment the server answers its watch, as on
+  Android, not only once it plays. It has no pause or seek. Stopped from
+  another device or by an administrator (`session_stopped`), it shows
+  **Live TV stopped** with who stopped it and, on a line of its own,
+  their message, with Watch again, as for a connection taken over.
 
 Only the player of the session named acts on a command, a seek stays
 within the title, and a skip counts from where it is. Each change is
@@ -334,12 +386,28 @@ pinned by the TV apps' shared fixture `packages/tv/test/fixtures/remote.json`
 (and a video's tracks and quality, which the fixture doesn't have, by its
 own tests).
 
+A command never brings up the video player's controls, as on Android TV:
+the person watching didn't press anything. What it changed shows for 2 s
+as the player's toast at the top right: "Paused", "Playing", "+30 s" or
+"−10 s" for a skip (the seconds asked for), "Jumped to 12:34" for a seek,
+"Audio: …", "Subtitles: …" or "Subtitles off", and "Quality: …", each
+named as the player's menu names it. The next title shows its banner as
+it begins, as it does by itself, and a command that changes nothing says
+nothing. Controls the person brought up stay as they were, hiding 5 s
+after their last key even when the remote pauses; a key on the TV after
+the remote's pause shows them as it does, and from then on the pause
+keeps them, as any pause does, until something plays it again. Music and
+Live TV show nothing new for a command: Now Playing is the music's
+controls already, and Live TV's channel up and down show the channel
+tuning, as the keys do, never its controls or what's on.
+
 **Casts.** The TV is one of the devices the profile's remotes play things
 on ([API.md](API.md#casting)) while its event stream is open, so while
 the app shows and is signed in. The stream names it a receiver by its
 install id (the `client_id` its plays send), a TV (`device_kind=tv`)
 taking titles and playlists (`casts=item`) and, where the profile has Live
-TV, channels (`live`). Until the server first says whether it has, the TV
+TV, channels (`live`), and switching to the profile of a remote of another
+profile that casts to it (`switch`). Until the server first says whether it has, the TV
 takes channels too, and the stream opens again when Live TV comes or goes.
 It sends no name, so the server names it from its `User-Agent`, as it
 does its players. What a remote sends plays as the TV's own Play would,
@@ -370,6 +438,25 @@ one that comes while the app is hidden, signing in or asking who's
 watching, does nothing, so a remote never gets past a profile's PIN; of
 two sent close together, the later plays. The rules are
 `crates/shell/src/cast.rs`.
+
+A remote on another profile of the household casts to the TV too (the
+server lists it to the household's remotes with the profile it is on).
+Its cast carries the remote's profile (`profile_id`) and a ticket
+(`switch_ticket`): the TV switches to that profile first. What plays ends,
+and its last reports (where it stopped, and the end of its session) go out
+as the profile it played as, within 5 s: what hasn't gone out by then is
+dropped, never sent as the new profile. Then the TV switches, with the
+switch-profile grant and the ticket in place of a PIN, as a switch on
+"Who's watching?" does: Home shows as the new profile and the event stream
+opens again as its. Then the cast plays as above, once: it waits in the
+app, not on the stream. Any other cast heard until the switch is done is
+dropped; after it, casts play as above, the new profile's own too. A
+switch the server refuses (the ticket expired, was spent or isn't this
+TV's) says so and plays nothing; a cast from another
+profile without a ticket is ignored. Hidden as the switch ends, the TV
+switches all the same, as the server has, but plays nothing. "Who's
+watching?" still ignores casts, as in the other TV apps: there the person
+at the TV picks.
 
 ### Requests
 
@@ -702,6 +789,7 @@ but keeps time, seeks, changes speed, waits and ends as the TV's does.
 | `--keys "<script>"` | Keys to press once the first page shows: `up down left right ok back menu info play pause playpause stop ff rew next prev chup chdown red green yellow blue`, digits, `hold:<key>:<ms>` (held, repeating as the remote does), `wait:<ms>`, `text:<chars>`, `point:<x>,<y>` (dp), `click`, and `drive:out` and `drive:in` (the drive pulled out and plugged in again) |
 | `--screenshot <file>` | After the keys (and a `wait:` at their end), once the frames go quiet, write the frame as PNG and leave |
 | `--screenshot-after <ms>` | Take the screenshot this long after the keys instead: a playing video never goes quiet, and otherwise the shot comes 15 s after the last key |
+| `--locale <tag>` | The language of the TV's menus (`en-US` by default): `fr-FR`, `es-MX`… |
 | `--tier low\|mid\|high` | Act as a TV of that tier |
 | `--reduced-motion` | As Settings' Reduce motion |
 | `--stats` | Print the time to the first frame and the frame times on leaving |
@@ -717,7 +805,8 @@ The fake server listens on 127.0.0.1: a demo household with profiles
 draws itself, Live TV with a guide, the code sign-in approved at once
 (and the proofs that tell the server apart, keyed the same on every run),
 playback of the Android app's test media, subtitles, seek previews and
-the event stream, with the remote's commands and its casts to the TV.
+the event stream, with the remote's commands and its casts to the TV,
+from another profile with the ticket its switch-profile grant takes.
 
 ### The TV build
 

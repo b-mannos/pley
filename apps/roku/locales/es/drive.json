@@ -1,0 +1,19 @@
+{
+  "title": "Dispositivo USB",
+  "space": "{{free}} libres de {{total}}",
+  "up": "Carpeta superior",
+  "resumes": "{{kind}} · Se reanuda en {{time}}",
+  "track": "Pista {{number}}",
+  "none": {
+    "title": "No hay ningún dispositivo USB",
+    "body": "Conecta un dispositivo USB al Roku para reproducir aquí sus videos."
+  },
+  "unreadable": {
+    "title": "No se puede leer esta carpeta",
+    "body": "Puede que se haya desconectado el dispositivo."
+  },
+  "empty": {
+    "title": "No hay nada que reproducir aquí",
+    "body": "Esta carpeta no contiene videos ni carpetas."
+  }
+}

@@ -6,6 +6,7 @@
         "components/**/*",
         "images/**/*",
         "fonts/**/*",
+        "locales/**/*",
         "licenses/**/*"
     ],
     "stagingDir": "out/staging",

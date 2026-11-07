@@ -47,6 +47,10 @@ pub enum LibraryWork {
 #[serde(default)]
 pub struct Settings {
     pub server_name: String,
+    /// The server language (an ISO 639-1 code of [`crate::i18n::LANGUAGES`]):
+    /// the server's own words, and devices in a language Pley doesn't have
+    /// (see [`crate::i18n`]). Empty: not chosen, which reads as English.
+    pub language: String,
     pub tmdb_api_key: String,
     pub metadata_language: String,
     pub tv_metadata: TvMetadata,
@@ -55,6 +59,10 @@ pub struct Settings {
     pub tvdb_pin: String,
     /// Look artists and albums up on MusicBrainz (covers from the Cover Art Archive).
     pub music_metadata: bool,
+    /// Read the NFO files Kodi, Jellyfin and the like keep next to titles:
+    /// their ids decide the match and their fields win over the online
+    /// source's (see [`crate::library::nfo`]).
+    pub read_nfo: bool,
     pub hwaccel: HwAccel,
     pub hardware_decoding: bool,
     pub tonemapping: TonemapMode,
@@ -185,12 +193,14 @@ impl Default for Settings {
         let host = std::env::var("COMPUTERNAME").or_else(|_| std::env::var("HOSTNAME")).unwrap_or_default();
         Self {
             server_name: if host.is_empty() { "Pley".into() } else { host },
+            language: String::new(),
             tmdb_api_key: String::new(),
             metadata_language: "en-US".into(),
             tv_metadata: TvMetadata::Auto,
             tvdb_api_key: String::new(),
             tvdb_pin: String::new(),
             music_metadata: true,
+            read_nfo: true,
             hwaccel: HwAccel::Auto,
             hardware_decoding: true,
             tonemapping: TonemapMode::Auto,
@@ -544,12 +554,15 @@ pub fn fit_to_accel(before: &Settings, patch: &mut SettingsPatch) -> Result<(), 
 #[derive(Debug, Default, Deserialize)]
 pub struct SettingsPatch {
     pub server_name: Option<String>,
+    /// Empty: not chosen (English).
+    pub language: Option<String>,
     pub tmdb_api_key: Option<String>,
     pub metadata_language: Option<String>,
     pub tv_metadata: Option<TvMetadata>,
     pub tvdb_api_key: Option<String>,
     pub tvdb_pin: Option<String>,
     pub music_metadata: Option<bool>,
+    pub read_nfo: Option<bool>,
     pub hwaccel: Option<HwAccel>,
     pub hardware_decoding: Option<bool>,
     pub tonemapping: Option<TonemapMode>,
@@ -628,6 +641,18 @@ impl SettingsStore {
             }
             next.server_name = v;
         }
+        if let Some(v) = patch.language {
+            next.language = match v.trim() {
+                "" => String::new(),
+                code => crate::i18n::LANGUAGES
+                    .into_iter()
+                    .find(|language| *language == code)
+                    .ok_or_else(|| {
+                        AppError::bad_request(format!("language is one of {}", crate::i18n::LANGUAGES.join(", ")))
+                    })?
+                    .to_owned(),
+            };
+        }
         if let Some(v) = patch.tmdb_api_key {
             next.tmdb_api_key = v.trim().to_owned();
         }
@@ -649,6 +674,9 @@ impl SettingsStore {
         }
         if let Some(v) = patch.music_metadata {
             next.music_metadata = v;
+        }
+        if let Some(v) = patch.read_nfo {
+            next.read_nfo = v;
         }
         match next.tv_metadata {
             TvMetadata::Tmdb if next.tmdb_api_key.is_empty() => {
@@ -915,6 +943,8 @@ mod tests {
         assert!(bad(serde_json::json!({"server_name": "x".repeat(65)})).await);
         assert!(bad(serde_json::json!({"metadata_language": "e"})).await);
         assert!(bad(serde_json::json!({"metadata_language": "en-US-x-twelve"})).await);
+        assert!(bad(serde_json::json!({"language": "de"})).await);
+        assert!(bad(serde_json::json!({"language": "fr-FR"})).await);
         assert!(bad(serde_json::json!({"max_transcodes": 0})).await);
         assert!(bad(serde_json::json!({"max_transcodes": 65})).await);
         assert!(bad(serde_json::json!({"transcode_preset": "placebo"})).await);
@@ -927,6 +957,7 @@ mod tests {
                 &db,
                 patch(serde_json::json!({
                     "server_name": "  Den  ",
+                    "language": " fr ",
                     "tmdb_api_key": "  abc  ",
                     "metadata_language": " fr-FR ",
                     "max_transcodes": 64,
@@ -938,6 +969,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(s.server_name, "Den");
+        assert_eq!(s.language, "fr");
         assert_eq!(s.tmdb_api_key, "abc");
         assert_eq!(s.metadata_language, "fr-FR");
         assert_eq!((s.max_transcodes, s.transcode_preset.as_str()), (64, "medium"));
@@ -1001,7 +1033,7 @@ mod tests {
         let s = SettingsStore::load(&db).await.unwrap().get();
         assert_eq!((s.server_name.as_str(), s.max_transcodes, s.hwaccel), ("Attic", 2, HwAccel::Nvenc));
         assert_eq!(s.tv_metadata, TvMetadata::Auto);
-        assert!(s.music_metadata && s.seek_previews && s.previews_in_background && s.detect_markers);
+        assert!(s.music_metadata && s.read_nfo && s.seek_previews && s.previews_in_background && s.detect_markers);
         assert_eq!((s.library_work, s.library_work_max_cpu), (LibraryWork::Auto, 50));
 
         // Unreadable settings fall back to the defaults instead of failing start-up.

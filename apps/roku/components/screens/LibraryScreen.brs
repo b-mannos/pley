@@ -16,6 +16,7 @@ sub init()
     m.jumpTimer = m.top.findNode("jumpTimer")
     m.rows = m.top.findNode("rows")
     m.message = m.top.findNode("message")
+    m.message.text = t("common.states.loading")
     m.panel = m.top.findNode("panel")
     m.panelTitle = m.top.findNode("panelTitle")
     m.choices = m.top.findNode("choices")
@@ -203,12 +204,12 @@ sub showTab(wanted as string)
         else
             ' Its first page asked for, or on its way: the other tab's
             ' message goes.
-            showMessage("Loading…")
+            showMessage(t("common.states.loading"))
             loadPage(0)
         end if
     else if wanted = "collections"
         if m.collections = invalid
-            showMessage("Loading…")
+            showMessage(t("common.states.loading"))
             askCollections()
         else
             m.grid.content = m.collections
@@ -218,7 +219,7 @@ sub showTab(wanted as string)
         ' Its rows end with the collections (addCollectionsRow).
         askCollections()
         if m.recommended = invalid
-            showMessage("Loading…")
+            showMessage(t("common.states.loading"))
             uiRequest({ method: "GET", path: "/api/libraries/" + urlValue(m.library.id) + "/hubs", build: "rows" }, "onRecommended")
         else
             showContent()
@@ -233,15 +234,15 @@ sub showContent()
     shownTab = m.view.tab
     empty = ""
     if shownTab = "recommended"
-        if m.recommended.getChildCount() = 0 then empty = "Nothing to recommend here yet."
+        if m.recommended.getChildCount() = 0 then empty = t("browse.library.noRecommendations")
     else if shownTab = "collections"
-        if m.collections.getChildCount() = 0 then empty = "This library has no collections."
+        if m.collections.getChildCount() = 0 then empty = t("browse.library.noCollections")
     else if m.content.getChildCount() = 0
         if libFiltered(m.view)
             ' Nothing matches: Clear filters, as on Android TV.
-            showMessage("Nothing in this library matches the current filters.", "No matches", "clear")
+            showMessage(t("browse.library.noMatches"), t("browse.library.noMatchesTitle"), "clear")
         else
-            showMessage("This library is empty.")
+            showMessage(t("browse.library.empty"))
         end if
         return
     end if
@@ -273,8 +274,8 @@ sub showMessage(text as string, title = "" as string, action = "" as string)
     showLetters()
     m.messageAction = action
     label = ""
-    if action = "clear" then label = "Clear filters"
-    if action = "retry" then label = "Retry"
+    if action = "clear" then label = t("browse.library.rows.clear")
+    if action = "retry" then label = t("common.actions.retry")
     m.message.title = title
     typeSet(m.message, text)
     m.message.action = label
@@ -291,8 +292,7 @@ end sub
 ' The tab couldn't load, as on Android TV: what didn't, the server's
 ' sentence, and Retry.
 sub showFailure(answer as object)
-    titles = { library: "Couldn't load this library", recommended: "Couldn't load recommendations", collections: "Couldn't load collections" }
-    showMessage(answer.message, titles[m.view.tab], "retry")
+    showMessage(answer.message, t("browse.library.failed." + m.view.tab), "retry")
 end sub
 
 ' The message's button: Clear filters lists every title again, Retry asks
@@ -322,9 +322,7 @@ sub showCount()
     if m.view.tab = "library" and m.total >= 0
         typeSet(m.countLabel, libCountLine(m.view, m.library.kind, m.total, m.library.itemCount))
     else if m.view.tab = "collections" and m.collections <> invalid
-        n = m.collections.getChildCount()
-        typeSet(m.countLabel, urlValue(n) + " collections")
-        if n = 1 then m.countLabel.text = "1 collection"
+        typeSet(m.countLabel, t("browse.counts.collections", { count: m.collections.getChildCount() }))
     else
         typeSet(m.countLabel, fmtCount(m.library.itemCount, m.library.kind))
     end if
@@ -415,7 +413,7 @@ sub loadPage(page as integer)
     at = page * pageSize()
     if page < 0 or m.pages.DoesExist(page.ToStr()) or (m.total >= 0 and at >= m.total) then return
     m.pages[page.ToStr()] = true
-    if m.content.getChildCount() = 0 then showMessage("Loading…")
+    if m.content.getChildCount() = 0 then showMessage(t("common.states.loading"))
     query = libQuery(m.view, at, pageSize())
     path = urlWithQuery("/api/libraries/" + urlValue(m.library.id) + "/items", query)
     uiRequest({ method: "GET", path: path, build: "tiles", badges: libShowsBadges(m.view), bitrate: m.view.sort = "bitrate", listing: m.listing, page: page }, "onPage")
@@ -693,7 +691,7 @@ sub onViewChosen(event as object)
             ' Its choices once the server says what they are.
             openFilters()
             m.filterWanted = kind
-            m.panelHint.text = "Loading…"
+            m.panelHint.text = t("common.states.loading")
         else
             openFilter(kind)
         end if
@@ -709,7 +707,7 @@ sub openSort()
         labels.Push(sort.label)
         values.Push(sort.id)
     end for
-    showChoices("sort", "Sort by", labels, values, current, "OK on the one checked turns the order around.")
+    showChoices("sort", t("browse.library.sortBy"), labels, values, current, t("browse.library.sortHint"))
 end sub
 
 ' The filters, each with what it keeps; OK opens its choices. Once some
@@ -718,7 +716,7 @@ end sub
 ' it comes, the focus staying on its row.
 sub openFilters()
     m.panelKind = "filters"
-    m.panelTitle.text = "Filter"
+    m.panelTitle.text = t("browse.library.filter")
     rows = libFilterRows(m.view, m.library.kind, m.filters)
     at = m.menu.itemFocused
     focused = ""
@@ -746,7 +744,8 @@ sub onMenu(event as object)
         current = 0
         if m.view.watched = "false" then current = 1
         if m.view.watched = "true" then current = 2
-        showChoices("watched", "Show", ["All titles", "Unwatched", "Watched"], ["", "false", "true"], current, "")
+        labels = [libWatchedLabel(""), libWatchedLabel("false"), libWatchedLabel("true")]
+        showChoices("watched", t("browse.library.show"), labels, ["", "false", "true"], current, "")
     else if action = "clear"
         libClearFilters(m.view)
         applyView()
@@ -756,7 +755,7 @@ sub onMenu(event as object)
     else if m.filters = invalid
         ' Its choices once the server says what they are.
         m.filterWanted = action
-        m.panelHint.text = "Loading…"
+        m.panelHint.text = t("common.states.loading")
         askFilters()
     else
         openFilter(action)
@@ -778,9 +777,9 @@ sub saveAs()
     closePanel()
     m.smartFilter = libSmartFilter(m.view)
     dialog = CreateObject("roSGNode", "StandardKeyboardDialog")
-    dialog.title = "Save these filters"
-    dialog.message = [libSmartFilterWords(m.view).Join(" · ") + ". It keeps up with the library by itself."]
-    dialog.buttons = ["Save", "Cancel"]
+    dialog.title = t("browse.library.saveFilters")
+    dialog.message = [t("browse.library.saveFiltersHint", { filters: libSmartFilterWords(m.view).Join(" · ") })]
+    dialog.buttons = [t("common.actions.save"), t("common.actions.cancel")]
     dialog.observeField("buttonSelected", "onSaveNamed")
     m.top.getScene().dialog = dialog
 end sub
@@ -800,7 +799,7 @@ sub onSaved(event as object)
     if answer.ok and httpObject(answer.data) <> invalid
         uiNavigate({ to: "playlist", params: { id: answer.data.id, title: httpSentence(answer.data.title) } })
     else if not uiFailed(answer)
-        uiMessage("That didn't work", [pagePlaylistRefusal(answer)])
+        uiMessage(t("common.states.failed"), [pagePlaylistRefusal(answer)])
     end if
 end sub
 
@@ -830,30 +829,31 @@ end sub
 
 ' A genre, a year, a resolution or a dynamic range to keep, or Any.
 sub openFilter(kind as string)
-    labels = ["Any"]
-    values = [""]
     current = 0
     if kind = "genre"
+        labels = [t("browse.library.allGenres")]
+        values = [""]
         for each genre in m.filters.genres
             if genre = m.view.genre then current = values.Count()
             labels.Push(genre)
             values.Push(genre)
         end for
-        showChoices("genre", "Genre", labels, values, current, "")
+        showChoices("genre", t("browse.library.genre"), labels, values, current, "")
     else if kind = "resolution"
-        choices = libQualityChoices(fmtResolutions(), m.filters.resolutions, m.view.resolution, "All resolutions")
-        showChoices("resolution", "Resolution", choices.labels, choices.values, choices.current, "")
+        choices = libQualityChoices(fmtResolutions(), m.filters.resolutions, m.view.resolution, t("browse.library.allResolutions"))
+        showChoices("resolution", t("browse.library.resolution"), choices.labels, choices.values, choices.current, "")
     else if kind = "dynamic_range"
-        choices = libQualityChoices(fmtDynamicRanges(), m.filters.dynamicRanges, m.view.dynamic_range, "All dynamic ranges")
-        showChoices("dynamic_range", "Dynamic range", choices.labels, choices.values, choices.current, "")
+        choices = libQualityChoices(fmtDynamicRanges(), m.filters.dynamicRanges, m.view.dynamic_range, t("browse.library.allDynamicRanges"))
+        showChoices("dynamic_range", t("browse.library.dynamicRange"), choices.labels, choices.values, choices.current, "")
     else
+        labels = [t("browse.library.allYears")]
         values = [0]
         for each year in m.filters.years
             if year = m.view.year then current = values.Count()
             labels.Push(urlValue(year))
             values.Push(year)
         end for
-        showChoices("year", "Year", labels, values, current, "")
+        showChoices("year", t("browse.library.year"), labels, values, current, "")
     end if
 end sub
 

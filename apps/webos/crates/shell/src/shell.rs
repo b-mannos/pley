@@ -13,10 +13,13 @@
 use pley_base::{ImageRequest, Key};
 use pley_core::ApiError;
 use pley_core::model::{Library, LiveCategory, RequestSummary, ServerEvent};
+use pley_i18n::t;
 use pley_kit::{Dialog, DialogButton};
 use pley_ui::{Dir, Edge, Group, Id, InputEvent, PageMemory, Ui, UiState};
 
-use crate::cast::{CAST_NOTICE_SECONDS, Cast, CastPlay, Casts, NOTHING_TO_PLAY, notice, opening};
+use crate::cast::{
+    CAST_NOTICE_SECONDS, Cast, CastNews, CastPlay, Casts, nothing_to_play, notice, opening, switch_refused,
+};
 use crate::cx::{AppCx, NavCommand, Requests, ToastRequest};
 use crate::notice::Notices;
 use crate::overlay::{self, DIM_AFTER, TOAST_TOP, TOAST_TOP_PLAYER, Toasts};
@@ -213,6 +216,11 @@ impl Shell {
         self.toasts.text()
     }
 
+    /// When the toast showing starts fading out (tests check how long one shows).
+    pub fn toast_ends(&self) -> Option<f64> {
+        self.toasts.next_due()
+    }
+
     /// Whether the idle dimmer is down.
     pub fn dimmed(&self) -> bool {
         self.dimmed
@@ -274,8 +282,17 @@ impl Shell {
         for e in state.update(now) {
             self.deliver(e, state, ui, now);
         }
-        if let Some((from, found)) = self.casts.take(state.generation()) {
-            self.play_cast(from.as_deref(), found, state, ui, now);
+        match self.casts.take(state.generation()) {
+            Some(CastNews::Switched { profile, cast }) => self.switched_for_cast(profile, cast, state, ui, now),
+            Some(CastNews::Refused(e)) => {
+                log::info!("the server didn't switch the TV to the profile that cast: {e}");
+                if let Some(text) = switch_refused(&e).filter(|_| self.takes_casts(state)) {
+                    self.requests.toasts.push(ToastRequest { text, error: true, seconds: None });
+                    self.carry_out(state, ui, now);
+                }
+            }
+            Some(CastNews::Found { from, found }) => self.play_cast(from.as_deref(), found, state, ui, now),
+            None => {}
         }
         if let Some(mut music) = state.music.take() {
             self.music_due = music.tick(now);
@@ -315,7 +332,11 @@ impl Shell {
     /// being found.
     pub fn deliver(&mut self, event: AppEvent, state: &mut AppState, ui: &mut UiState, now: f64) {
         if let AppEvent::Server(e) = &event {
-            self.hear_cast(e, state, now);
+            self.hear_cast(e, state, ui, now);
+        }
+        if event == AppEvent::Language {
+            self.relabel(state, ui, now);
+            return;
         }
         if event == AppEvent::Changed {
             let n = self.stack.len();
@@ -514,8 +535,8 @@ impl Shell {
     /// "Exit Pley?" (`AskExit` in the Samsung app's `Kit/Shell.cs`): a narrow card, its title and
     /// Cancel and Exit, Exit focused; Cancel or Back stays. Drawn every frame so it can fade out.
     fn exit_dialog(&mut self, ui: &mut Ui) {
-        let buttons = [DialogButton::new("Cancel"), DialogButton::new("Exit")];
-        let dialog = Dialog::new("Exit Pley?").buttons(&buttons).initial(1).width(360.0);
+        let buttons = [DialogButton::new(t!("common.actions.cancel")), DialogButton::new(t!("shell.exit.exit"))];
+        let dialog = Dialog::new(t!("shell.exit.title")).buttons(&buttons).initial(1).width(360.0);
         let r = dialog.show(ui, Id::new("pley.exit"), self.exit_asked);
         if r.dismissed || r.chosen == Some(0) {
             self.exit_asked = false;
@@ -534,15 +555,68 @@ impl Shell {
     }
 
     /// A cast for this TV starts being found, in place of one still being found, while the TV
-    /// takes casts. A cast for another of the user's devices is that device's.
-    fn hear_cast(&mut self, event: &ServerEvent, state: &AppState, now: f64) {
-        let Some(cast) = Cast::for_receiver(event, state.install_id()) else { return };
+    /// takes casts; one from another profile's remote ends what plays and then switches to that
+    /// profile ([`Casts::start`]). A cast for another of the profile's devices is that device's.
+    fn hear_cast(&mut self, event: &ServerEvent, state: &mut AppState, ui: &mut UiState, now: f64) {
+        let Some(cast) = Cast::for_receiver(event, state.install_id(), state.profile()) else { return };
         if !self.takes_casts(state) {
             log::info!("a remote's cast came while the TV can't play it");
             return;
         }
         log::info!("a remote cast to this TV");
+        if cast.switch.is_some() && !self.casts.switching() {
+            // Ended before the switch starts, so its last reports are queued for it to wait on.
+            self.end_what_plays(state, ui, now);
+        }
         self.casts.start(cast, state, now);
+    }
+
+    /// Ends what plays, before a switch for a cast: the music, and a player on the stack with the
+    /// pages over it (Home in its place when it is the first page). Their last reports go out
+    /// before the switch, as the profile they played as.
+    fn end_what_plays(&mut self, state: &mut AppState, ui: &mut UiState, now: f64) {
+        state.end_playback();
+        match self.stack.iter().position(|e| e.holds) {
+            Some(0) => self.apply(NavCommand::Reset(Route::Home), state, ui, now),
+            Some(player) => {
+                for old in self.stack.split_off(player + 1) {
+                    self.drop_entry(old, state);
+                }
+                self.apply(NavCommand::Pop, state, ui, now);
+            }
+            None => return,
+        }
+        log::info!("what played ended for a remote's cast from another profile");
+        self.carry_out(state, ui, now);
+    }
+
+    /// The server switched the TV to the profile of a remote that cast to it: the app acts as that
+    /// profile, as a switch on "Who's watching?" does (the event stream opens again as that
+    /// profile's), Home shows, made again as the new profile's, under what the cast plays, and the
+    /// cast is found. The cast waits here, not on the stream, so the new stream neither loses it
+    /// nor plays it again. Hidden, or back on the pages of getting in, the TV switches all the
+    /// same, as the server has, but plays nothing.
+    fn switched_for_cast(
+        &mut self,
+        profile: i64,
+        cast: Option<Cast>,
+        state: &mut AppState,
+        ui: &mut UiState,
+        now: f64,
+    ) {
+        log::info!("switched profiles for a remote's cast");
+        state.switched(profile);
+        if self.chrome() != Chrome::Bare {
+            for old in std::mem::take(&mut self.stack) {
+                self.drop_entry(old, state);
+            }
+            self.requests.nav.push(NavCommand::Reset(Route::Home));
+            self.carry_out(state, ui, now);
+        }
+        match cast {
+            Some(cast) if self.takes_casts(state) => self.casts.start(cast, state, now),
+            _ => log::info!("a remote's cast was let go as the TV switched profiles for it"),
+        }
     }
 
     /// Plays what a cast found as the app's own Play would, in place of what plays: a video or a
@@ -576,7 +650,7 @@ impl Shell {
                 Route::NowPlaying
             }
             Ok(CastPlay::Nothing) => {
-                self.requests.toasts.push(ToastRequest { text: NOTHING_TO_PLAY.into(), error: false, seconds: None });
+                self.requests.toasts.push(ToastRequest { text: nothing_to_play().into(), error: false, seconds: None });
                 self.carry_out(state, ui, now);
                 return;
             }
@@ -636,6 +710,34 @@ impl Shell {
         for t in std::mem::take(&mut self.requests.toasts) {
             self.toasts.show(t, now);
         }
+    }
+
+    /// The language shown changed: every page is drawn in it, each where it was. A page that puts
+    /// its own words in the new language keeps what it holds; the others are made again from
+    /// their routes, with the focus they had, and ask the server again (Home's rows come in the
+    /// new language). A player keeps its words until it closes. The rail's entries are made again.
+    fn relabel(&mut self, state: &mut AppState, ui: &mut UiState, now: f64) {
+        let top = self.stack.len().checked_sub(1);
+        for (i, entry) in self.stack.iter_mut().enumerate() {
+            if entry.holds {
+                continue;
+            }
+            let mut cx = AppCx::new(state, &mut self.requests, now);
+            if entry.screen.relabel(&mut cx) {
+                continue;
+            }
+            let on_top = Some(i) == top;
+            if on_top {
+                entry.memory = ui.export_page();
+            }
+            entry.screen = self.registry.make(&entry.route, &mut cx);
+            entry.missed = false;
+            if on_top {
+                ui.import_page(std::mem::take(&mut entry.memory));
+            }
+        }
+        self.entries_from = None;
+        self.carry_out(state, ui, now);
     }
 
     fn make(&mut self, route: Route, state: &mut AppState, now: f64) -> Entry {

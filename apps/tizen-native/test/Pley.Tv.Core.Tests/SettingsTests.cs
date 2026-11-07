@@ -32,6 +32,17 @@ sealed class FakeAccount : IMeSource, ISettingsSource
         return Me.Value! with { AudioLanguage = defaults.AudioLanguage, SubtitleLanguage = defaults.SubtitleLanguage, SubtitleMode = defaults.SubtitleMode, DisplayName = "from the server" };
     }
 
+    /// <summary>The languages saved, in order.</summary>
+    public List<string?> LanguagesSent { get; } = new List<string?>();
+
+    public async Task<User> SaveLanguage(string? language)
+    {
+        LanguagesSent.Add(language);
+        if (Saving != null) await Saving.Task;
+        if (SaveFailure != null) throw SaveFailure;
+        return Me.Value! with { Language = language, DisplayName = "from the server" };
+    }
+
     public void TracksChanged() => TracksChanges++;
 
     public Task SignOut()
@@ -51,6 +62,19 @@ sealed class FakeAccount : IMeSource, ISettingsSource
     public string Version => "0.1.0";
 
     public IReadOnlyList<Fact> DeviceFacts => new[] { new Fact("Model", "QE55S95D") };
+
+    public string? ServerLanguage { get; set; }
+
+    public IReadOnlyList<string> TvLanguages { get; set; } = new[] { "en-US" };
+
+    public string? DeviceLanguage { get; set; }
+
+    /// <summary>False: a Pley from before languages, as AppState finds it.</summary>
+    public bool KeepsLanguage { get; set; } = true;
+
+    public void LanguageRouteMissing() => KeepsLanguage = false;
+
+    public void ChooseDeviceLanguage(string? language) => DeviceLanguage = language;
 }
 
 /// <summary>The Me page: the Android app's MeViewModelTest.</summary>
@@ -166,7 +190,8 @@ public class SettingsModelTests
     public void Profile_has_switching_the_track_defaults_and_the_ways_to_the_rest()
     {
         var m = Model();
-        Assert.Equal(new[] { "profile-header", "row-switch", "row-audio", "row-subtitles", "row-history", "row-sort-libraries", "row-web" }, Keys(m.Items(SettingsCategory.Profile)));
+        Assert.Equal(new[] { "profile-header", "row-switch", "row-audio", "row-subtitles", "row-language", "row-history", "row-sort-libraries", "row-web" },
+            Keys(m.Items(SettingsCategory.Profile)));
         Assert.Equal("row-switch", m.FirstRow(SettingsCategory.Profile));
         Assert.Equal("English", Row(m, SettingsCategory.Profile, "row-audio").Value);
         Assert.Equal("Only for foreign dialogue", Row(m, SettingsCategory.Profile, "row-subtitles").Value);
@@ -175,10 +200,10 @@ public class SettingsModelTests
         // Subtitles in a language to read add their language; a household adds Always start as.
         account.Profiles.AddRange(new[] { new HouseholdProfile { Id = 7, Name = "Ann" }, new HouseholdProfile { Id = 8, Name = "Bo" } });
         m = Model(mode: "foreign");
-        Assert.Equal(new[] { "profile-header", "row-switch", "row-audio", "row-subtitles", "row-subtitle-language", "row-history", "row-sort-libraries", "row-start-as", "row-web" },
+        Assert.Equal(new[] { "profile-header", "row-switch", "row-audio", "row-subtitles", "row-subtitle-language", "row-language", "row-history", "row-sort-libraries", "row-start-as", "row-web" },
             Keys(m.Items(SettingsCategory.Profile)));
         Assert.Equal("Same as the audio language", Row(m, SettingsCategory.Profile, "row-subtitle-language").Value);
-        Assert.Equal("Ask who's watching", Row(m, SettingsCategory.Profile, "row-start-as").Value);
+        Assert.Equal("Profile used last", Row(m, SettingsCategory.Profile, "row-start-as").Value);
 
         // Without the play scope the defaults say so and open the web.
         m = Model(scope: "library");
@@ -250,12 +275,152 @@ public class SettingsModelTests
     }
 
     [Fact]
+    public void Language_is_the_profiles_own_or_Automatic_and_says_what_that_is_here()
+    {
+        var m = Model();
+        var row = Row(m, SettingsCategory.Profile, "row-language");
+        Assert.Equal(("Language", "languages"), (row.Label, row.Icon));
+        Assert.Equal(new SettingAction.Pick(new SettingPick.Language()), row.Action);
+        // Automatic is the TV's language, in itself, before the server's.
+        Assert.Equal("Automatic (English)", row.Value);
+        account.TvLanguages = new[] { "de-DE", "es-MX" };
+        account.ServerLanguage = "fr";
+        Assert.Equal("Automatic (Español)", Row(m, SettingsCategory.Profile, "row-language").Value);
+        // A TV in a language Pley doesn't have: the server's.
+        account.TvLanguages = new[] { "de-DE" };
+        Assert.Equal("Automatic (Français)", Row(m, SettingsCategory.Profile, "row-language").Value);
+        // The one picked on this TV with the globe, before the TV's.
+        account.DeviceLanguage = "en";
+        Assert.Equal("Automatic (English)", Row(m, SettingsCategory.Profile, "row-language").Value);
+        account.DeviceLanguage = null;
+
+        var panel = m.Panel(new SettingPick.Language());
+        Assert.Equal("Language", panel.Title);
+        Assert.Equal(new[] { "Automatic (Français)", "English", "Français", "Español" }, panel.Choices.Select(c => c.Label));
+        Assert.Equal(0, panel.Focus);
+        Assert.Equal("row-language", panel.Pick.RowKey);
+
+        // Choosing waits for the server's answer, which becomes who is watching: the app follows it.
+        account.Saving = new TaskCompletionSource<bool>();
+        m.Choose(new SettingPick.Language(), 3);
+        Assert.Equal(new string?[] { "es" }, account.LanguagesSent);
+        Assert.Null(account.Me.Value!.Language);
+        Assert.True(m.State.Value.Me.Language!.Saving);
+        // One change at a time.
+        m.Choose(new SettingPick.Language(), 2);
+        Assert.Single(account.LanguagesSent);
+        account.Saving.SetResult(true);
+        Assert.Equal(("es", "from the server"), (account.Me.Value!.Language, account.Me.Value.DisplayName));
+        Assert.Equal("Español", Row(m, SettingsCategory.Profile, "row-language").Value);
+        Assert.Equal(3, m.Panel(new SettingPick.Language()).Focus);
+        // The server's again.
+        account.Saving = null;
+        m.Choose(new SettingPick.Language(), 0);
+        Assert.Equal(new string?[] { "es", null }, account.LanguagesSent);
+        Assert.Null(account.Me.Value!.Language);
+    }
+
+    [Fact]
+    public void Language_is_changed_on_the_web_without_the_play_scope()
+    {
+        var m = Model(scope: "library");
+        var row = Row(m, SettingsCategory.Profile, "row-language");
+        Assert.Equal("Automatic (English) · change on the web", row.Value);
+        Assert.Equal(new SettingAction.Web("/account"), row.Action);
+
+        m = Model();
+        var told = new List<string>();
+        m.Told += told.Add;
+        account.SaveFailure = new ApiException(500, "internal", "it broke");
+        m.Choose(new SettingPick.Language(), 2);
+        Assert.Equal("It broke.", told.Last());
+        Assert.Null(account.Me.Value!.Language);
+        Assert.True(m.State.Value.Me.Language!.Editable);
+        account.SaveFailure = new ApiException(403, "forbidden", "the play scope is needed");
+        m.Choose(new SettingPick.Language(), 2);
+        Assert.False(m.State.Value.Me.Language!.Editable);
+        Assert.Equal(new SettingAction.Web("/account"), Row(m, SettingsCategory.Profile, "row-language").Action);
+    }
+
+    [Fact]
+    public void On_a_server_from_before_languages_the_Language_row_is_this_TVs_as_the_globe_picks_it()
+    {
+        // Its GET /api/server names none: nothing goes to it, and the one picked with the globe is the row's.
+        account.KeepsLanguage = false;
+        account.DeviceLanguage = "es";
+        var m = Model(scope: "library");
+        var told = new List<string>();
+        m.Told += told.Add;
+        var row = Row(m, SettingsCategory.Profile, "row-language");
+        Assert.Equal("Español", row.Value);
+        // Kept on the TV, it needs no play scope.
+        Assert.Equal(new SettingAction.Pick(new SettingPick.Language()), row.Action);
+        // Automatic is the TV's own language, not the one picked.
+        var panel = m.Panel(new SettingPick.Language());
+        Assert.Equal(new[] { "Automatic (English)", "English", "Français", "Español" }, panel.Choices.Select(c => c.Label));
+        Assert.Equal(3, panel.Focus);
+        m.Choose(new SettingPick.Language(), 2);
+        Assert.Equal("fr", account.DeviceLanguage);
+        Assert.Equal("Français", Row(m, SettingsCategory.Profile, "row-language").Value);
+        // Automatic forgets the pick.
+        m.Choose(new SettingPick.Language(), 0);
+        Assert.Null(account.DeviceLanguage);
+        Assert.Equal("Automatic (English)", Row(m, SettingsCategory.Profile, "row-language").Value);
+        Assert.Empty(account.LanguagesSent);
+        Assert.Empty(told);
+    }
+
+    [Fact]
+    public void A_server_that_answers_the_choice_404_keeps_it_on_this_TV_with_no_word()
+    {
+        var m = Model();
+        var told = new List<string>();
+        m.Told += told.Add;
+        account.SaveFailure = new ApiException(404, "not_found", "no such route");
+        m.Choose(new SettingPick.Language(), 2);
+        Assert.Equal(new string?[] { "fr" }, account.LanguagesSent);
+        Assert.Equal("fr", account.DeviceLanguage);
+        Assert.False(account.KeepsLanguage);
+        Assert.Null(account.Me.Value!.Language);
+        Assert.Equal(new LanguageState("fr", true, OnDevice: true), m.State.Value.Me.Language);
+        Assert.Equal("Français", Row(m, SettingsCategory.Profile, "row-language").Value);
+        Assert.Empty(told);
+        // From then on the row is this TV's: nothing more goes to the server.
+        m.Choose(new SettingPick.Language(), 3);
+        Assert.Single(account.LanguagesSent);
+        Assert.Equal("es", account.DeviceLanguage);
+    }
+
+    [Fact]
+    public void A_choice_on_its_way_keeps_the_row_busy_once_it_is_this_TVs_so_its_late_404_overwrites_nothing()
+    {
+        // Settings before the server has said: Français goes to it.
+        var m = Model();
+        account.Saving = new TaskCompletionSource<bool>();
+        account.SaveFailure = new ApiException(404, "not_found", "no such route");
+        m.Choose(new SettingPick.Language(), 2);
+        // It names no language, a Pley from before languages, and the profile is heard again: the row is this TV's.
+        account.KeepsLanguage = false;
+        account.Me.Value = account.Me.Value! with { DisplayName = "Ann" };
+        Assert.Equal(new LanguageState(null, true, Saving: true, OnDevice: true), m.State.Value.Me.Language);
+        // One change at a time, as on Android: Español waits for Français's answer.
+        m.Choose(new SettingPick.Language(), 3);
+        Assert.Null(account.DeviceLanguage);
+        account.Saving.SetResult(true);
+        Assert.Equal("fr", account.DeviceLanguage);
+        Assert.Equal(new LanguageState("fr", true, OnDevice: true), m.State.Value.Me.Language);
+        m.Choose(new SettingPick.Language(), 3);
+        Assert.Equal("es", account.DeviceLanguage);
+        Assert.Equal(new string?[] { "fr" }, account.LanguagesSent);
+    }
+
+    [Fact]
     public void Always_start_as_names_the_households_profiles()
     {
         account.Profiles.AddRange(new[] { new HouseholdProfile { Id = 7, Name = "Ann" }, new HouseholdProfile { Id = 8, Name = "Bo" } });
         var m = Model();
         var panel = m.Panel(new SettingPick.AlwaysStartAs());
-        Assert.Equal(new[] { "Ask who's watching", "Ann", "Bo" }, panel.Choices.Select(c => c.Label));
+        Assert.Equal(new[] { "Profile used last", "Ann", "Bo" }, panel.Choices.Select(c => c.Label));
         m.Choose(new SettingPick.AlwaysStartAs(), 2);
         Assert.Equal(8L, account.StartAs);
         Assert.Equal("Bo", Row(m, SettingsCategory.Profile, "row-start-as").Value);

@@ -43,6 +43,7 @@ sub init()
     m.menu = m.top.findNode("menu")
     m.choices = m.top.findNode("choices")
     m.info = m.top.findNode("info")
+    m.messageText.text = t("common.states.loading")
     ' What the panel shows: "" (closed), a menu ("more", "tracks"), the
     ' choices of one of its entries ("rating", "version", "audio",
     ' "subtitles") or the media info ("info"); the menu Back goes back to
@@ -58,6 +59,8 @@ sub init()
     m.fileId = invalid
     m.audioPick = -2
     m.started = false
+    ' A first load failed for a title gone (404): its button is Back.
+    m.messageGone = false
     ' The scene's titleChanges this page has shown.
     m.titlesSeen = 0
     ' What the server says of requests for the title (GET
@@ -184,14 +187,14 @@ sub onDetail(event as object)
 end sub
 
 sub showFailure(answer as object)
-    gone = answer.status = 404
-    m.messageTitle.text = "Couldn't load this item"
+    m.messageGone = answer.status = 404
+    m.messageTitle.text = t("titles.page.loadFailed")
     typeSet(m.messageText, answer.message)
-    m.messageButton.buttons = ["Retry"]
-    if gone
-        m.messageTitle.text = "Item not found"
-        m.messageText.text = "It may have been removed, or this profile can't see it."
-        m.messageButton.buttons = ["Back"]
+    m.messageButton.buttons = [t("common.actions.retry")]
+    if m.messageGone
+        m.messageTitle.text = t("titles.page.notFound")
+        m.messageText.text = t("titles.page.notFoundHint")
+        m.messageButton.buttons = [t("common.actions.back")]
     end if
     m.messageButton.visible = true
     m.message.visible = true
@@ -200,12 +203,12 @@ end sub
 
 ' Retry asks again, Loading… meanwhile; Back leaves.
 sub onMessageButton()
-    if m.messageButton.buttons[0] = "Back"
+    if m.messageGone
         uiNavigate({ back: true })
         return
     end if
     m.messageTitle.text = ""
-    m.messageText.text = "Loading…"
+    m.messageText.text = t("common.states.loading")
     m.messageButton.visible = false
     m.top.setFocus(true)
     askDetail()
@@ -432,7 +435,7 @@ sub onEpisodes(event as object)
     m.episodes.content = root
     if keep > 0 and keep < count then m.episodes.jumpToRowItem = [0, keep]
     m.episodesNote.text = ""
-    if count = 0 then m.episodesNote.text = "No episodes found."
+    if count = 0 then m.episodesNote.text = t("titles.seasons.noEpisodes")
     for i = 0 to m.seasons.Count() - 1
         if m.seasons[i].itemId = seasonId then m.tabs.current = i
     end for
@@ -456,7 +459,7 @@ function seasonTitleOf(seasonId as dynamic) as string
         return title
     end if
     if m.item <> invalid and httpString(m.item.kind) = "season" then return contentSeasonTitle(m.item)
-    return "Episodes"
+    return t("browse.title.episodes")
 end function
 
 ' A tab the focus rests on shows its season; OK shows it at once.
@@ -522,8 +525,8 @@ sub askRows(request as object, answer as object, kind as string)
     end if
     path = "/api/items/" + urlValue(m.item.id)
     if kind = "movie" or kind = "show"
-        uiRequest({ method: "GET", path: path + "/related", query: { limit: 20 }, build: "tiles", row: "related", title: "More like this" }, "onRow")
-        uiRequest({ method: "GET", path: path + "/collections", build: "collections", row: "collections", title: "Collections" }, "onRow")
+        uiRequest({ method: "GET", path: path + "/related", query: { limit: 20 }, build: "tiles", row: "related", title: t("titles.page.rows.moreLikeThis") }, "onRow")
+        uiRequest({ method: "GET", path: path + "/collections", build: "collections", row: "collections", title: t("titles.page.rows.collections") }, "onRow")
     end if
     showRows()
 end sub
@@ -665,7 +668,7 @@ sub placeLower()
 end sub
 
 ' The parts the focus can go to, top to bottom.
-function areas() as object
+function focusAreas() as object
     out = ["hero"]
     if hasTabs() then out.Push("tabs")
     if hasEpisodes() then out.Push("episodes")
@@ -676,7 +679,7 @@ end function
 ' The part above or below the one with the focus (delta -1 or 1), "" for
 ' none.
 function areaBeside(delta as integer) as string
-    list = areas()
+    list = focusAreas()
     for i = 0 to list.Count() - 1
         if list[i] = m.area
             if i + delta >= 0 and i + delta < list.Count() then return list[i + delta]
@@ -692,7 +695,7 @@ sub focusArea(area as string)
     else if area <> "hero"
         ' A part gone meanwhile (a season without episodes): the buttons.
         found = false
-        for each other in areas()
+        for each other in focusAreas()
             if other = area then found = true
         end for
         if not found then area = "hero"
@@ -855,7 +858,7 @@ sub onButton(event as object)
         uiNavigate({ to: "player", params: params })
     else if action = "playNext" or action = "nextFromStart"
         if m.onDeck = invalid
-            uiToast("Nothing to play")
+            uiToast(t("titles.nothingToPlay"))
             return
         end if
         tile = contentTile(m.onDeck, m.global.session.server, true)
@@ -910,7 +913,7 @@ sub openMore()
     for each entry in m.detail.more
         labels.Push(entry.label)
     end for
-    showMenu("more", "More", labels)
+    showMenu("more", t("common.actions.more"), labels)
 end sub
 
 ' A menu; the entry in focus stays in focus as it shows again.
@@ -963,7 +966,7 @@ end sub
 sub showInfo()
     m.panelKind = "info"
     m.panelBack = "more"
-    m.panelTitle.text = "Media info"
+    m.panelTitle.text = t("titles.page.mediaInfo")
     typeSet(m.info, mediaInfoText(m.item))
     m.menu.visible = false
     m.choices.visible = false
@@ -978,7 +981,7 @@ end sub
 sub showAbout()
     m.panelKind = "info"
     m.panelBack = "more"
-    m.panelTitle.text = "Details"
+    m.panelTitle.text = t("titles.page.about")
     typeSet(m.info, contentAbout(m.item, CreateObject("roDateTime").AsSeconds(), fmtZoneSeconds()))
     m.menu.visible = false
     m.choices.visible = false
@@ -1013,7 +1016,7 @@ sub onMenu(event as object)
             labels.Push(contentStarsLabel(stars))
             values.Push(stars)
         end for
-        showChoices("rating", "Your rating", labels, values, m.detail.stars, "more")
+        showChoices("rating", t("titles.page.yourRating"), labels, values, m.detail.stars, "more")
         return
     end if
     if action = "info"
@@ -1077,19 +1080,19 @@ sub openTracks()
     labels = []
     m.trackKinds = []
     if versions.values.Count() > 1
-        labels.Push("Version: " + versions.labels[versions.current])
+        labels.Push(t("titles.page.versionIs", { value: versions.labels[versions.current] }))
         m.trackKinds.Push("version")
     end if
     if tracks.audio.labels.Count() > 0
-        labels.Push("Audio: " + tracks.audio.labels[tracks.audio.current])
+        labels.Push(t("titles.page.audioIs", { value: tracks.audio.labels[tracks.audio.current] }))
         m.trackKinds.Push("audio")
     end if
     if tracks.subtitles.labels.Count() > 0
-        labels.Push("Subtitles: " + tracks.subtitles.labels[tracks.subtitles.current])
+        labels.Push(t("titles.page.subtitlesIs", { value: tracks.subtitles.labels[tracks.subtitles.current] }))
         m.trackKinds.Push("subtitles")
     end if
     if m.trackKinds.Count() > 1
-        showMenu("tracks", "Audio and subtitles", labels)
+        showMenu("tracks", t("titles.actions.audioAndSubtitles"), labels)
     else if m.trackKinds.Count() = 1
         openTrackChoices(m.trackKinds[0], "")
     end if
@@ -1098,14 +1101,14 @@ end sub
 sub openTrackChoices(kind as string, back as string)
     if kind = "version"
         versions = mediaVersions(m.item, m.fileId)
-        showChoices("version", "Version", versions.labels, versions.values, versions.current, back)
+        showChoices("version", t("titles.page.version"), versions.labels, versions.values, versions.current, back)
         return
     end if
     tracks = mediaTracks(playingFile())
     if kind = "audio"
-        showChoices("audio", "Audio", tracks.audio.labels, tracks.audio.values, tracks.audio.current, back)
+        showChoices("audio", t("titles.page.audio"), tracks.audio.labels, tracks.audio.values, tracks.audio.current, back)
     else
-        showChoices("subtitles", "Subtitles", tracks.subtitles.labels, tracks.subtitles.values, tracks.subtitles.current, back)
+        showChoices("subtitles", t("titles.page.subtitles"), tracks.subtitles.labels, tracks.subtitles.values, tracks.subtitles.current, back)
     end if
 end sub
 

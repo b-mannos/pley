@@ -7,6 +7,8 @@ sub init()
     m.count = m.top.findNode("count")
     m.entries = m.top.findNode("entries")
     m.message = m.top.findNode("message")
+    m.message.text = t("common.states.loading")
+    typeSet(m.top.findNode("title"), t("browse.history.title"))
     m.started = false
     m.content = CreateObject("roSGNode", "ContentNode")
     m.entries.content = m.content
@@ -44,7 +46,7 @@ end sub
 ' Retry, after the history couldn't load.
 sub onRetry()
     m.message.title = ""
-    m.message.text = "Loading…"
+    m.message.text = t("common.states.loading")
     m.message.action = ""
     m.top.setFocus(true)
     loadMore()
@@ -62,9 +64,9 @@ sub onPage(event as object)
     if not answer.ok
         ' With nothing listed, the page says so, with Retry, as on Android TV.
         if m.content.getChildCount() = 0 and not uiFailed(answer)
-            m.message.title = "Couldn't load your watch history"
+            m.message.title = t("browse.history.failed")
             typeSet(m.message, answer.message)
-            m.message.action = "Retry"
+            m.message.action = t("common.actions.retry")
             if m.top.hasFocus() or m.message.isInFocusChain() then m.message.setFocus(true)
         end if
         return
@@ -78,7 +80,7 @@ sub onPage(event as object)
     if rows <> invalid and rows.getChildCount() > 0 then m.content.appendChildren(rows.getChildren(-1, 0))
     showCount()
     if m.content.getChildCount() = 0
-        m.message.text = "No history yet. Movies, episodes and songs you finish show up here."
+        m.message.text = t("browse.history.empty")
         return
     end if
     m.message.visible = false
@@ -86,11 +88,7 @@ sub onPage(event as object)
 end sub
 
 sub showCount()
-    if m.total = 1
-        m.count.text = "1 play"
-    else if m.total >= 0
-        typeSet(m.count, urlValue(m.total) + " plays")
-    end if
+    if m.total >= 0 then typeSet(m.count, t("browse.counts.plays", { count: m.total }))
 end sub
 
 sub onFocused(event as object)
@@ -130,7 +128,7 @@ sub onRemoved(event as object)
             if i < focused then focused = focused - 1
         end if
     end for
-    uiToast("Removed “" + httpSentence(spec.title) + "”")
+    uiToast(t("browse.history.removed", { title: httpSentence(spec.title) }))
     count = m.content.getChildCount()
     if count > 0
         if focused >= count then focused = count - 1
@@ -141,7 +139,7 @@ sub onRemoved(event as object)
     m.offset = m.offset - 1
     showCount()
     if m.content.getChildCount() = 0
-        m.message.text = "No history yet. Movies, episodes and songs you finish show up here."
+        m.message.text = t("browse.history.empty")
         m.message.visible = true
         m.top.setFocus(true)
     end if

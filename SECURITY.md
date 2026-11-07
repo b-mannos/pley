@@ -154,6 +154,34 @@ protect your server.
 - Switching from a restricted profile to one that can see more (an
   administrator, a higher age limit, other libraries) takes that profile's
   PIN, or its password (and code).
+- A remote casting to a device of another of the household's profiles
+  switches that device to its own profile, signed in as it already, by a
+  switch's rules from the device's profile: a freer profile (an
+  administrator, a higher age limit, other libraries) takes its PIN and,
+  without one, can't cast there, so a child's device never becomes an
+  administrator's without that PIN. An administrator's profile is cast
+  only to Pley's apps, whose tokens never carry administrator rights,
+  never to a browser's or the desktop app's sign-in, which would stay one
+  with those rights, and such a sign-in never switches to an
+  administrator with a ticket. When the profile has a PIN, the remote
+  gives it first, checked and throttled as a switch's, and the rules are
+  checked again as the device switches. Only devices whose app switches
+  (Pley's own, allowed to switch profiles) are offered across profiles,
+  so an older app never plays someone else's cast as its own profile. The
+  device switches with a ticket the cast carries: random, stored hashed,
+  good once for 60 seconds for that device, from the profile it is on to
+  the caster's. A copy shown by anything else spends it. Such a cast goes
+  to the device the remote listed or to none, and reaches that device's
+  stream alone, not the profile's other devices. A receiver is its
+  device's: another sign-in of the profile that names a TV's receiver id
+  is listed beside the TV, never in its place, whether the TV is there or
+  comes back later, and never gets what is cast to the TV. A progress
+  report of another profile's session is kept for neither profile. Another
+  profile's devices are listed by name and profile, never with what they
+  play, and only to home members of the same household, from a person's
+  own sign-in or Pley's own apps allowed to switch profiles (another app
+  could take a TV over as its profile), nor are anyone's devices outside
+  it, or a disabled profile's, listed or cast to from it.
 
 ### Apps signing in
 
@@ -241,8 +269,11 @@ other apps (`pley_ct_…`), never with a session's
   taken away takes them at once. Each is checked by name where it applies:
   no token is ever an administrator. No scope administers accounts, sign-in
   or the server's settings, and the Jellyfin-compatible API takes every token
-  for what `play` allows: it lists no one but the caller, and a user id in
-  a path must be its own.
+  for what `play` allows, and one with `manage` for collections and editing
+  metadata: it lists no one but the caller, a user id in a path must be its
+  own, and a playlist is its owner's alone. A picture it is sent to fetch
+  must be on one of the hosts Pley takes pictures from, as on the
+  Plex-compatible API.
 - A token may be limited to addresses and networks (or the home network).
   From elsewhere it is refused as if it didn't exist; the address is the
   connection's, or the one a proxy on this computer or its network names
@@ -253,9 +284,10 @@ other apps (`pley_ct_…`), never with a session's
   or token) or paths it alone has reach it; `/api/…` never does. Answers
   are never pages (a sandboxing `Content-Security-Policy`, `nosniff`, no
   framing), and vary with the headers that decide for caches.
-- Players open streams, subtitles and pictures without a token. A
-  stream's HLS session is reached by its 128-bit id, and a Jellyfin media
-  source by an id keyed with the server's `secret.key` (an HMAC): either
+- Players open streams, subtitles, seek previews and pictures without a
+  token. A stream's HLS session is reached by its 128-bit id, and a
+  Jellyfin media source by an id keyed with the server's `secret.key` (an
+  HMAC): either
   stands for the token that started or listed it, and works only while that
   token does, from where it may be used, for what its user may see. A
   Jellyfin picture answers for an id someone was given, and with a token
@@ -338,7 +370,8 @@ other apps (`pley_ct_…`), never with a session's
 ### Files
 
 - A symbolic link in a library is followed only to a file of the same kind
-  (a video to a video, a picture to a picture). This is checked when the
+  (a video to a video, a picture to a picture, an NFO file to an NFO
+  file). This is checked when the
   library is scanned and again whenever the file is used: played,
   transcoded, downloaded, or its pictures or subtitles served. A symbolic
   link named like a film can't hand out other files.
@@ -381,6 +414,11 @@ other apps (`pley_ct_…`), never with a session's
   streams do, up to 1 MB for a logo and 4 MB for a picture, and are kept
   only when they are JPEG, PNG, WebP or GIF.
 - A profile picture is decoded only up to 4096 pixels.
+- NFO files are read up to 1 MiB, as XML with no DTD and none but XML's
+  own entities. What they say is bounded (500 characters for a title,
+  20,000 for a summary, 50 genres, 100 entries a file) and ids are checked
+  for their shape. Addresses in them, pictures' included, are never
+  fetched.
 - Subtitles from OpenSubtitles come over HTTPS only, never redirected to
   plain HTTP.
 - A file's attached fonts (for burned-in ASS subtitles) are taken up to

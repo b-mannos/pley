@@ -10,7 +10,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import app.pley.android.auth.AuthEvent
-import app.pley.android.common.describe
+import app.pley.android.common.errorSentence
+import app.pley.android.common.resolve
 import app.pley.android.data.Loadable
 import app.pley.android.data.OtherDevice
 import app.pley.android.data.RemoteRepository
@@ -77,7 +78,7 @@ class PhoneShellState internal constructor(
     /** What Play on…'s chooser sends, while it shows ([playOn]); `null` while it doesn't. */
     internal var playingOn: CastTarget? by mutableStateOf(null)
 
-    /** The device the remote was last asked to open on ([openRemote]). */
+    /** What the remote was last asked: to open ([openRemote]), or to follow a cast ([castSent]). */
     internal var remoteAsked: RemoteAsk? by mutableStateOf(null)
         private set
 
@@ -86,8 +87,16 @@ class PhoneShellState internal constructor(
         playingOn = target
     }
 
-    /** The remote opens on [deviceId], its controls showing once what it was sent plays. */
-    internal fun openRemote(deviceId: String) {
+    /** The remote opens on "Your devices". */
+    internal fun openRemote() {
+        remoteAsked = RemoteAsk()
+    }
+
+    /**
+     * This phone sent [deviceId] something to play (Play on…): the remote's
+     * bar says it starts there, then what plays, and opens its controls.
+     */
+    internal fun castSent(deviceId: String) {
         remoteAsked = RemoteAsk(deviceId)
     }
 
@@ -128,9 +137,9 @@ class PhoneShellState internal constructor(
             )
             error is OfflineException -> {
                 offlineState.value = true
-                toasts.show(sentence(describe(error)), error = true)
+                toasts.show(errorSentence(error).resolve(resources), error = true)
             }
-            else -> toasts.show(sentence(describe(error)), error = true)
+            else -> toasts.show(errorSentence(error).resolve(resources), error = true)
         }
     }
 
@@ -162,7 +171,7 @@ class PhoneShellState internal constructor(
     /** The sign-in module ended a sign-in: if it was this server's, back to signing in to it, saying why. */
     internal fun on(event: AuthEvent) {
         when (event) {
-            is AuthEvent.SignedOut -> if (signedOut(event.issuer)) toasts.show(sentence(event.reason.message), error = true)
+            is AuthEvent.SignedOut -> if (signedOut(event.issuer)) toasts.show(sentence(event.reason.text.resolve(resources)), error = true)
         }
     }
 

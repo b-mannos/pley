@@ -38,6 +38,8 @@ sub init()
     m.panelTitle = m.top.findNode("panelTitle")
     m.whole = m.top.findNode("whole")
     m.poll = m.top.findNode("poll")
+    m.credit.text = t("requests.credit")
+    m.message.text = t("common.states.loading")
     ' The title as the server sent it (DiscoverDetail), and as the page
     ' shows it (reqTitlePage's).
     m.detail = invalid
@@ -161,7 +163,7 @@ sub showDetail()
         m.stageLine.text = ""
     end if
     layoutText()
-    if overviewCut() then reqPushButton(m.shown, "Overview", "overview")
+    if overviewCut() then reqPushButton(m.shown, t("requests.title.overview"), "overview")
     agent = m.top.getScene().getHttpAgent()
     if m.backdrop.uri <> m.shown.backdrop
         m.backdrop.setHttpAgent(agent)
@@ -440,9 +442,9 @@ sub showProblem(problem as object)
     typeSet(m.problemTitle, problem.title)
     typeSet(m.problemText, problem.text)
     buttons = []
-    if problem.signIn then buttons.Push("Sign in")
-    if problem.retry then buttons.Push("Try again")
-    if problem.back then buttons.Push("Back")
+    if problem.signIn then buttons.Push(t("requests.buttons.signIn"))
+    if problem.retry then buttons.Push(t("common.actions.retry"))
+    if problem.back then buttons.Push(t("common.actions.back"))
     m.problemButtons.buttons = buttons
     m.problemButtons.visible = buttons.Count() > 0
     m.problem.visible = true

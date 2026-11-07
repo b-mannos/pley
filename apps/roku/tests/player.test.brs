@@ -88,6 +88,10 @@ sub test_player_says_who_stopped_the_stream()
     tkEqual(playerStoppedMessage({ message: "Disk full" }), "Playback was stopped by the server's administrator." + Chr(10) + "Disk full")
     tkEqual(playerStoppedMessage("<html>"), "Playback was stopped by the server's administrator.")
     tkEqual(playerStoppedMessage({ session_id: "s1", message: invalid, by_admin: false }), "Playback was stopped from another device.", "the event stream says who")
+    i18nUse("fr")
+    tkEqual(playerStoppedMessage({ message: "Disk full" }), "La lecture a été arrêtée par l’administrateur du serveur." + Chr(10) + "Disk full", "the server's words as it wrote them")
+    i18nUse("es")
+    tkEqual(playerStoppedMessage({ by_admin: false }), "La reproducción se detuvo desde otro dispositivo.")
 end sub
 
 sub test_player_leaves_a_stopped_playback_after_saying_why()
@@ -163,6 +167,10 @@ sub test_player_shows_a_skip_button_until_a_second_before_the_end()
     tkEqual(playerActiveMarker(markers, 1250000).key, "credits:1200000")
     tkEqual(playerSkipLabel(markers[0]), "Skip Intro", "in the other apps' words")
     tkEqual(playerSkipLabel(markers[1]), "Skip Credits")
+    i18nUse("fr")
+    tkEqual(playerSkipLabel(markers[1]), "Passer le générique")
+    i18nUse("es")
+    tkEqual(playerSkipLabel(markers[0]), "Saltar intro")
 end sub
 
 sub test_player_leaves_an_episodes_credits_to_up_next()
@@ -225,6 +233,28 @@ sub test_player_says_why_it_converted_a_file()
     tkEqual(playerFallbackNote("struggled"), "The original didn't play smoothly on this Roku.")
     tkEqual(playerFallbackNote(""), "", "the quality's own way")
     tkEqual(playerTranscodeToast("struggled"), "The original didn't play smoothly on this Roku. Play original is in Quality.", "Android TV's words")
+end sub
+
+' Up Next, the menu's Next and the paused band in French and Spanish, as
+' Android TV and the native Samsung app say them; French and Spanish write
+' 24 hours, whatever the Roku's clock.
+sub test_player_in_french_and_spanish()
+    server = "http://pley.test:8096"
+    now = 1700000000
+    i18nUse("fr")
+    tkEqual(playerUpNextCard({ kind: "episode", title: "Half Loop", parent_index: 1, index: 4 }, server).heading, "À suivre · " + fmtEpisode(1, 4))
+    tkEqual(playerUpNextCard({ kind: "movie", title: "Dune" }, server).heading, "À suivre")
+    tkEqual(playerNextIn(7), "Dans 7 s")
+    tkEqual(playerNextLabel(invalid), "Épisode suivant")
+    tkFalse(fmtTwelveHour())
+    tkEqual(playerClockText(20, 5, fmtTwelveHour()), "20:05")
+    tkEqual(playerEndsAt(now, 600000, 3300000, fmtTwelveHour()), "Se termine à " + playerClock(now + 2700, false))
+    tkEqual(playerTranscodeToast("struggled"), "L’original n’était pas fluide sur ce Roku. Pour lire l’original, ouvrez Qualité.")
+    i18nUse("es")
+    tkEqual(playerNextIn(7), "En 7 s")
+    tkEqual(playerNextLabel([{ itemId: 1 }, { itemId: 2 }]), "Siguiente de la lista")
+    tkEqual(playerClockText(9, 5, fmtTwelveHour()), "9:05", "as CLDR writes it")
+    tkEqual(playerFallbackNote("unplayable"), "Este Roku no pudo reproducir el archivo original.")
 end sub
 
 sub test_player_limits_restarts()

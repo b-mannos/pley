@@ -20,7 +20,7 @@ sub onActive()
     if not m.top.active then return
     if m.top.route = "licences"
         if m.text.text = ""
-            m.title.text = "Open-source licences"
+            typeSet(m.title, t("settings.licences"))
             typeSet(m.text, licences())
         end if
         m.text.visible = true
@@ -28,7 +28,7 @@ sub onActive()
         return
     end if
     if m.facts.content = invalid
-        m.title.text = "Diagnostics"
+        typeSet(m.title, t("settings.diagnostics"))
         m.facts.content = nodesContent(diagnostics())
     end if
     m.facts.visible = true
@@ -40,12 +40,12 @@ end sub
 function diagnostics() as object
     session = m.global.session
     device = CreateObject("roDeviceInfo")
-    rows = [heading("This TV")]
-    rows.Push(fact("App", "Pley " + session.appVersion))
-    rows.Push(fact("Model", httpSentence(device.GetModelDisplayName())))
-    rows.Push(fact("Roku OS", httpOsVersion(device.GetOSVersion())))
-    if session.deviceName <> "" then rows.Push(fact("Name", session.deviceName))
-    rows.Push(heading("What it plays"))
+    rows = [heading(t("settings.diagnosticsPage.thisTv"))]
+    rows.Push(fact(t("settings.diagnosticsPage.app"), "Pley " + session.appVersion))
+    rows.Push(fact(t("settings.diagnosticsPage.model"), httpSentence(device.GetModelDisplayName())))
+    rows.Push(fact(t("settings.diagnosticsPage.os"), httpOsVersion(device.GetOSVersion())))
+    if session.deviceName <> "" then rows.Push(fact(t("settings.diagnosticsPage.name"), session.deviceName))
+    rows.Push(heading(t("settings.diagnosticsPage.plays")))
     for each line in capsLines(capsBuild(device))
         rows.Push(factOf(line))
     end for
@@ -61,11 +61,14 @@ function fact(label as string, value as string) as object
 end function
 
 ' A line of what the Roku plays ("HDR: HDR10, Dolby Vision") as its label
-' and its value.
+' and its value; in French, the no-break space before the colon goes with
+' it ("HDR : HDR10").
 function factOf(line as string) as object
     at = Instr(1, line, ": ")
     if at = 0 then return fact("", line)
-    return fact(Left(line, at - 1), Mid(line, at + 2))
+    label = Left(line, at - 1)
+    if Right(label, 1) = Chr(160) then label = Left(label, Len(label) - 1)
+    return fact(label, Mid(line, at + 2))
 end function
 
 function isHeading(row as integer) as boolean
@@ -92,9 +95,8 @@ end sub
 ' Pley's licence, then those of what the package bundles: BrighterScript's
 ' helpers, Lucide's icons and the Roboto font.
 function licences() as string
-    own = "Pley for Roku is free software under the GNU Affero General Public License, version 3 (AGPL-3.0-only)."
-    parts = [own, ReadAsciiFile("pkg:/licenses/bslib.txt")]
-    parts.Push("Lucide's icons" + Chr(10) + Chr(10) + ReadAsciiFile("pkg:/licenses/lucide.txt"))
-    parts.Push("The Roboto font" + Chr(10) + Chr(10) + ReadAsciiFile("pkg:/licenses/roboto.txt"))
+    parts = [t("settings.licence"), ReadAsciiFile("pkg:/licenses/bslib.txt")]
+    parts.Push(t("settings.licencesPage.lucide") + Chr(10) + Chr(10) + ReadAsciiFile("pkg:/licenses/lucide.txt"))
+    parts.Push(t("settings.licencesPage.roboto") + Chr(10) + Chr(10) + ReadAsciiFile("pkg:/licenses/roboto.txt"))
     return parts.Join(Chr(10) + Chr(10))
 end function

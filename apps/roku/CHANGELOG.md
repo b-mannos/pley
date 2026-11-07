@@ -18,49 +18,6 @@ describes how they are made.
   where each video resumes. A video plays in Pley's player with no
   server: its subtitles are its own and the .srt and .vtt files beside
   it, and its place is kept on the Roku.
-- Your phone or browser changes the quality of a film or episode playing
-  on the Roku, as the player's Quality menu does (the pick is kept as the
-  Roku's), and sees which is picked. A film or episode sent with "Play
-  on…" plays with the audio and subtitles picked on its page.
-- Your phone or browser plays a film, an episode, a show, an album, an
-  artist, a track, a playlist or a Live TV channel on the Roku ("Play
-  on…"): it starts as the Roku's own Play would, in place of what plays,
-  and the Roku says "Playing from" the device it came from. It needs an
-  `http://` server, as the rest of the remote does.
-- Your phone or browser changes the audio and subtitles of a film or
-  episode playing on the Roku, as the player's own menu does (a pick is
-  saved for the show or movie), and sees which play. Like the rest of the
-  remote, it needs an `http://` server.
-- Your phone or browser controls what plays on the Roku: a film or
-  episode plays, pauses, seeks and skips, and goes on to the next one;
-  music does the same, and goes back a track; Live TV changes channel.
-  Remotes list the Roku by the name it has in Roku's settings, and need
-  an `http://` server: with `https://`, they offer only Stop. Music
-  stopped from another device or by the server's administrator now stops
-  too, and Live TV stopped that way says who stopped it, with their
-  message.
-- The player's menu (Down) has Subtitles and Audio, listing every track of
-  the file, picture subtitles too, as the other apps' players do. A pick is
-  saved for the show or movie.
-- The player shows the title at the top for a few seconds as each item
-  begins.
-- When the server is out of reach for a moment, the player says
-  "Reconnecting…" and goes on where it was, its queue kept, for up to
-  90 s, where it used to leave for a screen saying the server can't be
-  reached.
-- Home has a hero for the first of Continue Watching, with Resume, From
-  start, Info and the watched mark, and in its rows an info block about
-  the title focus rests on, the backdrop following it, as on the other TVs.
-- Collections, in Home's menu, shows every library's collections, a row
-  each.
-- A title's page says who made it and who is in it ("Directed by …
-  · Starring …"), and its More has Details: the whole summary, the crew,
-  the original title, the release date, the studio or network and how
-  many times it was played.
-- An album's page has Go to artist, and Now playing while music plays;
-  Now Playing's scrubber, Up from its buttons, moves 10 s with Left and
-  Right.
-- A playlist entry's Options key goes to its title's page.
 - In the live player, OK and the Options key open the channel list, at
   the right, as on the other TVs; holding OK shows what's on with
   Channels and Add to (or Remove from) favourites.
@@ -71,9 +28,6 @@ describes how they are made.
   its details in a panel at the right: its picture, episode, day and
   times with On now, Live, New and its rating, how far it is, what the
   guide says, then Watch now and the favourite, which changes in place.
-- The requests' tabs say how many each holds, and Discover's way to the
-  requests how many wait there, in red while some couldn't be sent.
-- A Discover grid whose next page fails ends in a tile to try again.
 - A show's page has season tabs and a row of its episodes, opening on the
   next episode's season with the focus on it, as on the other TVs; a
   season has a page of its own.
@@ -117,45 +71,14 @@ describes how they are made.
   and backdrops fade into the page. Live TV's tabs and lists have icons.
   Titles in scripts Roboto's files lack are drawn in Roku's own font.
 - Settings' Licences lists Lucide's icons and the Roboto font.
-- Requests: a sign-in from before the app could ask says "Sign in again to ask for movies
-  and shows" without a second line, and its button reads Sign in.
-- Up Next waits at the end of an episode once cancelled, or when the next
-  episode doesn't play by itself, where the player used to leave.
-- A video that stands still for 12 s is converted or opened again, and the
-  player says when the server can't convert it fast enough.
-- A title the server refuses to play offers Try again where asking again
-  may help.
-- Playback details stay up to date while they show.
 - Home's menu is in the other TVs' order: Search, Home, one way into
   requests (Discover where the profile may ask, else the requests) with
   its number, Live TV, the libraries, Playlists, Collections, Now
   Playing, then Settings.
-- Home with nothing to show says why: no libraries yet, a scan under way,
-  or nothing in them yet.
-- Live TV opens at the last channel watched, after a restart too.
-- Back in Live TV's guide goes back to now first, and from a search to the
-  category before, then to the categories; Clear in the search goes back
-  to the category before too.
-- A Live TV channel that fails is tuned again after 1 s and then 3 s
-  before the player says why.
-- A page of channels or a part of the guide that didn't load is asked for
-  again; with nothing to show, Live TV offers Try again.
-- What's on in Live TV and in the live player moves on as programmes end.
 - When a Live TV channel doesn't play, a card shows its logo, a row for
   each connection in use with its own Watch here instead, then Try again,
   Other channels and Back to the guide; when none can be taken over, it
   says what can be done instead.
-- When trending has nothing the profile may ask for, Discover's hero is
-  the first title of the next row that has one.
-- Search's Discover row looks through up to 3 of TMDB's pages for up to
-  20 titles the libraries lack, so it no longer goes missing when TMDB's
-  first page is all in the libraries.
-- Without the event stream, the requests and Discover's Your requests are
-  asked again every 30 s.
-- Ready-to-watch news shows in a card at the bottom right with the
-  title's poster, Open and Close, once the remote rests, as on the other
-  TVs. It gives the focus back when closed, goes by itself after 10 s,
-  and never shows on the requests.
 - What an action did, or why it didn't work, shows in a toast at the top
   right that goes by itself, as on the other TVs, where a dialog used to
   wait for OK. A cast's "Playing from …" shows there too.
@@ -235,22 +158,9 @@ describes how they are made.
 - Diagnostics lists its facts in label and value columns under This TV
   and What it plays.
 - "Can't reach your server" says why, and offers Retry and Switch server.
-- A movie or show in Discover or Search's Discover row that a library has
-  whole opens its library page, where it plays, not a page with only Open
-  on it.
 
 ### Fixed
 
-- Live TV's Up or Down, still finding the next channel when another is
-  picked from the list, no longer changes channel a moment later.
-- A video resumed past the end of what its file holds is converted or
-  opened again, instead of being counted as watched.
-- The server hears of a seek at once, so the title resumes from there on
-  other devices.
-- Chapters are offered in the player's menu only for a file with two or
-  more.
-- Choosing a Live TV category or searching takes the focus to its
-  channels.
 - Choosing a saved server, Switch server included, asks who's watching
   and the profile's PIN, as starting the app does, where it used to open
   Home past the PIN.
@@ -275,6 +185,150 @@ describes how they are made.
 - Search this network asks only a private network's addresses, never a
   provider's shared ones, reads at most 4 KB of each answer, and keeps a
   server's id only as letters, digits and dashes.
+
+## [0.1.7] - 2026-11-06
+
+### Added
+
+- Pley for Roku is in French and Spanish as well as English: your
+  account's language, else the one picked on the Roku, else the Roku's,
+  else the server's. Settings → Language picks your account's, on all
+  your devices, or Automatic; on a server from before languages, which
+  can't keep your account's, it keeps your choice on this Roku. Dates,
+  times, numbers and counts follow the language, and the app starts in
+  the one it showed last.
+- A globe at the bottom right of Choose your server, and at the top right
+  of the sign-in code, picks the Roku's language before anyone signs in:
+  Automatic (the Roku's own), English, Français or Español.
+- "Play on…" from someone else's profile in your household plays on the
+  Roku as their profile: the Roku switches to it first, without asking
+  its PIN (the phone or browser did). What was playing stops first, and
+  where it got to is saved for the profile that was watching. When the
+  switch can't be made, the Roku says so and plays nothing.
+
+### Changed
+
+- The Roku starts straight into Home as the profile it was left on when it
+  has no PIN, where a household of several profiles was asked "Who's
+  watching?" each time. A profile with a PIN still asks first, and Switch
+  profile still shows every profile. Settings' Always start as
+  calls this Profile used last, where it said Ask who's watching.
+- A pause from your phone or browser no longer brings up Roku's controls
+  on the TV: the player says what the remote did for a moment at the top
+  ("Paused", "Playing", "+30 s", "Jumped to 12:34", the audio, subtitles
+  or quality picked). Your own key brings the controls back.
+
+## [0.1.6] - 2026-11-05
+
+### Added
+
+- Your phone or browser changes the quality of a film or episode playing
+  on the Roku, as the player's Quality menu does (the pick is kept as the
+  Roku's), and sees which is picked. A film or episode sent with "Play
+  on…" plays with the audio and subtitles picked on its page.
+- Your phone or browser plays a film, an episode, a show, an album, an
+  artist, a track, a playlist or a Live TV channel on the Roku ("Play
+  on…"): it starts as the Roku's own Play would, in place of what plays,
+  and the Roku says "Playing from" the device it came from. It needs an
+  `http://` server, as the rest of the remote does.
+- Your phone or browser changes the audio and subtitles of a film or
+  episode playing on the Roku, as the player's own menu does (a pick is
+  saved for the show or movie), and sees which play. Like the rest of the
+  remote, it needs an `http://` server.
+- Your phone or browser controls what plays on the Roku: a film or
+  episode plays, pauses, seeks and skips, and goes on to the next one;
+  music does the same, and goes back a track; Live TV changes channel.
+  Remotes list the Roku by the name it has in Roku's settings, and need
+  an `http://` server: with `https://`, they offer only Stop. Music
+  stopped from another device or by the server's administrator now stops
+  too, and Live TV stopped that way says who stopped it, with their
+  message.
+- The player's menu (Down) has Subtitles and Audio, listing every track of
+  the file, picture subtitles too, as the other apps' players do. A pick is
+  saved for the show or movie.
+- The player shows the title at the top for a few seconds as each item
+  begins.
+- When the server is out of reach for a moment, the player says
+  "Reconnecting…" and goes on where it was, its queue kept, for up to
+  90 s, where it used to leave for a screen saying the server can't be
+  reached.
+- Home has a hero for the first of Continue Watching, with Resume, From
+  start, Info and the watched mark, and in its rows an info block about
+  the title focus rests on, the backdrop following it, as on the other TVs.
+- Collections, in Home's menu, shows every library's collections, a row
+  each.
+- A title's page says who made it and who is in it ("Directed by …
+  · Starring …"), and its More has Details: the whole summary, the crew,
+  the original title, the release date, the studio or network and how
+  many times it was played.
+- An album's page has Go to artist, and Now playing while music plays;
+  Now Playing's scrubber, Up from its buttons, moves 10 s with Left and
+  Right.
+- A playlist entry's Options key goes to its title's page.
+- The live player's Options key adds the channel playing to the
+  favourites or takes it out.
+- The live player's channel list shows another category or a search, and
+  a channel chosen there makes channel up and down go through that one.
+- The Options key on a programme in Live TV's guide, or on a card, shows
+  its details.
+- The requests' tabs say how many each holds, and Discover's way to the
+  requests how many wait there, in red while some couldn't be sent.
+- A Discover grid whose next page fails ends in a tile to try again.
+
+### Changed
+
+- Requests: a sign-in from before the app could ask says "Sign in again to ask for movies
+  and shows" without a second line, and its button reads Sign in.
+- Up Next waits at the end of an episode once cancelled, or when the next
+  episode doesn't play by itself, where the player used to leave.
+- A video that stands still for 12 s is converted or opened again, and the
+  player says when the server can't convert it fast enough.
+- A title the server refuses to play offers Try again where asking again
+  may help.
+- Playback details stay up to date while they show.
+- Home's menu is in the other TVs' order: Search, Home, Discover and the
+  requests, Live TV, the libraries, Playlists, Collections, Now Playing,
+  then Settings.
+- Home with nothing to show says why: no libraries yet, a scan under way,
+  or nothing in them yet.
+- Live TV opens at the last channel watched, after a restart too.
+- Back in Live TV's guide goes back to now first, and from a search to the
+  category before, then to the categories; Clear in the search goes back
+  to the category before too.
+- A Live TV channel that fails is tuned again after 1 s and then 3 s
+  before the player says why.
+- A page of channels or a part of the guide that didn't load is asked for
+  again; with nothing to show, Live TV offers Try again.
+- What's on in Live TV and in the live player moves on as programmes end.
+- When every connection is in use and none can be taken over, the notice
+  says what can be done instead.
+- When trending has nothing the profile may ask for, Discover's hero is
+  the first title of the next row that has one.
+- Search's Discover row looks through up to 3 of TMDB's pages for up to
+  20 titles the libraries lack, so it no longer goes missing when TMDB's
+  first page is all in the libraries.
+- Without the event stream, the requests and Discover's Your requests are
+  asked again every 30 s.
+- Ready-to-watch news shows in a card at the bottom right with the
+  title's poster, Open and Close, once the remote rests, as on the other
+  TVs. It gives the focus back when closed, goes by itself after 10 s,
+  and never shows on the requests.
+- A movie or show in Discover or Search's Discover row that a library has
+  whole opens its library page, where it plays, not a page with only Open
+  on it.
+
+### Fixed
+
+- Live TV's Up or Down, still finding the next channel when another is
+  picked from the list, no longer changes channel a moment later.
+- A video resumed past the end of what its file holds is converted or
+  opened again, instead of being counted as watched.
+- The server hears of a seek at once, so the title resumes from there on
+  other devices.
+- Chapters are offered in the player's menu only for a file with two or
+  more.
+- Choosing a Live TV category or searching takes the focus to its
+  channels.
 
 ## [0.1.5] - 2026-11-04
 
@@ -524,7 +578,9 @@ describes how they are made.
 - First release with a version of its own (builds before it carried 0.2.0,
   the version every app shared).
 
-[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-04...HEAD
+[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-06...HEAD
+[0.1.7]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-06
+[0.1.6]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-05
 [0.1.5]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-04
 [0.1.4]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-03
 [0.1.3]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-02.2

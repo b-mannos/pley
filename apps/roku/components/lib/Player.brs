@@ -111,12 +111,12 @@ end function
 ' whether that was an administrator (by_admin); a 410 doesn't, and is
 ' taken for one.
 function playerStoppedMessage(body as dynamic) as string
-    text = "Playback was stopped by the server's administrator."
+    text = t("player.errors.stoppedByAdmin")
     data = invalid
     data = httpObject(httpJson(body))
     if GetInterface(body, "ifAssociativeArray") <> invalid then data = body
     if data <> invalid
-        if GetInterface(data.by_admin, "ifBoolean") <> invalid and not data.by_admin then text = "Playback was stopped from another device."
+        if GetInterface(data.by_admin, "ifBoolean") <> invalid and not data.by_admin then text = t("player.errors.stoppedElsewhere")
         message = httpSentence(data.message)
         if message <> "" then text = text + Chr(10) + message
     end if
@@ -187,8 +187,8 @@ end function
 
 ' In the other apps' words.
 function playerSkipLabel(marker as object) as string
-    if marker.kind = "credits" then return "Skip Credits"
-    return "Skip Intro"
+    if marker.kind = "credits" then return t("player.skip.credits")
+    return t("player.skip.intro")
 end function
 
 ' Where skipping lands, in ms: just before an intro ends, so its last
@@ -222,7 +222,7 @@ end function
 ' summary or details; until they are known, the card has the title and
 ' still of the queue's entry (Content.brs's contentUpNext).
 function playerUpNextCard(item as dynamic, server as string, entry = invalid as dynamic) as object
-    card = { heading: "Up next", title: "", image: "" }
+    card = { heading: t("player.upNext.title"), title: "", image: "" }
     if entry <> invalid
         card.title = httpString(entry.title)
         card.image = httpString(entry.image)
@@ -232,7 +232,7 @@ function playerUpNextCard(item as dynamic, server as string, entry = invalid as 
     card.title = httpSentence(data.title)
     if httpString(data.kind) = "episode"
         code = fmtEpisode(data.parent_index, data.index)
-        if code <> "" then card.heading = "Up next · " + code
+        if code <> "" then card.heading = t("player.upNext.episode", { episode: code })
     end if
     for each key in ["thumb_url", "backdrop_url", "poster_url"]
         url = urlImage(server, data[key], 640)
@@ -251,14 +251,14 @@ end function
 
 ' "Next in 7", beside Play now while Up Next counts down.
 function playerNextIn(seconds as integer) as string
-    return "Next in " + seconds.ToStr()
+    return t("player.upNext.nextIn", { seconds: seconds })
 end function
 
 ' The menu's entry for what comes next, as Android TV's Next plays it: a
 ' playlist's or collection's next entry, else the next episode.
 function playerNextLabel(queue as dynamic) as string
-    if GetInterface(queue, "ifArray") <> invalid then return "Next in the queue"
-    return "Next episode"
+    if GetInterface(queue, "ifArray") <> invalid then return t("player.menu.nextInQueue")
+    return t("player.menu.nextEpisode")
 end function
 
 ' Fast forward and rewind jump 30 s while Skip, Up Next or Pley's menu has
@@ -333,15 +333,14 @@ end function
 ' ended short), "struggled" (it had its data and didn't move); "" for
 ' none.
 function playerFallbackNote(reason as string) as string
-    if reason = "unplayable" then return "This Roku couldn't play the original file."
-    if reason = "struggled" then return "The original didn't play smoothly on this Roku."
+    if reason = "unplayable" or reason = "struggled" then return t("player.fallback." + reason)
     return ""
 end function
 
 ' Said as the conversion of a file that struggled plays, outside Automatic
 ' (whose menu has Original): why, and where the way back is.
 function playerTranscodeToast(reason as string) as string
-    return playerFallbackNote(reason) + " Play original is in Quality."
+    return t("player.fallback.toast", { note: playerFallbackNote(reason) })
 end function
 
 ' How long the playhead may stand still while the video is meant to play
@@ -403,15 +402,12 @@ function playerBannerMs() as integer
 end function
 
 ' A time of day as this Roku writes it: "8:05 PM" on a 12-hour clock,
-' "20:05" on a 24-hour one (roDeviceInfo's GetClockFormat), as the other
-' apps follow their device's.
+' "20:05" on a 24-hour one, as Format.brs's fmtClockText writes it: twelve
+' is fmtTwelveHour's, the Roku's clock (roDeviceInfo's GetClockFormat) in
+' English, 24 hours in French and Spanish, as the other apps follow their
+' device's.
 function playerClockText(hours as integer, minutes as integer, twelve as boolean) as string
-    if not twelve then return fmtTwo(hours) + ":" + fmtTwo(minutes)
-    suffix = " AM"
-    if hours >= 12 then suffix = " PM"
-    shown = hours mod 12
-    if shown = 0 then shown = 12
-    return shown.ToStr() + ":" + fmtTwo(minutes) + suffix
+    return fmtClockText(hours, minutes, twelve)
 end function
 
 ' seconds (since the epoch) in this Roku's time zone.
@@ -429,5 +425,5 @@ function playerEndsAt(now as integer, positionMs as dynamic, durationMs as dynam
     if duration <= 0 then return ""
     remaining = duration - httpNumber(positionMs, 0)
     if remaining < 0 then remaining = 0
-    return "Ends at " + playerClock(now + Int(remaining / 1000), twelve)
+    return t("player.banner.endsAt", { time: playerClock(now + Int(remaining / 1000), twelve) })
 end function

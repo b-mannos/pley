@@ -10,13 +10,14 @@ sub init()
     m.buttons = m.top.findNode("buttons")
     m.grid = m.top.findNode("grid")
     m.message = m.top.findNode("message")
+    m.message.text = t("common.states.loading")
     m.started = false
     ' How many playlists show, -1 until the server said; what the new
     ' playlist is for ("video", "audio") while it is named.
     m.shown = -1
     m.newKind = ""
     m.lastFocus = m.grid
-    m.buttons.buttons = ["New playlist"]
+    m.buttons.buttons = [t("browse.playlists.new")]
     m.buttons.observeField("buttonSelected", "onNew")
     m.grid.observeField("itemSelected", "onSelected")
     m.message.observeField("chosen", "onRetry")
@@ -26,7 +27,7 @@ end sub
 ' Retry, after the playlists couldn't load.
 sub onRetry()
     m.message.title = ""
-    m.message.text = "Loading…"
+    m.message.text = t("common.states.loading")
     m.message.action = ""
     m.top.setFocus(true)
     load()
@@ -68,9 +69,9 @@ sub onPlaylists(event as object)
     if not answer.ok
         ' The first time, the page says so, with Retry, as on Android TV.
         if m.shown < 0 and not uiFailed(answer)
-            m.message.title = "Couldn't load your playlists"
+            m.message.title = t("titles.playlists.loadFailed")
             typeSet(m.message, answer.message)
-            m.message.action = "Retry"
+            m.message.action = t("common.actions.retry")
             if m.top.hasFocus() then m.message.setFocus(true)
         end if
         return
@@ -83,7 +84,7 @@ sub onPlaylists(event as object)
     if m.shown = 0
         m.message.title = ""
         m.message.action = ""
-        m.message.text = "No playlists yet. Make one with New playlist, or with Add to playlist, the Options key on a title."
+        m.message.text = t("browse.playlists.none")
         m.message.visible = true
         ' With nothing to focus in the grid, New playlist takes it.
         if m.top.hasFocus() or m.grid.hasFocus() then m.buttons.setFocus(true)
@@ -105,9 +106,9 @@ end sub
 
 sub onNew()
     dialog = CreateObject("roSGNode", "StandardMessageDialog")
-    dialog.title = "New playlist"
-    dialog.message = ["What is it for?"]
-    dialog.buttons = ["Movies & TV", "Music", "Cancel"]
+    dialog.title = t("browse.playlists.new")
+    dialog.message = [t("browse.playlists.whatFor")]
+    dialog.buttons = [t("browse.playlists.moviesTv"), t("browse.playlists.music"), t("common.actions.cancel")]
     dialog.observeField("buttonSelected", "onNewKind")
     m.top.getScene().dialog = dialog
 end sub
@@ -119,9 +120,9 @@ sub onNewKind(event as object)
     m.newKind = "video"
     if chosen = 1 then m.newKind = "audio"
     dialog = CreateObject("roSGNode", "StandardKeyboardDialog")
-    dialog.title = "New playlist"
-    dialog.message = ["Name it, then add to it with Add to playlist, the Options key on a title."]
-    dialog.buttons = ["Create", "Cancel"]
+    dialog.title = t("browse.playlists.new")
+    dialog.message = [t("browse.playlists.nameHint")]
+    dialog.buttons = [t("browse.playlists.create"), t("common.actions.cancel")]
     dialog.observeField("buttonSelected", "onNewName")
     m.top.getScene().dialog = dialog
 end sub
@@ -139,7 +140,7 @@ end sub
 sub onMade(event as object)
     answer = event.getData()
     if not answer.ok
-        if not uiFailed(answer) then uiMessage("The playlist wasn't made", [pagePlaylistRefusal(answer)])
+        if not uiFailed(answer) then uiMessage(t("browse.playlists.notMade"), [pagePlaylistRefusal(answer)])
         return
     end if
     playlist = httpObject(answer.data)

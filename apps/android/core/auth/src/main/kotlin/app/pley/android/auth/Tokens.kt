@@ -1,5 +1,6 @@
 package app.pley.android.auth
 
+import app.pley.android.common.UiText
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,7 +54,7 @@ data class TokenResponse(
         private const val DEFAULT_EXPIRES_IN = 3600L
 
         fun parse(text: String, askedScope: String = ""): TokenResponse {
-            val bad = AuthException("the server's answer can't be read: try again")
+            val bad = AuthException(UNREADABLE)
             val o = try {
                 JSONObject(text)
             } catch (_: JSONException) {
@@ -97,12 +98,15 @@ data class OAuthError(val error: String, val description: String?, val reason: S
 internal fun plain(text: String): String =
     text.filter { !Character.isISOControl(it) && Character.getType(it) != Character.FORMAT.toInt() }.trim().take(200)
 
-/** The token endpoint said no. */
+/** An answer of the server's that isn't what it should be. */
+val UNREADABLE: UiText = UiText.res(R.string.auth_unreadable)
+
+/** The token endpoint said no: in its own words when it gave some. */
 class TokenException(val status: Int, val oauth: OAuthError?) :
-    AuthException(oauth?.description ?: oauth?.error ?: "the server refused (HTTP $status)")
+    AuthException((oauth?.description ?: oauth?.error)?.let(UiText::raw) ?: UiText.res(R.string.auth_refused_status, status))
 
 /** The server no longer knows this app's sign-in: the person signs in again. */
-class SignedOutException : AuthException("you were signed out: sign in again")
+class SignedOutException : AuthException(SignOutReason.ENDED.text)
 
 /** The calls to the token and revocation endpoints: forms, no cookies, no secrets, no redirects. */
 internal object TokenEndpoint {
@@ -218,8 +222,11 @@ class Tokens(
     /**
      * Moves the sign-in to another profile of the household (the
      * switch-profile grant of pley's own apps). A wrong PIN changes nothing.
+     * [ticket]: a cast's `switch_ticket`, from a remote on [profile], which
+     * stands for its PIN; spent or expired, the grant refuses it with reason
+     * `ticket_spent`, and nothing changes either.
      */
-    suspend fun switchProfile(profile: Long, pin: String?): Unit = mutex.withLock {
+    suspend fun switchProfile(profile: Long, pin: String?, ticket: String? = null): Unit = mutex.withLock {
         val tokens = load() ?: throw SignedOutException()
         val refresh = tokens.refreshToken ?: signedOut()
         val form = mutableListOf(
@@ -229,6 +236,7 @@ class Tokens(
             "profile" to profile.toString(),
         )
         if (pin != null) form += "pin" to pin
+        if (ticket != null) form += "ticket" to ticket
         proved(tokens, now = true)
         val answer = try {
             TokenEndpoint.post(http, tokens.tokenEndpoint, form)

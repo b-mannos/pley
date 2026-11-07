@@ -26,6 +26,7 @@
         <field id="playerCommand" type="assocarray" alwaysNotify="true" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/screens/LivePlayerScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/I18n.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
@@ -91,7 +92,7 @@
             </Label>
             <!-- The Live chip: live is all there is. -->
             <Rectangle translation="[1648, 710]" width="176" height="52" color="0xEB6B70FF" />
-            <Label translation="[1648, 710]" width="176" height="52" horizAlign="center" vertAlign="center" text="LIVE" color="0xEBEBEBFF">
+            <Label id="liveMark" translation="[1648, 710]" width="176" height="52" horizAlign="center" vertAlign="center" color="0xEBEBEBFF">
                 <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="32" />
             </Label>
             <Label id="star" translation="[1648, 776]" width="176" color="0x38BDF8FF">

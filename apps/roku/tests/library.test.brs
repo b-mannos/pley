@@ -279,6 +279,80 @@ sub test_library_filters_as_a_smart_filter()
     tkEqual(libPlexSort("bitrate"), "mediaBitrate")
 end sub
 
+sub test_library_in_french()
+    i18nUse("fr")
+    nbsp = Chr(160)
+    tkEqual(libTabLabel("recommended"), "Recommandés")
+    tkEqual(libSortLabel("title", "asc"), "Titre, de A à Z")
+    tkEqual(libSortLabel("added", "desc"), "Ajouts récents d’abord")
+    tkEqual(libSortLabel("nonsense", "desc"), "Titre, de Z à A", "a sort this version doesn't know")
+    tkEqual(libSorts("music")[2], { id: "user_rating", label: "Votre note" })
+    view = libDefaultView()
+    labels = []
+    for each chip in libChips(view, "movies", { genres: ["Drame"], years: [1999], resolutions: [], dynamicRanges: [] })
+        labels.Push(chip.label)
+    end for
+    tkEqual(labels, ["Titre, de A à Z", "Filtres", "Non vu", "Genre", "Année"])
+    rows = libFilterRows(view, "movies", { genres: [], years: [], resolutions: ["4k"], dynamicRanges: ["hdr"] })
+    tkEqual(rows[0].title, "Afficher" + nbsp + ": Tous les titres")
+    tkEqual(rows[1].title, "Genre" + nbsp + ": Tous")
+    tkEqual(rows[2].title, "Année" + nbsp + ": Toutes")
+    tkEqual(rows[3].title, "Résolution" + nbsp + ": Toutes", "fewer words in the row than in its list")
+    tkEqual(libQualityChoices(fmtResolutions(), ["4k"], "", t("browse.library.allResolutions")).labels, ["Toutes les résolutions", "4K"])
+    view.watched = "false"
+    view.genre = "Comédie"
+    view.year = 1999
+    view.dynamic_range = "hdr"
+    view.sort = "year"
+    view.order = "desc"
+    labels = []
+    for each chip in libChips(view, "movies", invalid)
+        labels.Push(chip.label)
+    end for
+    tkEqual(labels, ["Année, plus récents d’abord", "Filtres", "Non vu", "Comédie", "1999", "Tout HDR"], "a year isn't grouped as a number")
+    tkEqual(libCountLine(view, "movies", 23, 1234), "23 sur 1" + nbsp + "234 films", "out of the library's count")
+    tkEqual(libCountLine(view, "movies", 1, 1), "1 sur 1 film")
+    row = libCollectionsRow([{ title: "Dune", itemId: 3, kind: "collection" }])
+    tkEqual(row.title, "Collections")
+    tkEqual(row.tiles[1].title, "Tout voir")
+    tkEqual(libSmartFilterWords(view), ["Genre" + nbsp + ": Comédie", "Année" + nbsp + ": 1999", "Tout HDR", "Non vu", "Les plus récents d’abord"])
+end sub
+
+sub test_library_in_spanish()
+    i18nUse("es")
+    tkEqual(libTabLabel("collections"), "Colecciones")
+    tkEqual(libSortLabel("last_played", "desc"), "Recién reproducidos primero")
+    tkEqual(libFilterRows(libDefaultView(), "music", invalid)[1].title, "Género: Todos")
+    view = libDefaultView()
+    tkEqual(libChips(view, "movies", invalid)[2].label, "No visto")
+    view.genre = "Drama"
+    tkEqual(libCountLine(view, "shows", 2, 12), "2 de 12 series")
+    view.genre = ""
+    view.watched = "true"
+    view.sort = "bitrate"
+    view.order = "desc"
+    tkEqual(libSmartFilterWords(view), ["Visto", "Mayor tasa de bits primero"])
+end sub
+
+' The sorts' words are looked up by their names: each has its words in
+' each order, in every language.
+sub test_library_every_sort_has_its_words()
+    for each language in i18nLanguages()
+        i18nUse(language)
+        for each sort in libSorts("movies")
+            tkTrue(Left(sort.label, 7) <> "browse.", language + " " + sort.id)
+            for each order in ["asc", "desc"]
+                tkTrue(Left(libSortLabel(sort.id, order), 7) <> "browse.", language + " " + sort.id + " " + order)
+                view = libDefaultView()
+                view.sort = sort.id
+                view.order = order
+                words = libSmartFilterWords(view)
+                tkTrue(Left(words[words.Count() - 1], 7) <> "browse.", language + " smart filter " + sort.id + " " + order)
+            end for
+        end for
+    end for
+end sub
+
 sub test_library_letters_of_titles()
     letters = libLetters()
     tkEqual(letters.Count(), 27)

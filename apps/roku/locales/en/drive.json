@@ -1,0 +1,19 @@
+{
+  "title": "USB drive",
+  "space": "{{free}} free of {{total}}",
+  "up": "Up a folder",
+  "resumes": "{{kind}} · Resumes at {{time}}",
+  "track": "Track {{number}}",
+  "none": {
+    "title": "No USB drive",
+    "body": "Plug a USB drive into the Roku to play its videos here."
+  },
+  "unreadable": {
+    "title": "This folder can't be read",
+    "body": "The drive may have been pulled out."
+  },
+  "empty": {
+    "title": "Nothing to play here",
+    "body": "This folder has no videos or folders in it."
+  }
+}

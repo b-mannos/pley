@@ -25,12 +25,14 @@ async fn detail(state: &AppState, user_id: i64, id: i64) -> ApiResult<ItemDetail
     let row = item_or_404(state, user_id, id).await?;
     let mut detail = catalog::item_detail(&state.db, row).await?;
     detail.locked_fields = overrides::locked_fields(&state.db, id).await?;
+    detail.nfo_fields = overrides::nfo_fields(&state.db, id).await?;
     detail.in_watchlist = catalog::in_watchlist(&state.db, user_id, id).await?;
     Ok(detail)
 }
 
 /// `{ "title": "Alien", "year": 1979, "summary": null, … }`: a value sets and
 /// locks the field, `null` unlocks it (the next refresh fills it again).
+/// `"match": null` undoes Fix Match, for the item's NFO file to decide it.
 pub async fn edit(
     State(state): State<AppState>,
     AdminUser(user): AdminUser,
@@ -62,6 +64,10 @@ pub async fn edit(
         changes.push((field, value));
     }
     overrides::set(&state.db, id, &changes).await?;
+    // Fix Match undone: the item's NFO file decides its match again.
+    if changes.iter().any(|(field, value)| field == overrides::MATCH && value.is_none()) {
+        crate::library::scanner::nfo_match_dropped(&state.db, id).await?;
+    }
     if changes.iter().any(|(_, v)| v.is_none()) && state.metadata.can_refresh(&row.kind) {
         refresh_later(&state, id, row.library_id);
     }
@@ -69,7 +75,9 @@ pub async fn edit(
     Ok(Json(detail(&state, user.id, id).await?))
 }
 
-fn refresh_later(state: &AppState, id: i64, library_id: i64) {
+/// Fetches item `id`'s metadata again after the answer, as an unlocked field
+/// is filled again.
+pub(crate) fn refresh_later(state: &AppState, id: i64, library_id: i64) {
     let metadata = state.metadata.clone();
     let events = state.events.clone();
     tokio::spawn(async move {
@@ -230,6 +238,21 @@ pub async fn reset_artwork(
 ) -> ApiResult<StatusCode> {
     let row = item_or_404(&state, user.id, id).await?;
     let kind = artwork_kind(&kind)?;
+    reset_picture(&state, id, &row.kind, row.library_id, kind).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Picture `kind` (poster, backdrop or thumb) of item `id`, of `item_kind`
+/// in library `library_id`, goes back to the automatic one: the file's own
+/// or the metadata source's, found again after the answer.
+pub(crate) async fn reset_picture(
+    state: &AppState,
+    id: i64,
+    item_kind: &str,
+    library_id: i64,
+    kind: &str,
+) -> ApiResult<()> {
+    let kind = artwork_kind(kind)?;
     overrides::set(&state.db, id, &[(kind.to_owned(), None)]).await?;
     // `kind` is one of three column names.
     sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE items SET {kind} = NULL, updated_at = ? WHERE id = ?")))
@@ -237,10 +260,10 @@ pub async fn reset_artwork(
         .bind(id)
         .execute(&state.db.write)
         .await?;
-    if state.metadata.can_refresh(&row.kind) {
-        refresh_later(&state, id, row.library_id);
+    if state.metadata.can_refresh(item_kind) {
+        refresh_later(state, id, library_id);
     } else {
-        state.scanner.enqueue(row.library_id, false);
+        state.scanner.enqueue(library_id, false);
     }
-    Ok(StatusCode::NO_CONTENT)
+    Ok(())
 }

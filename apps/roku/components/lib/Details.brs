@@ -88,11 +88,11 @@ end function
 function detMethod(info as object) as string
     method = httpString(info.method)
     if method = "remux"
-        if httpTrue(info.audio_converted) then return "Direct stream · Audio transcoding"
-        return "Direct stream"
+        if httpTrue(info.audio_converted) then return t("titles.playback.method.remuxAudio")
+        return t("titles.playback.method.remux")
     end if
-    if method = "transcode" then return "Transcoding"
-    return "Direct play"
+    if method = "transcode" then return t("titles.playback.method.transcode")
+    return t("titles.playback.method.direct")
 end function
 
 ' The transcoder's "H.264 1920×1080" as "H.264 1080p".
@@ -171,7 +171,7 @@ function detPlayback(info as object, file as dynamic, audioIndex as integer, liv
             end if
             value = value + " → " + out
         end if
-        rows.Push({ label: "Video", value: value })
+        rows.Push({ label: t("titles.playback.video"), value: value })
     end if
     if audio <> invalid
         value = detAudio(audio)
@@ -181,26 +181,35 @@ function detPlayback(info as object, file as dynamic, audioIndex as integer, liv
             if transcode <> invalid and httpString(transcode.audio_out) <> "" then out = httpSentence(transcode.audio_out)
             value = value + " → " + out
         end if
-        rows.Push({ label: "Audio", value: value })
+        rows.Push({ label: t("titles.playback.audio"), value: value })
     end if
     if file <> invalid
         bitrate = fmtBitrate(file.bitrate)
-        if bitrate <> "" then rows.Push({ label: "Bitrate", value: bitrate })
+        if bitrate <> "" then rows.Push({ label: t("titles.playback.bitrate"), value: bitrate })
     end if
     shown = httpSentence(info.video_range)
-    if transcode <> invalid and httpString(transcode.tonemap) <> "" then shown = "SDR (tone-mapped with " + httpSentence(transcode.tonemap) + ")"
-    if video <> invalid and shown <> "" then rows.Push({ label: "Shown as", value: shown })
-    if httpTrue(info.burn_subtitles) then rows.Push({ label: "Subtitles", value: "Burned in" })
+    if transcode <> invalid and httpString(transcode.tonemap) <> "" then shown = t("titles.playback.toneMapped", { method: httpSentence(transcode.tonemap) })
+    if video <> invalid and shown <> "" then rows.Push({ label: t("titles.playback.shownAs"), value: shown })
+    if httpTrue(info.burn_subtitles) then rows.Push({ label: t("titles.playback.subtitles"), value: t("titles.playback.burnedIn") })
     if transcode <> invalid
         speed = httpNumber(transcode.speed, 0)
         if speed > 0
-            value = fmtOneDecimal(speed) + "× real time"
             ahead = Int((httpNumber(transcode.transcoded_ms, 0) - positionMs) / 1000)
-            if ahead > 0 then value = value + " · " + urlValue(ahead) + " s ready"
-            rows.Push({ label: "Speed", value: value })
+            if ahead > 0
+                value = t("titles.playback.realTimeReady", { speed: fmtOneDecimal(speed), seconds: ahead })
+            else
+                value = t("titles.playback.realTime", { speed: fmtOneDecimal(speed) })
+            end if
+            rows.Push({ label: t("titles.playback.speed"), value: value })
         end if
     end if
     return { method: detMethod(info), why: why, rows: rows }
+end function
+
+' A row of the playback's details as a line: "Video: HEVC 4K", "Vidéo :
+' HEVC 4K".
+function detLine(row as object) as string
+    return t("titles.playback.line", { label: row.label, value: row.value })
 end function
 
 ' The readout over the video (Settings → Playback details), as Android
@@ -215,28 +224,28 @@ function detReadout(info as object, file as dynamic, audioIndex as integer, node
     method = httpString(info.method)
     converted = method = "transcode"
     streams = detStreams(info, file, audioIndex)
-    lines = ["Playback: " + detMethod(info)]
+    lines = [detLine({ label: t("player.details.playback"), value: detMethod(info) })]
     if streams.video <> invalid
         value = detVideo(streams.video)
         decoded = detCodec(detNodeCodec(node.videoFormat))
         if converted and decoded <> "" then value = value + " → " + decoded
-        lines.Push("Video: " + value)
+        lines.Push(detLine({ label: t("titles.playback.video"), value: value }))
     end if
     if streams.audio <> invalid
         value = detAudio(streams.audio)
         decoded = detCodec(node.audioFormat)
         if (converted or httpTrue(info.audio_converted)) and decoded <> "" then value = value + " → " + decoded
-        lines.Push("Audio: " + value)
+        lines.Push(detLine({ label: t("titles.playback.audio"), value: value }))
     end if
     subtitles = httpString(node.subtitles)
     if httpTrue(info.burn_subtitles)
         if subtitles = ""
-            subtitles = "Burned in"
+            subtitles = t("titles.playback.burnedIn")
         else
-            subtitles = subtitles + " (burned in)"
+            subtitles = t("player.details.burnedInTrack", { track: subtitles })
         end if
     end if
-    if subtitles <> "" then lines.Push("Subtitles: " + subtitles)
+    if subtitles <> "" then lines.Push(detLine({ label: t("titles.playback.subtitles"), value: subtitles }))
     bitrate = ""
     if file <> invalid then bitrate = fmtBitrate(file.bitrate)
     stream = fmtBitrate(node.streamBps)
@@ -244,9 +253,9 @@ function detReadout(info as object, file as dynamic, audioIndex as integer, node
         if bitrate <> "" then bitrate = bitrate + " → "
         bitrate = bitrate + stream
     end if
-    if bitrate <> "" then lines.Push("Bitrate: " + bitrate)
+    if bitrate <> "" then lines.Push(detLine({ label: t("titles.playback.bitrate"), value: bitrate }))
     network = fmtBitrate(node.networkBps)
-    if network <> "" then lines.Push("Network: " + network)
+    if network <> "" then lines.Push(detLine({ label: t("player.details.network"), value: network }))
     return lines
 end function
 
@@ -280,7 +289,7 @@ end function
 function detChapterName(title as dynamic, number as integer) as string
     name = httpSentence(title).Trim()
     timeOnly = CreateObject("roRegex", "^\d{1,2}(:\d{2}){1,2}([.,]\d+)?$", "")
-    if name = "" or timeOnly.IsMatch(name) then return "Chapter " + urlValue(number)
+    if name = "" or timeOnly.IsMatch(name) then return t("titles.playback.chapter", { number: number })
     return name
 end function
 

@@ -14,6 +14,7 @@
     <script type="text/brightscript" uri="pkg:/components/items/LiveRailItem.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/I18n.brs" />
     <children>
         <Poster id="back" uri="pkg:/images/pill.9.png" blendColor="0x38BDF8FF" opacity="0" />
         <Poster id="icon" width="32" height="32" loadWidth="32" loadHeight="32" visible="false" />

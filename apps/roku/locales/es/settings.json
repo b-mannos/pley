@@ -1,0 +1,66 @@
+{
+  "title": "Ajustes",
+  "categories": {
+    "profile": "Perfil",
+    "playback": "Reproducción",
+    "display": "Subtítulos y pantalla",
+    "server": "Servidor",
+    "diagnostics": "Diagnóstico",
+    "about": "Acerca de",
+    "signOut": "Cerrar sesión"
+  },
+  "tmdb": "Este producto usa la API de TMDB, pero TMDB no lo respalda ni lo certifica.",
+  "web": "Gestiona tu cuenta en la web",
+  "webHint": "Nombre, foto, contraseña, PIN, inicio de sesión en dos pasos, dispositivos y aplicaciones",
+  "webBody": "Ve a esta dirección en un teléfono o una computadora de la misma red:",
+  "managed": "Perfil administrado",
+  "rows": {
+    "switchProfile": "Cambiar de perfil",
+    "history": "Historial de reproducción",
+    "sortLibraries": "Ordenar bibliotecas",
+    "sortLibrariesValue": "Tu orden, en todos tus dispositivos",
+    "autoplay": "Reproducir el siguiente episodio automáticamente",
+    "autoplayValue": "Tras una cuenta regresiva de 10 segundos",
+    "details": "Detalles de reproducción",
+    "detailsValue": "Mostrar sobre el video cómo se reproduce (directo, remux o transcodificación)",
+    "captions": "Estilo de subtítulos",
+    "captionsValue": "Como indican los ajustes de este Roku: Accesibilidad, Estilo de subtítulos",
+    "serverValue": "El servidor que usa esta TV",
+    "switchServer": "Cambiar de servidor",
+    "diagnostics": "Abrir el diagnóstico",
+    "diagnosticsValue": "Lo que esta TV decodifica y muestra, y por qué",
+    "version": "Versión",
+    "licencesValue": "La licencia de Pley y los avisos de lo que incluye la aplicación",
+    "signOut": "Cerrar sesión"
+  },
+  "language": {
+    "title": "Idioma",
+    "automatic": "Automático ({{language}})"
+  },
+  "quality": "Calidad",
+  "alwaysStartAs": "Empezar siempre como",
+  "usedLast": "Último perfil usado",
+  "signOut": {
+    "title": "¿Cerrar sesión?",
+    "body": "Se cerrará la sesión de esta TV en {{address}}.",
+    "confirm": "Cerrar sesión",
+    "intro": "Cierra la sesión de esta TV en {{address}}. Necesitarás un nuevo código de vinculación para volver a iniciar sesión."
+  },
+  "loadingProfile": "Cargando tu perfil…",
+  "readOnly": "Este servidor no permite que la aplicación los cambie: cámbialos en la web",
+  "diagnostics": "Diagnóstico",
+  "licences": "Licencias de código abierto",
+  "diagnosticsPage": {
+    "thisTv": "Esta TV",
+    "app": "Aplicación",
+    "model": "Modelo",
+    "os": "Roku OS",
+    "name": "Nombre",
+    "plays": "Lo que reproduce"
+  },
+  "licencesPage": {
+    "lucide": "Los iconos de Lucide",
+    "roboto": "La fuente Roboto"
+  },
+  "licence": "Pley para Roku es software libre bajo la Licencia Pública General Affero de GNU, versión 3 (AGPL-3.0-only)."
+}

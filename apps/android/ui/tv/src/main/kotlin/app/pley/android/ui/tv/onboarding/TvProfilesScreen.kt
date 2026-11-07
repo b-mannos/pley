@@ -29,6 +29,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -73,6 +74,7 @@ import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.designsystem.image.Artwork
 import app.pley.android.designsystem.image.ArtworkImage
 import app.pley.android.designsystem.reducedMotion
+import app.pley.android.designsystem.text.asString
 import app.pley.android.screens.onboarding.PinEntry
 import app.pley.android.screens.onboarding.ProfileGate
 import app.pley.android.screens.onboarding.ProfileTile
@@ -105,6 +107,11 @@ internal fun TvProfilesScreen(pin: Boolean = false) {
     val given = LocalOnboardingSource.current
     val vm = viewModel { ProfilesViewModel(given ?: onboardingSource(), tv = true, gate = !ProfileGate.passed, pin = pin) }
     LaunchedEffect(vm) { vm.navigation.collect { navigator.go(it) } }
+    // No cast plays over it: whoever is at the TV is choosing.
+    DisposableEffect(Unit) {
+        ProfileGate.shows()
+        onDispose { ProfileGate.hidden() }
+    }
     val state by vm.state.collectAsStateWithLifecycle()
     TvProfilesContent(
         state = state,
@@ -197,7 +204,7 @@ private fun Picker(state: ProfilesUiState, onPick: (Long) -> Unit, onRetry: () -
         ) {
             val error = state.error
             if (error != null) {
-                BasicText(error, style = PleyType.Tv.Body.copy(color = PleyColors.DangerText, textAlign = TextAlign.Center), modifier = Modifier.width(560.dp))
+                BasicText(error.asString(), style = PleyType.Tv.Body.copy(color = PleyColors.DangerText, textAlign = TextAlign.Center), modifier = Modifier.width(560.dp))
             }
             if (profiles.isEmpty() && !state.loading) {
                 TvPillButton(stringResource(R.string.tv_onboarding_retry), onClick = onRetry, icon = PleyIcons.RefreshCw, modifier = Modifier.initialFocus())
@@ -394,7 +401,7 @@ internal fun TvPinPad(
                 val error = step.error
                 if (error != null) {
                     BasicText(
-                        error,
+                        error.asString(),
                         style = PleyType.Tv.Body.copy(color = PleyColors.DangerText, textAlign = TextAlign.Center),
                         maxLines = 1,
                         modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive }.testTag(PIN_ERROR_TAG),

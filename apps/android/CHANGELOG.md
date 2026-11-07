@@ -10,6 +10,86 @@ describes how they are made.
 
 ### Added
 
+- Home opens on the newest movies and shows you haven't watched, as the
+  web does: on phones a banner under a clear top bar, with the title's
+  plot, Play, More info and My List, swiped between; on Android TV and
+  Fire TV the hero, where Right from its last button goes to the next
+  title. Both turn to the next by themselves every few seconds, holding
+  still while you use them. Continue Watching is the first row under them.
+
+## [0.1.8] - 2026-11-06
+
+### Added
+
+- Pley is in English, French and Spanish: your account's language, else
+  this device's, else your server's, and Settings has a Language row on
+  phones and TVs that sets it for your account on every device. Before you
+  sign in, a globe on the screens that choose a server and sign in (at the
+  top left on phones, in a corner on TVs) picks this device's language.
+  Every screen on phones, tablets and TVs is in it; dates, times,
+  runtimes, counts, the names of audio and subtitle languages and
+  connection errors follow it, and a download that failed says why in it. On Android 13 and later the system's settings list
+  Pley's languages, and one picked there is your account's, as in
+  Settings, or before you sign in this device's, as with the globe. On a
+  server from before languages, which can't keep your account's, the
+  Language row keeps your choice on this device.
+- The phone's remote offers Skip Intro and Skip Credits while what a TV
+  plays is in an intro or the credits, as the TV's own player does.
+- The phone's remote and Play on… list the devices of everyone in your
+  household too, each saying whose profile it is on ("On Sam's
+  profile"), never what it plays. Sending something there ends what
+  plays on that phone or TV, its place kept for its own profile, and
+  switches it to your profile before it plays, after your PIN when your
+  profile has one; one that can't says "Couldn't switch to the remote's
+  profile" and plays nothing. A phone or TV showing "Who's watching?"
+  ignores what is sent to it meanwhile: whoever is there is choosing.
+
+### Changed
+
+- On phones the player's Downloaded badge is green, as on TVs: the file
+  plays as it is.
+- After Play on…, one bar above the tabs says it is starting on the
+  device, then what plays there, where a toast and the remote's sheet came
+  and went over each other. The remote's back button goes 30 seconds, as
+  far as forward.
+- The phone's remote opens from a button in Home's top bar, beside your
+  picture, while another of your devices is on. The bar above the tabs
+  shows only while the phone controls what one plays (it sent it a
+  command, or something with Play on…), says where and what, Playing or
+  Paused, and opens its controls. A command shows at once what it asks
+  (the place a seek goes, playing or paused, the track picked), and what
+  plays stays while a next starts the one after. A device ready to play is
+  only listed, without controls to open.
+- A command from your remote doesn't bring up the video player's controls
+  on the device it plays on: a toast says for a moment what it did
+  ("Paused", "Playing", "+30 s", "Jumped to 12:34", "Audio: …",
+  "Subtitles off", "Quality: …"). Controls already up as the remote pauses
+  hide as they do while it plays, until you press a key or touch the
+  screen there.
+- Android TV and Fire TV start straight into Home as the profile they were
+  left on when it has no PIN, where a household of several profiles was
+  asked "Who's watching?" each time. A profile with a PIN still asks
+  first, and Switch profile still shows every profile. Settings' Always
+  start as calls this Profile used last, where it said Ask who's watching.
+
+### Fixed
+
+- On phones and tablets, the player's controls are at the screen's edges
+  again: since 0.1.7 the top row sat a status bar's height down the screen
+  and the buttons along the bottom a navigation bar's height up it, though
+  the player hides both bars.
+- On Android TV and Fire TV, a seek's preview in French or Spanish shows
+  a chapter called "Chapitre 3" or "Capítulo 3" once, not as "Chapitre 3 ·
+  Chapitre 3".
+- On Android TV and Fire TV, letting go of Left or Right held to scrub
+  while the player was busy (starting, or switching the TV's mode) no
+  longer leaves the seek waiting for OK for good: it goes by itself, as
+  after any scrub.
+
+## [0.1.7] - 2026-11-05
+
+### Added
+
 - The phone is a remote for your other devices: while something plays on
   one of them, a bar above the tabs says where and what, and opens a
   remote with what plays on each, how far, and the controls its player
@@ -100,6 +180,11 @@ describes how they are made.
   opens, rather than moving a moment later: the buttons along the bottom
   show once the server has answered, and the controls keep clear of the
   status and navigation bars whether they show or not.
+- On Android TV and Fire TV, a programme's details in Live TV have Watch
+  and the favourite side by side, the favourite a star as in the live
+  player, where Remove from favourites was a wide button under Watch. In
+  the live player, the star no longer shows its words under it, which ran
+  under Channels.
 
 ## [0.1.6] - 2026-11-04
 
@@ -581,7 +666,9 @@ describes how they are made.
 - First release with a version of its own (builds before it carried 0.2.0,
   the version every app shared).
 
-[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-04...HEAD
+[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-06...HEAD
+[0.1.8]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-06
+[0.1.7]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-05
 [0.1.6]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-04
 [0.1.5]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-03
 [0.1.4]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-02.2

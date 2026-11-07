@@ -6,9 +6,11 @@
      Pley's menu (Down: Subtitles, Audio, Quality, Subtitle sync,
      Chapters, Previous chapter, Next chapter, Next episode, Sleep timer,
      Find subtitles…, Playback details), the sleep timer's notice,
-     Automatic's notice of a lower quality, "Reconnecting…" while the
-     server is out of reach, and what went wrong when it did; a video on a
-     USB drive plays here too, with no server. -->
+     "Reconnecting…" while the server is out of reach, and what went wrong
+     when it did; a video on a USB drive plays here too, with no server.
+     Automatic's notice of a lower quality and the user's remote's of what
+     it did show in the scene's toast (Ui.brs's uiToast). -->
+
 <component name="PlayerScreen" extends="Group">
     <interface>
         <field id="route" type="string" />
@@ -24,6 +26,7 @@
         <field id="playerCommand" type="assocarray" alwaysNotify="true" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/screens/PlayerScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/I18n.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
@@ -98,7 +101,7 @@
         <BusySpinner id="spinner" translation="[928, 508]" visible="false" />
         <Group id="reconnecting" visible="false">
             <Rectangle translation="[790, 604]" width="340" height="60" color="0x16191E99" />
-            <Label translation="[790, 604]" width="340" height="60" horizAlign="center" vertAlign="center" text="Reconnecting…" color="0xEBEBEBFF">
+            <Label id="reconnectingText" translation="[790, 604]" width="340" height="60" horizAlign="center" vertAlign="center" color="0xEBEBEBFF">
                 <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
             </Label>
         </Group>
@@ -123,13 +126,13 @@
         <!-- At the top, clear of the subtitles it moves. -->
         <Group id="sync" translation="[560, 72]" visible="false">
             <Rectangle width="800" height="236" color="0x16191EE6" />
-            <Label translation="[48, 40]" text="Subtitle sync" color="0x38BDF8FF">
+            <Label id="syncTitle" translation="[48, 40]" width="380" color="0x38BDF8FF">
                 <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="30" />
             </Label>
             <Label id="syncValue" translation="[48, 84]" width="340" color="0xEBEBEBFF">
                 <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="44" />
             </Label>
-            <Label translation="[48, 150]" width="360" wrap="true" maxLines="2" text="Left: earlier · Right: later" color="0xA1A9B6FF">
+            <Label id="syncHint" translation="[48, 150]" width="360" wrap="true" maxLines="2" color="0xA1A9B6FF">
                 <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
             </Label>
             <Buttons id="syncButtons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[440, 48]" minWidth="312" />
@@ -174,7 +177,7 @@
         <!-- The sleep timer's last 30 s, at the bottom left: Keep watching
              adds the same time again. -->
         <Group id="sleepNotice" translation="[96, 916]" visible="false">
-            <Rectangle width="840" height="112" color="0x16191EE6" />
+            <Rectangle id="sleepBack" width="840" height="112" color="0x16191EE6" />
             <Label id="sleepText" translation="[40, 0]" width="420" height="112" vertAlign="center" color="0xEBEBEBFF">
                 <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
             </Label>

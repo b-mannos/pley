@@ -47,9 +47,11 @@ python apps/kodi/package.py        # dist/plugin.video.pley-<version>.zip
 - When the server requires two-step sign-in, the screen with the code says
   so under its notes. Someone who doesn't use it yet sets it up on the
   phone or computer where they approve the code.
-- In a household of more than one profile, Kodi asks "Who's watching?" each
-  time it starts, and the PIN of the profile it was left on when that
-  profile has one, as the other TVs do; a profile with a PIN shows a lock.
+- Kodi starts as the profile it was left on, straight into Home, when that
+  profile has no PIN. In a household of more than one profile it asks
+  "Who's watching?" each time it starts when that profile has one, and
+  going on as it asks the PIN, as the other TVs do; a profile with a PIN
+  shows a lock.
   A PIN is typed in Kodi's number dialog and never kept. A wrong one, or
   too many, asks again with the reason in the dialog's heading, the only
   line the dialog has; a PIN locked after too many wrong tries is said on
@@ -254,6 +256,19 @@ tested against every case of `packages/tv/test/fixtures/remote.json`:
   once; another title, channel or quality reports with its own session.
 - Kodi stopped or playing something else obeys nothing. A command it
   doesn't know, or a seek or skip without its place, does nothing.
+- **What shows:** the add-on brings up nothing of Kodi's player for a
+  command. What the remote did to a video shows for 2 seconds as a Kodi
+  notification with the add-on's icon, without its sound: "Paused",
+  "Playing", the skip asked for ("+30 s", "−10 s"), where a seek went
+  ("Jumped to 12:34"), the audio or subtitles switched to, by the
+  language and title Kodi's own Audio and Subtitles menus name them by
+  ("Audio: French - Commentary", "Subtitles off"), and the quality picked
+  as the Quality setting names it. A command that changes nothing shows nothing; next
+  and channel up and down show what Kodi shows as it plays the title or
+  channel, and music shows nothing. Kodi's own pause and seek bar are its
+  skin's: most skins show the seek bar while paused and for a moment
+  after a seek, whoever made it, and the add-on can't keep it away (a
+  skin opens it again while its condition holds).
 
 ### Casting
 
@@ -264,7 +279,9 @@ it (`casting.py`):
 - **Taking casts:** its event stream makes Kodi a receiver, by the
   `client_id` its plays are made with, as a TV named as its plays are
   named. It takes titles and playlists always, and Live TV's channels
-  where the account has Live TV as the stream opens.
+  where the account has Live TV as the stream opens, and says it switches
+  to the profile of a remote of another profile that casts to it
+  (`casts=…,switch`).
 - **What plays:** what is sent plays as the add-on's own Play plays it,
   through the plugin's play routes, in place of what plays:
   - a movie or an episode from where it was sent, else where Play starts
@@ -286,10 +303,26 @@ it (`casting.py`):
   device" when the remote's has no name) shows for 4 seconds as a Kodi
   notification with the add-on's icon, and "Nothing to play" when a show
   has no next episode or an album or a playlist is empty.
-- **Not taken:** a cast for another device, or one that comes while the
-  add-on is signed out or while Pley's window asks "Who's watching?" as
-  Kodi starts (a cast doesn't play past its PINs), does nothing. Of two
-  casts close together, the later plays.
+- **From another profile:** a remote on another profile of the household
+  casts with its profile and a ticket, and Kodi switches to that profile
+  first, with the switch-profile grant and the ticket in place of a PIN
+  (the remote gave its own). What played ends as the profile it played
+  as: the switch waits up to 5 seconds for its last report, its
+  session's end and its live channel's to go, and what hasn't gone by
+  then is dropped rather than sent as the new profile. Until the switch
+  is done, any other cast heard is dropped, whichever profile it names;
+  once switched, casts play as usual. The add-on then acts as the
+  remote's profile:
+  Pley's window goes to its Home, a listing of the add-on on screen shows
+  again, and "Who's watching?" counts as answered until Kodi starts over.
+  A switch that fails (the ticket spent or out of time, the server out of
+  reach) says "Couldn't switch to the remote's profile" for 4 seconds,
+  plays nothing and stops what played, which was ended for the cast.
+- **Not taken:** a cast for another device, one naming another profile
+  without a ticket, or one that comes while the add-on is signed out or
+  while Pley's window asks "Who's watching?" as Kodi starts (a cast
+  neither plays past its PINs nor switches profile while one is picked),
+  does nothing. Of two casts close together, the later plays.
 
 ### Requests
 
@@ -377,6 +410,57 @@ Discover's plots end with "Details and pictures from TMDB."; the add-on's
 description, in its information in Kodi, ends with "This product uses the
 TMDB API but is not endorsed or certified by TMDB."
 
+### Language
+
+The add-on is in English, French and Spanish, in the language
+[API.md](API.md#language) describes: the account's own, else the one
+chosen in the add-on's settings, else Kodi's where Pley has it, else the
+server's, else English. `packages/tv/test/fixtures/language.json` pins
+that order for the Samsung apps, and the add-on's tests hold it to the
+same answers.
+
+- **Kodi's language:** what Kodi says of its own
+  (`xbmc.getLanguage(xbmc.ISO_639_1)`). A region doesn't count: a Kodi
+  in Canadian French is in French.
+- **This device's choice:** Settings → Screens → Language: Automatic,
+  English, Français or Español, each named in itself. Kodi has no globe
+  as the TVs' sign-in screens do; this setting stands for it, and its
+  Automatic is Kodi's language, else the server's. Signed in, a profile's
+  own language comes first.
+- **Profile language:** in the profile's menu, and in the add-on's
+  settings under Switch profile: "Automatic (Français)", with what that is
+  here, then English, Français and Español. A choice is the profile's on
+  all its devices (`PUT /api/me/language`), and shows once the server has
+  it. A Pley from before languages keeps no account's language (its
+  `GET /api/server` names none, and that route answers 404 or 405):
+  there Profile language is this device's choice, as the Language setting
+  is, whose Automatic is Kodi's language; a choice shows at once and stays
+  on this device, with no error. So does a choice a server answers with
+  404 or 405 though it names a language, until another server, or this
+  one updated, is the one in use. A 403 (no permission) is said, as other
+  refusals are.
+- **When it changes:** the account's language is heard as the service's
+  event stream opens (as Kodi starts, on another sign-in or profile, when
+  the server is back), on signing in, and in the profile's menu; the
+  server's at the same times and on the sign-in screen, so a Kodi in a
+  language Pley doesn't have shows the server's. Signing out leaves this
+  device's. The last ones heard are kept on the device
+  (`remembered.json`), so Kodi starts in the language it showed last.
+  Pley's window draws its page again in the new language, Kodi's lists
+  refresh, and the service's notices follow.
+- **Requests** to the server carry `Accept-Language` with the language
+  shown, so what the server writes itself (Home's rows) comes in it.
+- **Dates and numbers** are written in the language shown: "Mar 5, 2024",
+  "5 mars 2024", "5 mar 2024"; "12,345", "12 345", "12.345"; "7.4" or
+  "7,4". Times of Live TV's guide take Kodi's region format, unless Kodi
+  is in another of Pley's languages than the one shown: then they take
+  that language's own clock (24 hours in French and Spanish). Counts take each language's plural forms, as CLDR
+  has them: English one and other, French and Spanish one, many and
+  other.
+- **What Kodi draws itself** stays in Kodi's language: the add-on's
+  settings screen, and Kodi's own dialogs' buttons. Track languages in the
+  player's notices are named as Kodi's menus name them.
+
 ## Building and testing
 
 ### How it works
@@ -426,6 +510,19 @@ TMDB API but is not endorsed or certified by TMDB."
   fail. `bun scripts/render-kodi-skin.mjs` renders its pictures from the
   Android app's icons, and `bun scripts/render-icons.mjs` the add-on's icon
   and fanart.
+- **The words** are in `resources/language/resource.language.<code>/strings.po`
+  (`en_gb`, `fr_fr`, `es_es`), in Kodi's layout, each by its id. Kodi's
+  `getLocalizedString` would give them in Kodi's language only, so the
+  add-on reads the files itself (`i18n.py`) in the language shown:
+  `kodi.text("name")` by the names in `kodi.TEXT`, `kodi.count("name", n)`
+  for a count, whose three ids in a row are its forms one, many and other
+  (`kodi.COUNTS`; English writes many as other). Values are `%s` and `%d`,
+  or `{name}` where languages order them differently (dates). A word a
+  language lacks shows in English. The windows' XML draws its words from
+  Home window properties (`pley.word.<id>`, the ids in `layout.WORDS`)
+  that the add-on fills in the language shown, since Kodi's `$ADDON[]`
+  would be in Kodi's. Kodi's settings screen reads the same files, in
+  Kodi's language.
 - **Python 3.8:** Kodi 21 runs Python 3.8 on Windows, so the add-on uses
   nothing newer. CI checks.
 
@@ -452,7 +549,11 @@ PLEY_BIN=target/debug/pley PLEY_FFMPEG_DIR=/usr/bin python -m unittest test_e2e
 `test_asking.py` covers Discover, search's Discover entry, the picker
 and the requests' lists and actions, `test_news.py` the service's
 summary, refreshes and notices, and `test_requests.py` the rules and
-words; none reaches TMDB. CI runs all of them.
+words; none reaches TMDB. `test_language.py` holds every language to
+English's words with the same values, French and Spanish to their
+punctuation, the language order to `packages/tv/test/fixtures/language.json`,
+and checks the lookup, counts, dates and Profile language. CI runs all of
+them.
 
 By hand, use a portable Kodi (`kodi.exe -p` on Windows) with the add-on
 copied into `portable_data/addons`. With JSON-RPC on (Settings → Services →

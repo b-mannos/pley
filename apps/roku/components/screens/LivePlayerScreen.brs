@@ -75,7 +75,9 @@ sub init()
         spinner.poster.width = 64
         spinner.poster.height = 64
     end for
-    m.twelve = CreateObject("roDeviceInfo").GetClockFormat() <> "24h"
+    ' The Live chip: the badge's word, in capitals.
+    m.top.findNode("liveMark").text = UCase(t("livetv.program.live"))
+    m.twelve = fmtTwelveHour()
     m.started = false
     ' OK went down with nothing over the picture, timed by okTimer: let go
     ' first, it opens the channel list; still down, it was held and shows
@@ -95,7 +97,7 @@ sub init()
     ' page of it held ({ total, offset, channels }) and its rows, and the
     ' asking an answer must be for.
     m.category = "all"
-    m.categoryName = "All channels"
+    m.categoryName = t("livetv.categories.all")
     m.page = invalid
     m.pageContent = invalid
     m.pageAsked = 0
@@ -104,7 +106,7 @@ sub init()
     ' or a search made there, with its page, the asking it waits for, and
     ' whether it shows a search made there, with the category before it.
     m.listCategory = "all"
-    m.listName = "All channels"
+    m.listName = m.categoryName
     m.listPage = invalid
     m.listAsked = 0
     m.listSearched = false
@@ -426,7 +428,7 @@ sub showListCategory(category as string)
         showListPage(m.page, m.pageContent, "")
         return
     end if
-    m.listRange.text = "Loading…"
+    m.listRange.text = t("common.states.loading")
     ' Chosen: asked for at once, whatever failed before.
     m.failedAt = -1
     m.failedCategory = ""
@@ -439,12 +441,12 @@ sub openCategories()
     m.channelList.visible = false
     m.categoryList.visible = true
     showListEmpty()
-    m.listTitle.text = "Categories"
+    m.listTitle.text = t("livetv.categories.title")
     m.listRange.text = ""
-    m.listHint.text = "OK: its channels   ·   Back: the channels"
+    m.listHint.text = t("livetv.player.categoriesHint")
     m.categoryList.setFocus(true)
     if m.summary = invalid
-        m.listRange.text = "Loading…"
+        m.listRange.text = t("common.states.loading")
         uiRequest({ method: "GET", path: "/api/live/groups" }, "onGroups")
         return
     end if
@@ -521,32 +523,28 @@ sub closeCategories()
 end sub
 
 function listHintText() as string
-    return "OK: watch   ·   Options (*): favourite   ·   Back: close" + Chr(10) + "Left: categories   ·   Replay: search"
+    return t("livetv.player.listHint") + Chr(10) + t("livetv.player.listMoreHint")
 end function
 
 ' Replay in the list: Roku's keyboard, every channel whose name, number or
 ' programme on now has the words in it.
 sub askListSearch()
     dialog = CreateObject("roSGNode", "StandardKeyboardDialog")
-    dialog.title = "Search channels"
-    dialog.message = ["Channels and what's on"]
+    dialog.title = t("livetv.search.channelsTitle")
+    dialog.message = [t("livetv.search.channelsPrompt")]
     if Left(m.listCategory, 7) = "search:" then dialog.text = Mid(m.listCategory, 8)
-    dialog.buttons = ["Search", "Cancel"]
+    dialog.buttons = [t("livetv.search.search"), t("common.actions.cancel")]
     dialog.observeField("buttonSelected", "onListSearch")
     m.top.getScene().dialog = dialog
 end sub
 
+' The first button searches, the other cancels.
 sub onListSearch(event as object)
     dialog = m.top.getScene().dialog
     text = ""
-    labels = []
-    if dialog <> invalid
-        text = dialog.text.Trim()
-        labels = dialog.buttons
-    end if
+    if dialog <> invalid then text = dialog.text.Trim()
     uiCloseDialog()
-    chosen = event.getData()
-    if chosen < 0 or chosen >= labels.Count() or labels[chosen] <> "Search" then return
+    if event.getData() <> 0 then return
     query = httpSentence(text)
     if query = "" then return
     ' The category shown as the first of the searches made here began.
@@ -890,8 +888,8 @@ sub onChecked(event as object)
         return
     end if
     ' Its playlist is there: the stream itself broke off.
-    message = "It stopped and couldn't get going again."
-    failed({ kind: "other", title: m.channel.name + " stopped", message: message, lines: message, retry: true, connections: [] })
+    message = t("livetv.player.stalled")
+    failed({ kind: "other", title: t("livetv.player.channelStopped", { channel: m.channel.name }), message: message, lines: message, retry: true, connections: [] })
 end sub
 
 ' Watching failed: the channel is tuned again where that may help (the
@@ -978,21 +976,24 @@ sub drawBanner()
         m.bannerFill.visible = true
     else
         typeSet(m.bannerTitle, channel.name)
-        m.bannerMeta.text = "Nothing in the guide now"
-        if not channel.hasGuide then m.bannerMeta.text = "No guide for this channel"
+        if channel.hasGuide
+            m.bannerMeta.text = t("livetv.nothingNow")
+        else
+            m.bannerMeta.text = t("livetv.noGuideHere")
+        end if
         m.bannerTrack.visible = false
         m.bannerFill.visible = false
     end if
     m.bannerNext.text = ""
-    if coming <> invalid then typeSet(m.bannerNext, "Next   " + liveClock(coming.start, m.twelve) + "   " + coming.title)
+    if coming <> invalid then typeSet(m.bannerNext, t("livetv.player.next", { time: liveClock(coming.start, m.twelve), title: coming.title }))
     typeSet(m.star, "")
-    if channel.favorite then typeSet(m.star, "★ Favourite")
-    favorite = "Add to favourites"
-    if channel.favorite then favorite = "Remove from favourites"
+    if channel.favorite then typeSet(m.star, "★ " + t("livetv.favourites.mark"))
+    favorite = t("livetv.favourites.add")
+    if channel.favorite then favorite = t("livetv.favourites.remove")
     ' Drawn again only when the favourite's words change: the chips are
     ' made anew each time.
     chips = m.controls.chips
-    if chips = invalid or chips.Count() <> 2 or chips[1].label <> favorite then m.controls.chips = [{ label: "Channels", width: 0 }, { label: favorite, width: 0 }]
+    if chips = invalid or chips.Count() <> 2 or chips[1].label <> favorite then m.controls.chips = [{ label: t("livetv.player.channels"), width: 0 }, { label: favorite, width: 0 }]
 end sub
 
 ' A programme's LIVE or NEW (text, "" for neither) in badge, a small
@@ -1008,7 +1009,7 @@ sub placeBadge(badge as object, title as object, text as string, width as intege
         return
     end if
     badge.color = "0x7DD3FCFF"
-    if text = "LIVE" then badge.color = "0xEB6B70FF"
+    if liveBadgeIsLive(text) then badge.color = "0xEB6B70FF"
     room = Int(badge.boundingRect().width) + 16
     title.translation = [x + room, y]
     title.width = width - room
@@ -1215,7 +1216,7 @@ sub troubleRow(c as object, y as integer)
     room = 1072 - 48
     if c.canTakeOver
         take = row.createChild("ChipRow")
-        take.chips = [{ label: "Watch here instead", width: 0 }]
+        take.chips = [{ label: t("livetv.player.watchHere"), width: 0 }]
         take.translation = [1072 - 16 - take.rowWidth, 16]
         ' The connection it takes over, read back as it is chosen.
         take.id = c.channelId.ToStr()

@@ -21,6 +21,9 @@ pub struct Audience {
     /// Left out: the streams of this token (its hash), the session that
     /// caused the event.
     pub except_token: Option<String>,
+    /// Only the streams whose account sees this language: an event with
+    /// Pley's own words in it goes once for each language, worded in it.
+    pub language: Option<&'static str>,
 }
 
 impl Audience {
@@ -35,9 +38,13 @@ impl Audience {
     }
 
     /// Whether a stream of account `user_id`, opened with the token hashed
-    /// `token`, gets the event: `manager` while it manages requests.
-    pub fn reaches(&self, user_id: i64, manager: bool, token: &str) -> bool {
-        if self.except_token.as_deref() == Some(token) || self.except_user == Some(user_id) {
+    /// `token` and seeing `language`, gets the event: `manager` while it
+    /// manages requests.
+    pub fn reaches(&self, user_id: i64, manager: bool, token: &str, language: &str) -> bool {
+        if self.except_token.as_deref() == Some(token)
+            || self.except_user == Some(user_id)
+            || self.language.is_some_and(|l| l != language)
+        {
             return false;
         }
         self.users.contains(&user_id) || (self.managers && manager)
@@ -148,11 +155,17 @@ pub enum ServerEvent {
     /// `playlist_id` and `channel_id` is set; `audio_index` and
     /// `subtitle_index` (`-1`: none), when set, are the tracks the remote
     /// had picked for the title, which it plays with; `from` is the
-    /// remote's device.
+    /// remote's device. Cast from another profile of the household, it goes
+    /// to the streams of the profile the receiver is on, with the remote's
+    /// profile (`profile_id`) and a ticket (`switch_ticket`) the receiver
+    /// switches to it with first; both are left out otherwise. `device_id`
+    /// is the receiver's device, which such a cast goes to alone.
     Cast {
         #[serde(skip)]
         user_id: i64,
         receiver_id: String,
+        #[serde(skip)]
+        device_id: String,
         item_id: Option<i64>,
         playlist_id: Option<i64>,
         channel_id: Option<i64>,
@@ -161,6 +174,10 @@ pub enum ServerEvent {
         audio_index: Option<i64>,
         subtitle_index: Option<i64>,
         from: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        profile_id: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        switch_ticket: Option<SwitchTicket>,
     },
     /// Live TV's sources, channels or guide changed: apps fetch the
     /// channels and the guide again.
@@ -242,6 +259,7 @@ pub enum ServerEvent {
         request_id: i64,
         title: String,
         kind: TitleKind,
+        /// In the language of the streams it goes to (`to.language`).
         reason: String,
         retry_at: Option<i64>,
     },
@@ -254,6 +272,18 @@ pub enum ServerEvent {
         #[serde(skip)]
         user_id: Option<i64>,
     },
+}
+
+/// A cast's switch ticket (see `ServerEvent::Cast`): sent as it is, never
+/// shown in Debug output, which logs may carry.
+#[derive(Clone, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct SwitchTicket(pub String);
+
+impl std::fmt::Debug for SwitchTicket {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SwitchTicket(..)")
+    }
 }
 
 impl ServerEvent {
@@ -297,6 +327,17 @@ impl ServerEvent {
             | ServerEvent::Cast { user_id, .. }
             | ServerEvent::LiveTakenOver { user_id, .. } => Some(*user_id),
             ServerEvent::RequestsSettingsChanged { user_id } => *user_id,
+            _ => None,
+        }
+    }
+
+    /// The one receiver whose streams alone get the event, by its id and
+    /// its device: a cast from another profile of the household, whose
+    /// title and switch ticket are the receiver's to see, not every device
+    /// of the profile it is on, nor another that names the same id.
+    pub fn receiver_only(&self) -> Option<(&str, &str)> {
+        match self {
+            ServerEvent::Cast { receiver_id, device_id, switch_ticket: Some(_), .. } => Some((receiver_id, device_id)),
             _ => None,
         }
     }
@@ -419,6 +460,7 @@ mod tests {
         let event = ServerEvent::Cast {
             user_id: 4,
             receiver_id: "tv-1".into(),
+            device_id: "app-7".into(),
             item_id: Some(12),
             playlist_id: None,
             channel_id: None,
@@ -427,11 +469,35 @@ mod tests {
             audio_index: Some(2),
             subtitle_index: Some(-1),
             from: Some("Chrome on Windows".into()),
+            profile_id: None,
+            switch_ticket: None,
         };
-        assert_eq!((event.user_id(), event.to_administrators()), (Some(4), false), "to the caster's user only");
+        assert_eq!((event.user_id(), event.to_administrators()), (Some(4), false), "to the receiver's user only");
+        assert_eq!(event.receiver_only(), None, "a cast of their own reaches all their streams");
         assert_eq!(
             serde_json::to_string(&event).unwrap(),
             r#"{"type":"cast","receiver_id":"tv-1","item_id":12,"playlist_id":null,"channel_id":null,"start_ms":null,"shuffle":false,"audio_index":2,"subtitle_index":-1,"from":"Chrome on Windows"}"#
+        );
+        let event = ServerEvent::Cast {
+            user_id: 5,
+            receiver_id: "tv-1".into(),
+            device_id: "app-7".into(),
+            item_id: Some(12),
+            playlist_id: None,
+            channel_id: None,
+            start_ms: None,
+            shuffle: false,
+            audio_index: None,
+            subtitle_index: None,
+            from: None,
+            profile_id: Some(4),
+            switch_ticket: Some(SwitchTicket("t1".into())),
+        };
+        assert_eq!(event.user_id(), Some(5), "to the profile the receiver is on");
+        assert_eq!(event.receiver_only(), Some(("tv-1", "app-7")), "and only to that receiver's streams");
+        assert!(!format!("{event:?}").contains("t1"), "a ticket is never in Debug output");
+        assert!(
+            serde_json::to_string(&event).unwrap().ends_with(r#""from":null,"profile_id":4,"switch_ticket":"t1"}"#)
         );
         // Request events say whom they are for, and stay off the
         // per-user path.
@@ -498,14 +564,16 @@ mod tests {
     #[test]
     fn an_audience_names_accounts_and_managers() {
         let to = Audience::of(vec![4]);
-        assert!(to.reaches(4, false, "a"), "named");
-        assert!(to.reaches(7, true, "b"), "a manager");
-        assert!(!to.reaches(7, false, "b"), "neither");
+        assert!(to.reaches(4, false, "a", "en"), "named");
+        assert!(to.reaches(7, true, "b", "fr"), "a manager");
+        assert!(!to.reaches(7, false, "b", "en"), "neither");
         let only = Audience::only(vec![4]);
-        assert!(!only.reaches(7, true, "b"), "not for managers");
+        assert!(!only.reaches(7, true, "b", "en"), "not for managers");
         let created = Audience { except_user: Some(4), ..Audience::of(Vec::new()) };
-        assert!(!created.reaches(4, true, "a") && created.reaches(7, true, "b"), "its maker is left out");
+        assert!(!created.reaches(4, true, "a", "en") && created.reaches(7, true, "b", "en"), "its maker is left out");
         let seen = Audience { except_token: Some("a".into()), ..Audience::only(vec![4]) };
-        assert!(!seen.reaches(4, false, "a") && seen.reaches(4, false, "c"), "the account's other streams");
+        assert!(!seen.reaches(4, false, "a", "en") && seen.reaches(4, false, "c", "en"), "the account's other streams");
+        let french = Audience { language: Some("fr"), ..Audience::of(Vec::new()) };
+        assert!(french.reaches(7, true, "b", "fr") && !french.reaches(7, true, "b", "es"), "worded in its language");
     }
 }

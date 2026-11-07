@@ -19,6 +19,8 @@ sub init()
     m.messageTitle = m.top.findNode("messageTitle")
     m.messageText = m.top.findNode("messageText")
     m.loading = m.top.findNode("loading")
+    m.title.text = driveDefaultName()
+    m.loading.text = t("common.states.loading")
     m.started = false
     ' Which asking for the folder an answer must be for.
     m.asked = 0
@@ -78,19 +80,19 @@ sub onList(event as object)
     if not answer.ok and answer.error <> "unreadable"
         m.place.text = ""
         showLines(invalid, false)
-        showMessage("usb", "No USB drive", "Plug a USB drive into the Roku to play its videos here.", false)
+        showMessage("usb", t("drive.none.title"), t("drive.none.body"), false)
         return
     end if
     m.place.text = httpString(data.line)
     up = httpTrue(data.up)
     if not answer.ok
         showLines(invalid, up)
-        showMessage("circle-alert", "This folder can't be read", "The drive may have been pulled out.", up)
+        showMessage("circle-alert", t("drive.unreadable.title"), t("drive.unreadable.body"), up)
         return
     end if
     showLines(request.content, up)
     if httpNumber(data.count, 0) = 0
-        showMessage("folder-open", "Nothing to play here", "This folder has no videos or folders in it.", up)
+        showMessage("folder-open", t("drive.empty.title"), t("drive.empty.body"), up)
     else
         m.message.visible = false
     end if
@@ -109,7 +111,7 @@ sub showLines(content as dynamic, up as boolean)
         content = CreateObject("roSGNode", "ContentNode")
         if up
             node = content.createChild("ContentNode")
-            node.setFields({ url: "", title: "..", description: "Up a folder", shortDescriptionLine1: "up", shortDescriptionLine2: "", hdPosterUrl: "pkg:/images/icons/corner-left-up.png" })
+            node.setFields({ url: "", title: "..", description: t("drive.up"), shortDescriptionLine1: "up", shortDescriptionLine2: "", hdPosterUrl: "pkg:/images/icons/corner-left-up.png" })
         end if
     end if
     at = 0

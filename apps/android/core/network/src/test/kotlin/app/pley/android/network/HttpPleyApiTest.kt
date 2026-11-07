@@ -114,6 +114,9 @@ class HttpPleyApiTest {
             Golden("health", json("server/health.json"), "GET /api/health") { health() },
             Golden("server", json("server/info.json"), "GET /api/server") { server() },
             Golden("me", json("me/app_token.json"), "GET /api/auth/me") { me() },
+            Golden("setLanguage", json("me/app_token.json"), "PUT /api/me/language", body = """{"language":"fr"}""") { setLanguage("fr") },
+            // The server's: left out, which the server reads as null.
+            Golden("setLanguage (the server's)", json("me/app_token.json"), "PUT /api/me/language", body = "{}") { setLanguage(null) },
             Golden("libraries", json("libraries/list.json"), "GET /api/libraries") { libraries() },
             Golden("library", json("libraries/library.json"), "GET /api/libraries/2") { library(2) },
             Golden(
@@ -191,7 +194,7 @@ class HttpPleyApiTest {
                 body = """{"command":"pause"}""",
             ) { sendCommand("6f1c2a9e", PlayerCommandRequest(Control.Pause)) },
             Golden("stopSession", MockPley.noContent(), "DELETE /api/sessions/6f1c2a9e") { stopSession("6f1c2a9e") },
-            Golden("remoteDevices", json("remote/devices.json"), "GET /api/remote/devices") { remoteDevices() },
+            Golden("remoteDevices", json("remote/devices.json"), "GET /api/remote/devices?household=1") { remoteDevices() },
             Golden(
                 "cast",
                 MockPley.noContent(),

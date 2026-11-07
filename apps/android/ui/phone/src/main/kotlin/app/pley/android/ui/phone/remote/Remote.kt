@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,7 +37,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TooltipAnchorPosition
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.rememberTooltipState
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -51,6 +54,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalResources
@@ -71,7 +75,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.pley.android.common.sentenceOf
+import app.pley.android.common.errorSentence
+import app.pley.android.common.resolve
 import app.pley.android.data.OtherDevice
 import app.pley.android.data.RemoteRepository
 import app.pley.android.data.RemoteSession
@@ -84,10 +89,12 @@ import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.designsystem.image.Artwork
 import app.pley.android.designsystem.image.ArtworkCandidates
 import app.pley.android.designsystem.image.ArtworkImage
+import app.pley.android.designsystem.text.formatWords
 import app.pley.android.designsystem.tile.ChannelLogo
 import app.pley.android.model.Control
 import app.pley.android.model.DeviceKind
 import app.pley.android.model.ItemKind
+import app.pley.android.model.MarkerKind
 import app.pley.android.model.MediaStream
 import app.pley.android.model.PlayerCommandRequest
 import app.pley.android.model.PlayingChannel
@@ -96,11 +103,13 @@ import app.pley.android.model.PlayingSession
 import app.pley.android.model.ProgressState
 import app.pley.android.model.StreamKind
 import app.pley.android.model.TrackOption
+import app.pley.android.model.format.FormatWords
 import app.pley.android.model.format.episodeLabel
 import app.pley.android.model.format.formatClockMs
 import app.pley.android.model.format.fullTitle
 import app.pley.android.model.format.streamLabel
 import app.pley.android.network.CommandRefusal
+import app.pley.android.player.markers.Markers
 import app.pley.android.ui.phone.R
 import app.pley.android.ui.phone.kit.ConfirmDialog
 import app.pley.android.ui.phone.kit.PleyIconButton
@@ -110,58 +119,139 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/** A request to open the remote on a device ([RemoteSlot]): each one opens it, the same device's too. */
-internal class RemoteAsk(val deviceId: String)
+/**
+ * A request to the remote ([RemoteSlot]): something this phone sent to a device ([deviceId], Play on…), which
+ * the bar follows, or to open on "Your devices" (`null`, Home's [RemoteButton]). Each one counts, the same
+ * device's too.
+ */
+internal class RemoteAsk(val deviceId: String? = null)
 
 /**
- * The remote's place above the tabs (over the mini player when both
- * show): the bar while another of the profile's devices is on, playing or
- * ready to ([devices]), and the sheet it opens, which closes when no
- * device is left and opens closed when one is on again. A command waiting
- * for its answer keeps the sheet: next ends a session before its player
- * lists the next one. The device chosen in the sheet is kept while it is
- * open. [asked] opens it on a device (Play on… sent it something).
+ * The remote's place above the tabs (over the mini player when both show)
+ * and its sheet. The sheet lists the profile's other devices that are on
+ * ([devices]); [asked] opens it from Home's header, and it closes when no
+ * device is left. The bar shows while this phone controls what a device
+ * plays: a command from the sheet, or what it sent with Play on…, which it
+ * says starts there until it plays (not what played there before it), then
+ * what plays; it opens that device's controls. It goes once that device
+ * has played nothing for [RemoteRepository.ANSWER_WAIT_MS], so a title
+ * ending into the next one keeps it, and a cast that hasn't started within
+ * [CAST_START_WAIT_MS] isn't waited for. Play on… doesn't open the sheet:
+ * the bar alone follows what it sent, so nothing comes and goes behind a
+ * sheet coming up. A next, or a track that needs a new session, ends one session to start another:
+ * until the device plays the new one (or the wait for it is over), the one
+ * that ended stays, on the bar and in the sheet. The device chosen in the
+ * sheet is kept while it is open.
  */
 @Composable
 internal fun RemoteSlot(devices: List<OtherDevice>, remote: RemoteRepository?, origin: String?, asked: RemoteAsk? = null) {
     if (remote == null) return
     var open by rememberSaveable { mutableStateOf(false) }
     var chosen by rememberSaveable { mutableStateOf<String?>(null) }
-    var holding by remember { mutableStateOf(false) }
-    var commands by remember { mutableIntStateOf(0) }
-    val none = devices.isEmpty()
+    var ended by remember { mutableStateOf<RemoteSession?>(null) }
+    // The device this phone controls; until `started`, a cast on its way, which the session the device played
+    // as it was sent (`castOver`) isn't. Each cast (`casts`) waits its own CAST_START_WAIT_MS.
+    var controlling by rememberSaveable { mutableStateOf<String?>(null) }
+    var started by rememberSaveable { mutableStateOf(false) }
+    var castOver by rememberSaveable { mutableStateOf<String?>(null) }
+    var casts by rememberSaveable { mutableIntStateOf(0) }
+    val listed = remember(devices, ended) { RemoteRepository.withEnded(devices, ended) }
+    val controlled = controlling?.let { id -> listed.firstOrNull { it.deviceId == id } }
+    val playingThere = controlled?.session?.sessionId
+    LaunchedEffect(devices, ended) {
+        val gone = ended ?: return@LaunchedEffect
+        val now = devices.firstOrNull { it.deviceId == RemoteRepository.deviceOf(gone) }?.session
+        if (now != null && now.sessionId != gone.sessionId) ended = null
+    }
+    LaunchedEffect(ended) {
+        if (ended == null) return@LaunchedEffect
+        delay(RemoteRepository.ANSWER_WAIT_MS)
+        ended = null
+    }
+    // What a cast sent plays: the device plays a session other than the one it played as it was sent.
+    LaunchedEffect(playingThere, castOver) {
+        if (controlling != null && !started && playingThere != null && playingThere != castOver) started = true
+    }
+    LaunchedEffect(controlling, started, casts) {
+        if (controlling == null || started) return@LaunchedEffect
+        delay(CAST_START_WAIT_MS)
+        controlling = null
+    }
+    // Playing nothing a while (stopped there, or at the end): no longer this phone's. A moment between one title
+    // and the next, or before the list is read again after a cold start, isn't enough.
+    val idle = started && playingThere == null
+    LaunchedEffect(idle) {
+        if (!idle) return@LaunchedEffect
+        delay(RemoteRepository.ANSWER_WAIT_MS)
+        controlling = null
+        started = false
+    }
+    val none = listed.isEmpty()
     LaunchedEffect(asked) {
         val ask = asked ?: return@LaunchedEffect
         chosen = ask.deviceId
-        open = true
-    }
-    LaunchedEffect(commands) {
-        if (commands == 0) return@LaunchedEffect
-        delay(RemoteRepository.ANSWER_WAIT_MS)
-        holding = false
-    }
-    LaunchedEffect(none, holding) { if (none && !holding) open = false }
-    RemoteBar(
-        devices,
-        onOpen = {
-            chosen = null
+        val id = ask.deviceId
+        if (id == null) {
             open = true
-        },
-    )
-    if (open && (!none || holding)) {
+            return@LaunchedEffect
+        }
+        // Sent something from here: the bar says it starts there, and what it plays is this phone's to control.
+        controlling = id
+        started = false
+        castOver = listed.firstOrNull { it.deviceId == id }?.session?.sessionId
+        casts++
+    }
+    LaunchedEffect(none) { if (none) open = false }
+    val bar = controlled?.takeIf { !started || it.playing }
+    if (bar != null) {
+        RemoteBar(
+            bar,
+            deviceNames(listed).getValue(bar.deviceId),
+            starting = !started,
+            onOpen = {
+                chosen = bar.deviceId
+                open = true
+            },
+        )
+    }
+    if (open && !none) {
         RemoteSheet(
-            devices,
+            listed,
             remote,
             origin,
             chosen = chosen,
             onChoose = { chosen = it },
-            onCommand = {
-                holding = true
-                commands++
+            onCommand = { session, command ->
+                controlling = RemoteRepository.deviceOf(session)
+                started = true
+                if (RemoteRepository.mayEndSession(command)) ended = session
             },
             onDismiss = { open = false },
         )
     }
+}
+
+/**
+ * The remote's button in Home's header while another of the profile's
+ * devices is on (the web's header button): it opens "Your devices"
+ * ([onOpen]). In the accent while one of them plays.
+ */
+@Composable
+internal fun RemoteButton(devices: List<OtherDevice>, onOpen: () -> Unit) {
+    if (devices.isEmpty()) return
+    val playing = devices.count { it.playing }
+    val label = if (playing > 0) {
+        pluralStringResource(R.plurals.remote_button_playing, playing, playing)
+    } else {
+        pluralStringResource(R.plurals.remote_button_ready, devices.size, devices.size)
+    }
+    PleyIconButton(
+        PleyIcons.MonitorSmartphone,
+        label,
+        onClick = onOpen,
+        modifier = Modifier.testTag(REMOTE_BUTTON),
+        tint = if (playing > 0) PleyColors.Accent else PleyColors.Fg,
+    )
 }
 
 /** What the remote calls each device ([RemoteRepository.deviceNames]), numbered as the app says it. */
@@ -175,38 +265,37 @@ internal fun deviceNames(devices: List<OtherDevice>): Map<String, String> {
 }
 
 /**
- * The bar above the tabs while another of the profile's devices is on
- * (apps/web/src/components/Remote.tsx, as a bar): "Playing on Living room
- * TV" over what plays there, or how many devices play and their names, or,
- * while none plays, "Your devices" and their names. Tapping it opens the
- * remote ([RemoteSheet]).
+ * The bar above the tabs while this phone controls what [device] plays
+ * ([RemoteSlot]): "Starting on Living room TV…" ([name]) while what it sent
+ * there hasn't played yet ([starting]), then "Playing on", or "Paused on",
+ * over what plays there. Tapping it opens that device's controls.
  */
 @Composable
-internal fun RemoteBar(devices: List<OtherDevice>, onOpen: () -> Unit, modifier: Modifier = Modifier) {
-    if (devices.isEmpty()) return
-    val names = deviceNames(devices)
-    val playing = devices.filter { it.playing }
-    val single = playing.singleOrNull()
-    val headline = when {
-        single != null -> stringResource(R.string.remote_playing_on, names.getValue(single.deviceId))
-        playing.isNotEmpty() -> pluralStringResource(R.plurals.remote_playing_on_devices, playing.size, playing.size)
-        else -> stringResource(R.string.remote_title)
-    }
-    val liveTv = stringResource(R.string.remote_live_tv)
-    val separator = stringResource(R.string.remote_device_separator)
-    val detail = single?.session?.let { titleOf(it, liveTv) }
-        ?: playing.ifEmpty { devices }.joinToString(separator) { names.getValue(it.deviceId) }
+internal fun RemoteBar(device: OtherDevice, name: String, onOpen: () -> Unit, modifier: Modifier = Modifier, starting: Boolean = false) {
+    val session = device.session
+    if (session == null && !starting) return
+    val paused = session?.session?.state == ProgressState.Paused
+    val headline = stringResource(
+        when {
+            starting -> R.string.remote_starting_on
+            paused -> R.string.remote_paused_on
+            else -> R.string.remote_playing_on
+        },
+        name,
+    )
+    // What played there before isn't what starts: nothing under the headline until it plays.
+    val detail = if (starting || session == null) "" else titleOf(session, stringResource(R.string.remote_live_tv), formatWords())
     Row(
         modifier
             .fillMaxWidth()
             .heightIn(min = 48.dp)
             .background(PleyColors.Surface2)
-            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.remote_open), onClick = onOpen)
+            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.remote_open_device), onClick = onOpen)
             .padding(horizontal = 16.dp, vertical = 6.dp)
             .testTag(REMOTE_BAR),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(if (playing.isEmpty()) PleyIcons.Cast else PleyIcons.MonitorPlay, contentDescription = null, size = 20.dp, tint = PleyColors.Accent)
+        Icon(PleyIcons.MonitorPlay, contentDescription = null, size = 20.dp, tint = PleyColors.Accent)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(headline, style = MaterialTheme.typography.labelMedium, color = PleyColors.AccentBright, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -220,11 +309,13 @@ internal fun RemoteBar(devices: List<OtherDevice>, onOpen: () -> Unit, modifier:
 
 /**
  * The remote: "Your devices", a row for each of the profile's other
- * devices that is on, those that play first; choosing one shows its
- * controls in the list's place, Back (or the arrow) going back to it.
- * With one device only, its controls show at once. Positions are
- * estimated each second while a device plays. Pictures come from
- * [origin], the server in use; [onCommand] is told of each command sent.
+ * devices that is on, those that play first; choosing one that plays shows
+ * its controls in the list's place, Back (or the arrow) going back to it.
+ * One ready to play is only listed: it has nothing to control. With one
+ * device only, playing, its controls show at once. Positions are estimated
+ * each second while a device plays. Pictures come from [origin], the
+ * server in use; [onCommand] is told of each command sent, with the
+ * session it went to.
  */
 @Composable
 internal fun RemoteSheet(
@@ -233,7 +324,7 @@ internal fun RemoteSheet(
     origin: String?,
     chosen: String? = null,
     onChoose: (String?) -> Unit = {},
-    onCommand: () -> Unit = {},
+    onCommand: (RemoteSession, Control) -> Unit = { _, _ -> },
     onDismiss: () -> Unit,
 ) {
     val names = deviceNames(devices)
@@ -243,14 +334,15 @@ internal fun RemoteSheet(
             value = remote.clock()
         }
     }
-    val single = devices.singleOrNull()
-    val shown = single ?: devices.firstOrNull { it.deviceId == chosen }
+    val single = devices.singleOrNull()?.takeIf { it.playing }
+    val shown = single ?: devices.firstOrNull { it.deviceId == chosen && it.playing }
+    val session = shown?.session
     PleySheet(
         onDismiss = onDismiss,
-        title = stringResource(R.string.remote_title).takeIf { shown == null },
+        title = stringResource(R.string.remote_title).takeIf { session == null },
         modifier = Modifier.testTag(REMOTE_SHEET),
     ) {
-        if (shown == null) {
+        if (shown == null || session == null) {
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 8.dp)) {
                 devices.forEach { device ->
                     key(device.deviceId) {
@@ -263,21 +355,31 @@ internal fun RemoteSheet(
             val back = { onChoose(null) }.takeIf { single == null }
             BackHandler(enabled = back != null) { onChoose(null) }
             key(shown.deviceId) {
-                DeviceControls(shown, names.getValue(shown.deviceId), now, remote, origin, onCommand, back)
+                DeviceControls(shown, session, names.getValue(shown.deviceId), now, remote, origin, onCommand, back)
             }
         }
     }
 }
 
-/** A device in the list: its kind's icon, its name, and what it plays with how far, or "Ready to play". */
+/**
+ * A device in the list: its kind's icon, its name, and what it plays with
+ * how far, or "Ready to play" (with the profile it is on, for another
+ * profile's). One that plays is chosen with [onClick]; one ready to play
+ * has no controls to show, and isn't.
+ */
 @Composable
 private fun DeviceRow(device: OtherDevice, name: String, now: Long, onClick: () -> Unit) {
     val session = device.session
+    val choose = if (session != null) {
+        Modifier.clickable(role = Role.Button, onClickLabel = stringResource(R.string.remote_open_device), onClick = onClick)
+    } else {
+        Modifier
+    }
     Row(
         Modifier
             .fillMaxWidth()
             .heightIn(min = 64.dp)
-            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.remote_open_device), onClick = onClick)
+            .then(choose)
             // In line with the sheet's title, as Play on…'s devices are.
             .padding(horizontal = 24.dp, vertical = 10.dp)
             .testTag(REMOTE_DEVICE + device.deviceId),
@@ -288,10 +390,10 @@ private fun DeviceRow(device: OtherDevice, name: String, now: Long, onClick: () 
         Column(Modifier.weight(1f)) {
             Text(name, style = MaterialTheme.typography.titleSmall, color = PleyColors.Fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (session == null) {
-                Text(stringResource(R.string.remote_ready), style = MaterialTheme.typography.bodySmall, color = PleyColors.Muted)
+                Text(readyLine(device), style = MaterialTheme.typography.bodySmall, color = PleyColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             } else {
                 Text(
-                    lineOf(session, stringResource(R.string.remote_live_tv)),
+                    lineOf(session, stringResource(R.string.remote_live_tv), formatWords()),
                     style = MaterialTheme.typography.bodySmall,
                     color = PleyColors.Muted,
                     maxLines = 1,
@@ -307,10 +409,21 @@ private fun DeviceRow(device: OtherDevice, name: String, now: Long, onClick: () 
                 }
             }
         }
-        Spacer(Modifier.width(8.dp))
-        Icon(PleyIcons.ChevronRight, contentDescription = null, size = 20.dp, tint = PleyColors.Muted)
+        if (session != null) {
+            Spacer(Modifier.width(8.dp))
+            Icon(PleyIcons.ChevronRight, contentDescription = null, size = 20.dp, tint = PleyColors.Muted)
+        }
     }
 }
+
+/**
+ * What a device that plays nothing here says: "Ready to play", and a
+ * device of another of the household's profiles whose it is: "On Sam's
+ * profile", never what it plays.
+ */
+@Composable
+internal fun readyLine(device: OtherDevice): String =
+    device.profile?.let { stringResource(R.string.remote_on_profile, it.name) } ?: stringResource(R.string.remote_ready)
 
 /** A device's kind as an icon in a 40 dp circle: in the accent while it plays. */
 @Composable
@@ -332,17 +445,18 @@ internal fun kindIcon(kind: DeviceKind): PleyIcon = when (kind) {
 
 /**
  * One device's controls: its name (with the way back to the list, [onBack],
- * when there is one), then what it plays and the controls its player
- * obeys, or, while it plays nothing, that it is ready for something.
+ * when there is one), then what it plays ([session]) and the controls its
+ * player obeys.
  */
 @Composable
 private fun DeviceControls(
     device: OtherDevice,
+    session: RemoteSession,
     name: String,
     now: Long,
     remote: RemoteRepository,
     origin: String?,
-    onCommand: () -> Unit,
+    onCommand: (RemoteSession, Control) -> Unit,
     onBack: (() -> Unit)?,
 ) {
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 8.dp).testTag(REMOTE_CONTROLS + device.deviceId)) {
@@ -358,40 +472,19 @@ private fun DeviceControls(
             Spacer(Modifier.width(10.dp))
             Text(name, style = MaterialTheme.typography.titleMedium, color = PleyColors.Fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        val session = device.session
-        if (session == null) {
-            Idle()
-        } else {
-            Playing(device.deviceId, session, name, now, remote, origin, onCommand)
-        }
-    }
-}
-
-/** A device ready to play, under its name: nothing plays there, and how to send it something. */
-@Composable
-private fun Idle() {
-    Column(
-        Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 24.dp).testTag(REMOTE_IDLE),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(stringResource(R.string.remote_nothing_playing), style = MaterialTheme.typography.titleSmall, color = PleyColors.Fg)
-        Spacer(Modifier.height(6.dp))
-        Text(
-            stringResource(R.string.remote_idle_hint),
-            style = MaterialTheme.typography.bodyMedium,
-            color = PleyColors.Muted,
-            textAlign = TextAlign.Center,
-        )
+        Playing(device.deviceId, session, name, now, remote, origin, onCommand)
     }
 }
 
 /**
  * What a device plays, top to bottom: its picture and title, how far (a
  * channel's programme), the transport, then its audio, subtitles and
- * quality on the left and Stop on the right; Stop asks first. A command it
- * didn't act on within [RemoteRepository.ANSWER_WAIT_MS] says so. Its
- * session may change under it (the next episode, a track that needed a new
- * session): the device's newest is followed.
+ * quality on the left and Stop on the right; Stop asks first. A command
+ * shows what it asks at once ([RemoteRepository.asSent]); one it didn't act
+ * on within [RemoteRepository.ANSWER_WAIT_MS] says so, and what it plays
+ * shows again. Its session may change under it (the next episode, a track
+ * that needed a new session): the device's newest is followed, and
+ * [onCommand] is told of each command, with the session it went to.
  */
 @Composable
 private fun Playing(
@@ -401,13 +494,12 @@ private fun Playing(
     now: Long,
     remote: RemoteRepository,
     origin: String?,
-    onCommand: () -> Unit,
+    onCommand: (RemoteSession, Control) -> Unit,
 ) {
     val resources = LocalResources.current
     val scope = rememberCoroutineScope()
     val current by rememberUpdatedState(session)
     var sent by remember { mutableStateOf<SentCommand?>(null) }
-    var sending by remember { mutableStateOf(false) }
     var stopping by remember { mutableStateOf(false) }
     var confirmStop by rememberSaveable { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -443,28 +535,30 @@ private fun Playing(
         CommandRefusal.Gone -> resources.getString(R.string.remote_gone, device)
         CommandRefusal.NotControllable -> resources.getString(R.string.remote_cant, device)
         CommandRefusal.TooMany -> resources.getString(R.string.remote_too_many)
-        CommandRefusal.Offline, CommandRefusal.Other -> sentenceOf(e)
+        CommandRefusal.Offline, CommandRefusal.Other -> errorSentence(e).resolve(resources)
     }
 
     fun send(request: PlayerCommandRequest) {
         say(null)
-        sending = true
-        onCommand()
+        val before = current
+        val sentAt = remote.clock()
+        // A skip goes from where the bar shows, a seek still on its way too; a play or pause stays there.
+        val shown = RemoteRepository.asSent(before, sent)
+        val toggle = request.command == Control.Play || request.command == Control.Pause
+        val target = RemoteRepository.target(shown, request.command, sentAt, request.positionMs, request.offsetMs)
+            ?: shown.positionAt(sentAt).takeIf { toggle }
+        val entry = SentCommand(request.command, before, sentAt, target, request.streamIndex, request.quality)
+        // Shown at once, and waited for from now: the player's report confirms it.
+        sent = entry
+        onCommand(before, request.command)
         scope.launch {
-            val before = current
-            val sentAt = remote.clock()
-            val target = RemoteRepository.target(before, request.command, sentAt, request.positionMs, request.offsetMs)
             try {
                 remote.command(before.sessionId, request)
-                sent = SentCommand(request.command, before, sentAt, target, request.streamIndex, request.quality)
-                // Its answer is waited for from now.
-                onCommand()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                if (sent == entry) sent = null
                 say(refused(e))
-            } finally {
-                sending = false
             }
         }
     }
@@ -485,7 +579,10 @@ private fun Playing(
         }
     }
 
-    val waiting = sending || sent != null
+    // What the controls show: the session as its player reported it, with what was just asked of it.
+    val shown = RemoteRepository.asSent(session, sent)
+    // What a next or previous plays isn't known until it plays: what plays now is dimmed until then.
+    val dim = if (sent?.command == Control.Next || sent?.command == Control.Previous) 0.5f else 1f
     val live = session.session.kind == PlayingKind.Live
     Column(
         Modifier
@@ -494,18 +591,33 @@ private fun Playing(
             .testTag(REMOTE_CARD + session.sessionId),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Header(session, origin)
-        // The controls stay as they are while a command waits for its answer (the web's): another can follow it.
+        // In an intro or the credits there, as its player would offer: Skip Intro, Skip Credits.
+        val marker = if (live || !shown.can(Control.Seek)) {
+            null
+        } else {
+            Markers.active(shown.session.markers.filter { it.kind != MarkerKind.Unknown }, shown.positionAt(now))
+        }
+        Header(
+            session,
+            origin,
+            Modifier.alpha(dim),
+            skip = marker?.let { m ->
+                // Where the player's own button lands, within the title: the server refuses a seek past its length.
+                val target = Markers.skipTarget(m).let { at -> shown.session.durationMs?.takeIf { it > 0 }?.let { minOf(at, it) } ?: at }
+                SkipOffer(m.kind, device) { send(PlayerCommandRequest(Control.Seek, positionMs = target)) }
+            },
+        )
+        // The controls stay usable while a command waits for its answer (the web's): another can follow it.
         if (live) {
             session.session.channel?.let { LiveProgress(it) }
         } else {
-            Progress(session, device, now, onSeek = { send(PlayerCommandRequest(Control.Seek, positionMs = it)) })
+            Progress(shown, device, now, onSeek = { send(PlayerCommandRequest(Control.Seek, positionMs = it)) })
         }
-        Transport(session, device, live, ::send)
+        Transport(shown, device, live, ::send, Modifier.alpha(dim))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             // The icons' glyphs, and Stop's, line up with the artwork and the times above:
             // their touch targets reach past the edges instead.
-            Choices(session, device, ::send, Modifier.weight(1f).offset(x = (-12).dp))
+            Choices(shown, device, ::send, Modifier.weight(1f).offset(x = (-12).dp))
             val stopLabel = stringResource(R.string.remote_stop_on, device)
             TextButton(
                 onClick = { confirmStop = true },
@@ -518,17 +630,12 @@ private fun Playing(
                 Text(stringResource(R.string.remote_stop), style = MaterialTheme.typography.labelLarge)
             }
         }
-        val said = error
-        val (line, color) = when {
-            said != null -> said to PleyColors.DangerText
-            waiting -> stringResource(R.string.remote_waiting, device) to PleyColors.Muted
-            else -> null to PleyColors.Muted
-        }
-        line?.let {
+        // A refusal, or a command not answered. While one waits nothing is said: the controls show what it asked.
+        error?.let {
             Text(
                 it,
                 style = MaterialTheme.typography.bodySmall,
-                color = color,
+                color = PleyColors.DangerText,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
             )
@@ -550,17 +657,22 @@ private fun Playing(
     }
 }
 
+/** Skip Intro or Skip Credits on [device], while what plays there is in one ([kind]): [skip] sends it on past it. */
+private class SkipOffer(val kind: MarkerKind, val device: String, val skip: () -> Unit)
+
 /**
  * What plays, beside its poster or the channel's logo: an episode as its
  * show and place over its title, a track over its artist, a channel's
  * number and name over Live TV (its programme is under it, with how far
- * it is: [LiveProgress]), a movie over its year.
+ * it is: [LiveProgress]), a movie over its year. In an intro or the credits,
+ * Skip Intro or Skip Credits at its end ([skip]), where the player's own
+ * shows over the picture.
  */
 @Composable
-private fun Header(session: RemoteSession, origin: String?) {
+private fun Header(session: RemoteSession, origin: String?, modifier: Modifier = Modifier, skip: SkipOffer? = null) {
     val playing = session.session
-    val (title, under) = linesOf(playing, stringResource(R.string.remote_live_tv))
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    val (title, under) = linesOf(playing, stringResource(R.string.remote_live_tv), formatWords())
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         val channel = playing.channel
         val item = playing.item
         if (playing.kind == PlayingKind.Live && channel != null) {
@@ -583,6 +695,45 @@ private fun Header(session: RemoteSession, origin: String?) {
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.titleMedium, color = PleyColors.Fg, maxLines = 2, overflow = TextOverflow.Ellipsis)
             under?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = PleyColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+        }
+        skip?.let {
+            Spacer(Modifier.width(12.dp))
+            SkipButton(it)
+        }
+    }
+}
+
+/**
+ * Skip Intro or Skip Credits: the player's own pill, on the sheet's surface,
+ * kept small beside the title (which gives way to it), in a 48 dp touch target.
+ */
+@Composable
+private fun SkipButton(offer: SkipOffer) {
+    val intro = offer.kind == MarkerKind.Intro
+    val label = stringResource(if (intro) R.string.remote_skip_intro else R.string.remote_skip_credits)
+    val description = stringResource(if (intro) R.string.remote_skip_intro_on else R.string.remote_skip_credits_on, offer.device)
+    val interaction = remember { MutableInteractionSource() }
+    Box(
+        Modifier
+            .testTag(REMOTE_SKIP)
+            .minimumInteractiveComponentSize()
+            .clickable(interaction, indication = null, role = Role.Button, onClick = offer.skip)
+            .clearAndSetSemantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            Modifier
+                .height(36.dp)
+                .clip(PleyShape.Pill)
+                .background(PleyColors.Surface3)
+                .border(1.dp, PleyColors.Border, PleyShape.Pill)
+                .indication(interaction, ripple())
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(label, style = MaterialTheme.typography.labelMedium, color = PleyColors.Fg, maxLines = 1, softWrap = false)
+            Icon(PleyIcons.ChevronsRight, contentDescription = null, size = 14.dp, tint = PleyColors.Fg)
         }
     }
 }
@@ -697,34 +848,43 @@ private fun Progress(session: RemoteSession, device: String, now: Long, onSeek: 
 }
 
 /**
- * The transport, centred. A title's in the web's order: previous, back
- * 10 s, play or pause, forward 30 s, where the player declares them, and
- * next where the player declares it or what plays has a next by nature (an
- * episode, a track), dimmed when the player can't go there; a movie whose
- * player declares none has no Next. A channel's: play or pause where the
- * player declares pause, then the channel rocker ([ChannelRocker]).
+ * The transport, one centred row. A title's: previous, back 30 s, play or
+ * pause, forward 30 s and next, each where the player declares it. Next
+ * shows where the player declares it or what plays has a next by nature
+ * (an episode, a track), dimmed when the player can't go there; a movie
+ * whose player declares none has no Next. Where only one of previous and
+ * next shows, the other's place is kept, so play stays in the middle. A
+ * channel's: play or pause where the player declares pause, then the
+ * channel rocker ([ChannelRocker]).
  */
 @Composable
-private fun Transport(session: RemoteSession, device: String, live: Boolean, send: (PlayerCommandRequest) -> Unit) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-        val paused = session.session.state == ProgressState.Paused
-        val toggle = when {
-            live && !session.can(Control.Pause) -> null
-            paused && session.can(Control.Play) -> Control.Play
-            !paused && session.can(Control.Pause) -> Control.Pause
-            else -> null
-        }
-        if (live) {
+private fun Transport(session: RemoteSession, device: String, live: Boolean, send: (PlayerCommandRequest) -> Unit, modifier: Modifier = Modifier) {
+    val paused = session.session.state == ProgressState.Paused
+    val toggle = when {
+        live && !session.can(Control.Pause) -> null
+        paused && session.can(Control.Play) -> Control.Play
+        !paused && session.can(Control.Pause) -> Control.Pause
+        else -> null
+    }
+    if (live) {
+        Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
             toggle?.let { PlayPause(it, device, send) }
             ChannelRocker(session, device, send)
-            return@Row
         }
-        if (session.can(Control.Previous)) {
+        return
+    }
+    val previous = session.can(Control.Previous)
+    val kind = session.session.item?.kind
+    val next = session.can(Control.Next) || kind == ItemKind.Episode || kind == ItemKind.Track
+    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+        if (previous) {
             PleyIconButton(
                 PleyIcons.SkipBack,
                 stringResource(R.string.remote_previous, device),
                 onClick = { send(PlayerCommandRequest(Control.Previous)) },
             )
+        } else if (next) {
+            Spacer(Modifier.size(48.dp))
         }
         if (session.can(Control.Skip)) {
             PleyIconButton(
@@ -741,14 +901,15 @@ private fun Transport(session: RemoteSession, device: String, live: Boolean, sen
                 onClick = { send(PlayerCommandRequest(Control.Skip, offsetMs = RemoteRepository.SKIP_FORWARD_MS)) },
             )
         }
-        val kind = session.session.item?.kind
-        if (session.can(Control.Next) || kind == ItemKind.Episode || kind == ItemKind.Track) {
+        if (next) {
             PleyIconButton(
                 PleyIcons.SkipForward,
                 stringResource(R.string.remote_next, device),
                 onClick = { send(PlayerCommandRequest(Control.Next)) },
                 enabled = session.can(Control.Next),
             )
+        } else if (previous) {
+            Spacer(Modifier.size(48.dp))
         }
     }
 }
@@ -823,13 +984,14 @@ private fun Choices(session: RemoteSession, device: String, send: (PlayerCommand
     val audio = playing.tracks.audio.takeIf { session.can(Control.Audio) && it.size > 1 }.orEmpty()
     val subtitles = playing.tracks.subtitles.takeIf { session.can(Control.Subtitles) }.orEmpty()
     val qualities = playing.qualities.takeIf { session.can(Control.Quality) }.orEmpty()
+    val words = formatWords()
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
         if (audio.isNotEmpty()) {
             ChoiceMenu(
                 icon = PleyIcons.AudioLines,
                 hint = stringResource(R.string.remote_audio),
                 description = stringResource(R.string.remote_audio_on, device),
-                choices = audio.map { it.index to labelOf(it, StreamKind.Audio) },
+                choices = audio.map { it.index to labelOf(it, StreamKind.Audio, words) },
                 current = playing.audioIndex,
                 tag = REMOTE_AUDIO,
                 onPick = { send(PlayerCommandRequest(Control.Audio, streamIndex = it)) },
@@ -841,7 +1003,7 @@ private fun Choices(session: RemoteSession, device: String, send: (PlayerCommand
                 hint = stringResource(R.string.remote_subtitles),
                 description = stringResource(R.string.remote_subtitles_on, device),
                 choices = listOf(PlayingSession.SUBTITLES_OFF to stringResource(R.string.remote_subtitles_off)) +
-                    subtitles.map { it.index to labelOf(it, StreamKind.Subtitle) },
+                    subtitles.map { it.index to labelOf(it, StreamKind.Subtitle, words) },
                 current = playing.subtitleIndex,
                 tag = REMOTE_SUBTITLES,
                 onPick = { send(PlayerCommandRequest(Control.Subtitles, streamIndex = it)) },
@@ -920,8 +1082,8 @@ private fun <T> ChoiceMenu(
     }
 }
 
-/** A track as the player's own menu labels it ([streamLabel]): "English (EAC3 5.1)", "French (SRT, Forced)". */
-private fun labelOf(track: TrackOption, kind: StreamKind): String = streamLabel(
+/** A track as the player's own menu labels it ([streamLabel]) in [words]: "English (EAC3 5.1)", "French (SRT, Forced)". */
+private fun labelOf(track: TrackOption, kind: StreamKind, words: FormatWords): String = streamLabel(
     MediaStream(
         index = track.index,
         kind = kind,
@@ -932,26 +1094,27 @@ private fun labelOf(track: TrackOption, kind: StreamKind): String = streamLabel(
         forced = track.forced,
         channels = track.channels,
     ),
+    words,
 )
 
 /** What plays, in one line, as the bar says it: the title as the web writes it ("Show — S1 · E2 — Title"), or the channel ([liveTv] without one). */
-private fun titleOf(session: RemoteSession, liveTv: String): String = when (session.session.kind) {
+private fun titleOf(session: RemoteSession, liveTv: String, words: FormatWords): String = when (session.session.kind) {
     PlayingKind.Live -> session.session.channel?.name?.takeIf { it.isNotEmpty() } ?: liveTv
-    else -> session.session.item?.let(::fullTitle).orEmpty()
+    else -> session.session.item?.let { fullTitle(it, words) }.orEmpty()
 }
 
 /** What plays, as the list says it: the title as the web writes it, or the channel's number and name. */
-internal fun lineOf(session: RemoteSession, liveTv: String): String {
+internal fun lineOf(session: RemoteSession, liveTv: String, words: FormatWords): String {
     val channel = session.session.channel
     return when {
-        session.session.kind != PlayingKind.Live -> session.session.item?.let(::fullTitle).orEmpty()
+        session.session.kind != PlayingKind.Live -> session.session.item?.let { fullTitle(it, words) }.orEmpty()
         channel != null -> listOfNotNull(channel.number, channel.name.takeIf { it.isNotEmpty() }).joinToString(" ").ifEmpty { liveTv }
         else -> liveTv
     }
 }
 
 /** What plays, in two lines ([Header]); the second `null` when there is nothing to say. */
-private fun linesOf(playing: PlayingSession, liveTv: String): Pair<String, String?> {
+private fun linesOf(playing: PlayingSession, liveTv: String, words: FormatWords): Pair<String, String?> {
     val channel = playing.channel
     val item = playing.item
     return when {
@@ -962,7 +1125,7 @@ private fun linesOf(playing: PlayingSession, liveTv: String): Pair<String, Strin
         }
         item == null -> "" to null
         item.kind == ItemKind.Episode ->
-            listOf(item.grandparentTitle.orEmpty(), episodeLabel(item)).filter { it.isNotEmpty() }.joinToString(" · ") to item.title
+            listOf(item.grandparentTitle.orEmpty(), episodeLabel(item, words)).filter { it.isNotEmpty() }.joinToString(" · ") to item.title
         item.kind == ItemKind.Track -> item.title to (item.grandparentTitle ?: item.parentTitle)?.takeIf { it.isNotEmpty() }
         else -> item.title to item.year?.toString()
     }
@@ -971,8 +1134,18 @@ private fun linesOf(playing: PlayingSession, liveTv: String): Pair<String, Strin
 /** How often the sheet moves its estimates on. */
 private const val TICK_MS = 1_000L
 
+/**
+ * How long the bar waits for what this phone sent a device to play there
+ * ([RemoteSlot]): long enough for a TV to wake its player and open the
+ * title, not so long that a cast that failed makes a later one the phone's.
+ */
+internal const val CAST_START_WAIT_MS = 30_000L
+
 /** The bar's test tag. */
 internal const val REMOTE_BAR = "pley.phone.remote_bar"
+
+/** The remote's button in Home's header. */
+internal const val REMOTE_BUTTON = "pley.phone.remote_button"
 
 /** The sheet's test tag. */
 internal const val REMOTE_SHEET = "pley.phone.remote_sheet"
@@ -986,9 +1159,6 @@ internal const val REMOTE_CONTROLS = "pley.phone.remote_controls."
 /** What a device plays and its controls: this and its session id. */
 internal const val REMOTE_CARD = "pley.phone.remote_card."
 
-/** A device ready to play, playing nothing. */
-internal const val REMOTE_IDLE = "pley.phone.remote_idle"
-
 /** The Audio, Subtitles and Quality buttons. */
 internal const val REMOTE_AUDIO = "pley.phone.remote_audio"
 internal const val REMOTE_SUBTITLES = "pley.phone.remote_subtitles"
@@ -999,3 +1169,6 @@ internal const val REMOTE_ROCKER = "pley.phone.remote_rocker"
 
 /** A channel's programme, with how far it is. */
 internal const val REMOTE_LIVE = "pley.phone.remote_live"
+
+/** Skip Intro or Skip Credits, while what plays is in one. */
+internal const val REMOTE_SKIP = "pley.phone.remote_skip"

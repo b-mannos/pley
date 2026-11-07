@@ -47,12 +47,14 @@ fn answers_show_saved_first_then_fresh() {
     let profile = app.state.profile().unwrap();
     let server_url = server.url().to_string();
     let snapshots = app.state.snapshots().clone();
+    // Each answer is saved off the main thread.
+    let keys = [snapshot_keys::ME, snapshot_keys::LIBRARIES, snapshot_keys::LIVE, snapshot_keys::HOME];
+    let saved = || keys.iter().all(|k| snapshots.read(&server_url, profile, k).is_some());
     let start = Instant::now();
-    while snapshots.read(&server_url, profile, snapshot_keys::HOME).is_none()
-        && start.elapsed() < Duration::from_secs(5)
-    {
+    while !saved() && start.elapsed() < Duration::from_secs(10) {
         std::thread::sleep(Duration::from_millis(10));
     }
+    assert!(saved(), "the answers weren't saved");
     drop(app);
 
     // The next start draws who, the libraries, Live TV and Home from what was saved, before asking.
@@ -128,7 +130,7 @@ fn the_server_out_of_reach_shows_what_was_saved_and_comes_back() {
     assert!(app.until(|app| app.state.offline()), "the server never went");
     assert!(app.state.offline_notice());
     app.advance(0.2);
-    assert!(app.list.says(pley_shell::OFFLINE_TEXT));
+    assert!(app.list.says(pley_shell::offline_text()));
     // What was saved stays.
     assert!(app.state.home().is_some());
 
@@ -187,13 +189,16 @@ fn a_screen_s_answer_shows_saved_first_then_fresh() {
     while snapshots.read(server.url(), profile, &key).is_none() && start.elapsed() < Duration::from_secs(5) {
         std::thread::sleep(Duration::from_millis(10));
     }
+    assert!(snapshots.read(server.url(), profile, &key).is_some(), "the answer wasn't saved");
     let mut again = Resource::new(Some(key), |api| api.libraries());
     server.set_mode(Mode::Down).unwrap();
+    // What was saved is read off the main thread, beside the ask: a server that refuses at once
+    // can fail the ask first, and what was saved shows with the failure once read, as on Android.
     let start = Instant::now();
     loop {
         let mut cx = pley_shell::AppCx::new(&mut app.state, &mut requests, app.time);
         again.update(&mut cx);
-        if again.error().is_some() || start.elapsed() > Duration::from_secs(10) {
+        if (again.error().is_some() && again.value().is_some()) || start.elapsed() > Duration::from_secs(10) {
             break;
         }
         std::thread::sleep(Duration::from_millis(5));
@@ -218,4 +223,70 @@ fn a_sign_in_the_server_ended_goes_back_to_its_code_screen() {
     assert!(!app.state.signed_in());
     assert!(!app.state.listening());
     assert!(heard.borrow().iter().any(|(_, e)| *e == AppEvent::SignedOut));
+}
+
+/// A registry that counts the pages it makes, by route name.
+fn counting(heard: &Heard, made: &Rc<RefCell<Vec<&'static str>>>) -> pley_shell::Registry {
+    let inner = registry(heard, &[]);
+    let mut r = pley_shell::Registry::new();
+    let made = made.clone();
+    r.add(move |route, cx| {
+        made.borrow_mut().push(route.name());
+        Some(inner.make(route, cx))
+    });
+    r
+}
+
+#[test]
+fn the_accounts_language_shows_once_it_is_heard_and_the_pages_are_made_again() {
+    use pley_i18n::Language;
+    let server = fixtures();
+    server.set_account_language(ids::ALEX, Some("fr"));
+    let heard: Heard = Rc::new(RefCell::new(Vec::new()));
+    let made = Rc::new(RefCell::new(Vec::new()));
+    let device = device();
+    let (store, http) = (store(&device), http());
+    sign_in(&server, ids::ALEX, &store, &http);
+    let mut app = TestApp::new(device.clone(), store.clone(), http.clone(), counting(&heard, &made));
+    // Until the account is heard, the language shown last (none yet: the TV's, English).
+    assert_eq!(app.state.language(), Language::En);
+    let pages = made.borrow().len();
+    assert!(app.until(|app| app.state.language() == Language::Fr), "the account's language never showed");
+    assert_eq!(pley_i18n::language(), Language::Fr);
+    assert_eq!(store.shown_language(), Some(Language::Fr));
+    app.settle();
+    assert!(made.borrow().len() > pages, "Home wasn't made again");
+
+    // The next start shows French at once, before the account answers.
+    server.set_account_language(ids::ALEX, None);
+    drop(app);
+    let state = pley_shell::AppState::new(device, store, http, pley_core::Tasks::new(pley_base::Waker::noop()));
+    assert_eq!(state.language(), Language::Fr);
+    // Automatic for the account: this TV's English.
+    assert_eq!(state.account_automatic_language(), Language::En);
+}
+
+#[test]
+fn signed_out_the_globe_s_choice_comes_before_the_tv_and_the_server() {
+    use pley_i18n::Language;
+    let server = fixtures();
+    server.set_server_language("es");
+    let heard: Heard = Rc::new(RefCell::new(Vec::new()));
+    let device = device();
+    device.set_languages(&["de-DE"]);
+    let (store, http) = (store(&device), http());
+    store.set_active_server(Some(server.url())).unwrap();
+    let mut app = TestApp::new(device.clone(), store.clone(), http, registry(&heard, &[]));
+    // A TV in a language Pley hasn't: the server's, once it has said.
+    assert!(app.until(|app| app.state.language() == Language::Es), "the server's language never showed");
+    assert_eq!(app.state.automatic_language(), Language::Es);
+    // Picked with the globe: at once, and kept on the TV.
+    app.state.choose_language_here(Some(Language::Fr));
+    assert_eq!(app.state.language(), Language::Fr);
+    assert_eq!(store.device_language(), Some(Language::Fr));
+    assert_eq!(app.state.account_automatic_language(), Language::Fr);
+    // Automatic forgets it.
+    app.state.choose_language_here(None);
+    assert_eq!(app.state.language(), Language::Es);
+    assert_eq!(store.device_language(), None);
 }

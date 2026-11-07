@@ -75,7 +75,7 @@ public sealed record TokenResponse(
 /// <summary>The token endpoint said no: in the server's words, or its error code, or its status.</summary>
 public class TokenException : AuthException
 {
-    public TokenException(int status, OAuthError? oauth) : base(oauth?.Description ?? oauth?.Error ?? $"the server refused (HTTP {status})")
+    public TokenException(int status, OAuthError? oauth) : base(oauth?.Description ?? oauth?.Error ?? Strings.T("common.errors.refused", ("status", status)))
     {
         Status = status;
         OAuth = oauth;
@@ -87,7 +87,7 @@ public class TokenException : AuthException
 
 public class SignedOutException : AuthException
 {
-    public SignedOutException() : base("you were signed out: sign in again")
+    public SignedOutException() : base(Strings.T("signin.errors.signedOut"))
     {
     }
 }
@@ -106,15 +106,15 @@ public enum SignOutReason
 /// <summary>The Android app's token requests: reading and sending them.</summary>
 public static class TokenRequests
 {
-    public const string WiderScopeMessage = "the server allowed more than this app asks for: signed out";
+    public static string WiderScopeMessage => Strings.T("signin.errors.widerScope");
 
     /// <summary>Why tokens couldn't be sealed: they aren't used, and the person signs in again.</summary>
-    public const string Unkept = "the sign-in couldn't be kept on this device: sign in again";
+    public static string Unkept => Strings.T("signin.errors.unkept");
 
     /// <summary>Pley's access tokens last an hour; an answer without expires_in is read as that.</summary>
     const long DefaultExpiresIn = 3600;
 
-    const string Unreadable = "the server's answer can't be read: try again";
+    static string Unreadable => Strings.T("signin.errors.unreadable");
 
     public static TokenResponse ParseTokenResponse(JsonElement? body, string askedScope)
     {
@@ -537,8 +537,10 @@ public sealed class Tokens
     /// <summary>
     /// Moves the sign-in to another profile of the household (the switch-profile grant of Pley's
     /// own apps), or checks the PIN of the one it acts as. A wrong PIN changes nothing.
+    /// <paramref name="ticket"/>, in place of a PIN: a cast's from another profile's remote
+    /// (docs/API.md, "Casting"); a spent one is invalid_grant with reason ticket_spent, and changes nothing.
     /// </summary>
-    public Task SwitchProfile(long profile, string? pin) => Serial(async () =>
+    public Task SwitchProfile(long profile, string? pin, string? ticket = null) => Serial(async () =>
     {
         var tokens = Load() ?? throw new SignedOutException();
         if (tokens.RefreshToken == null) throw SignedOut();
@@ -548,6 +550,7 @@ public sealed class Tokens
             ("refresh_token", tokens.RefreshToken),
             ("profile", profile.ToString(System.Globalization.CultureInfo.InvariantCulture)));
         if (pin != null) fields.Add(new KeyValuePair<string, string>("pin", pin));
+        if (ticket != null) fields.Add(new KeyValuePair<string, string>("ticket", ticket));
         await Proved(tokens, now: true).ConfigureAwait(false);
         JsonElement? answer;
         try

@@ -2,6 +2,7 @@ import { useCallback, useMemo } from "react";
 import { queryOptions, useInfiniteQuery, useMutation, useMutationState, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api, errorMessage, isApiError, qs, request } from "./client";
 import { reordered } from "./lists";
+import { t } from "@/i18n";
 import { received, type RemoteSession } from "@/lib/remote";
 import type {
   Activity,
@@ -244,18 +245,22 @@ export function fetchProfiles(qc: QueryClient) {
 }
 
 /**
- * Switch this device to another home profile. Everything cached belongs to
- * the previous profile, so the cache starts over with the new user.
+ * Switch this device to another home profile: with what it asks for, or
+ * with the `ticket` of a cast from it (components/CastReceiver.tsx).
+ * Everything cached belongs to the previous profile, so the cache starts
+ * over with the new user. Who is signed in changes in place: the app
+ * around the pages hears it at once, as the receiver of a cast needs,
+ * without a page change to show it.
  */
 export function useSwitchProfile() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { user_id: Id; pin?: string; password?: string; code?: string; setup_id?: string }) =>
+    mutationFn: (body: { user_id: Id; pin?: string; password?: string; code?: string; setup_id?: string; ticket?: string }) =>
       api.post<LoginResponse>("/api/auth/switch", body, { noAuthRedirect: true }),
     onSuccess: (res) => {
-      const server = qc.getQueryData<ServerStatus>(keys.server);
-      qc.clear();
-      if (server) qc.setQueryData(keys.server, server);
+      const kept = (key: readonly unknown[]) => key.length === 1 && (key[0] === keys.me[0] || key[0] === keys.server[0]);
+      qc.removeQueries({ predicate: (q) => !kept(q.queryKey) });
+      qc.getMutationCache().clear();
       qc.setQueryData(keys.me, res.user);
     },
   });
@@ -359,11 +364,15 @@ export const queries = {
       queryFn: () => api.get<PlayingSession[]>("/api/sessions").then((list) => received(list, Date.now())),
       staleTime: 2_000,
     }),
-  /** The user's own devices that take casts, which a remote lists with what they play. */
+  /**
+   * The devices that take casts, which a remote lists: the user's own, with
+   * what they play, and those of the household's other profiles that switch
+   * to the user's for a cast (`household=1`).
+   */
   remoteDevices: () =>
     queryOptions({
       queryKey: keys.remoteDevices,
-      queryFn: () => api.get<RemoteDevice[]>("/api/remote/devices"),
+      queryFn: () => api.get<RemoteDevice[]>("/api/remote/devices?household=1"),
       staleTime: 2_000,
     }),
   item: (id: Id) => queryOptions({ queryKey: keys.item(id), queryFn: ({ signal }) => api.get<ItemDetail>(`/api/items/${id}`, { signal }) }),
@@ -958,9 +967,10 @@ export function usePlayingSessions() {
 }
 
 /**
- * The user's own devices that take casts (their apps with the event stream
- * open as a receiver). Fetched again as they come and go, which the event
- * stream says with `sessions_changed`.
+ * The devices that take casts (apps with the event stream open as a
+ * receiver): the user's own, and those their household's other profiles are
+ * on. Fetched again as they come and go, which the event stream says with
+ * `sessions_changed`.
  */
 export function useRemoteDevices() {
   return useQuery(queries.remoteDevices());
@@ -1001,21 +1011,25 @@ export function useSessionCommand() {
 
 /** What a remote says when `device` didn't take a command. */
 export function sessionCommandError(err: unknown, device: string | null): string {
-  const it = device ?? "This device";
-  if (isApiError(err, 404)) return `${it} isn't playing any more`;
-  if (isApiError(err, 409)) return `${it} can't do that`;
-  if (isApiError(err, 429)) return "Too many at once: try again in a moment";
+  const it = device ?? t("remote.thisDevice");
+  if (isApiError(err, 404)) return t("remote.notPlaying", { device: it });
+  if (isApiError(err, 409)) return t("remote.cantDoThat", { device: it });
+  if (isApiError(err, 429)) return t("remote.tooMany");
   return errorMessage(err);
 }
 
 /**
- * Sends one of the user's own devices that take casts something to play
- * (`receiverId`: its `receiver_id`). It plays it as its own Play would, and
- * its session shows in the list as it starts.
+ * Sends a device that takes casts something to play (`receiverId`: its
+ * `receiver_id`). It plays it as its own Play would, and its session shows
+ * in the list as it starts. One on another profile switches to the user's
+ * first: the cast names that profile, and the user's PIN when they have one.
+ * A cast isn't kept once it is done with (`gcTime: 0`, and the caller's
+ * `reset`): the PIN would stay in the mutation cache with it.
  */
 export function useCast() {
   const qc = useQueryClient();
   return useMutation({
+    gcTime: 0,
     mutationFn: ({ receiverId, cast }: { receiverId: string; cast: CastRequest }) =>
       api.post<void>(`/api/remote/devices/${encodeURIComponent(receiverId)}/cast`, cast),
     onError: (err) => {
@@ -1027,9 +1041,9 @@ export function useCast() {
 
 /** What "Play on…" says when `device` didn't take a cast. */
 export function castError(err: unknown, device: string): string {
-  if (isApiError(err, 404)) return `${device} isn't on any more`;
-  if (isApiError(err, 409)) return `${device} can't play that`;
-  if (isApiError(err, 429)) return "Too many at once: try again in a moment";
+  if (isApiError(err, 404)) return t("remote.notOn", { device });
+  if (isApiError(err, 409)) return t("remote.cantPlay", { device });
+  if (isApiError(err, 429)) return t("remote.tooMany");
   return errorMessage(err);
 }
 

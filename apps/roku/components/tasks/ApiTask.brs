@@ -57,6 +57,13 @@ sub apiRun()
     ' { request, spec }; and whether one is under way.
     m.switchWaiting = invalid
     m.switching = false
+    ' A cast's switch held until the profile before it has been heard:
+    ' { request, spec, at } (apiSwitchAsked).
+    m.switchHeld = invalid
+    ' Profile switches made so far: each request is asked for the profile
+    ' signed in then (its gen), and goes with that profile's tokens or not
+    ' at all (authJobGoes).
+    m.switches = 0
     m.profileAsked = 0
     ' What the server said of this Roku's network, for each server
     ' (aqNetworkKept): forgotten with each sign-in and profile.
@@ -66,12 +73,17 @@ sub apiRun()
     ' liveGuideKeep; upto: how far each channel's is fetched).
     m.liveGuide = { key: "", programs: {}, upto: {} }
     apiDeviceFacts()
+    ' The words of its answers, and what it asks the server for
+    ' (Accept-Language), in the language the scene shows.
+    i18nUse(m.global.language)
+    m.global.observeField("language", m.port)
     m.top.ready = true
     while true
         msg = wait(apiWaitMs(), m.port)
         kind = type(msg)
         if kind = "roSGNodeEvent"
             if msg.getField() = "request" then apiAccept(msg.getData())
+            if msg.getField() = "language" then i18nUse(msg.getData())
         else if kind = "roUrlEvent"
             apiFinished(msg)
         else if kind = "roDeviceInfoEvent"
@@ -113,7 +125,7 @@ end function
 ' Timers need a tick while transfers, a sign-in or a later transfer are
 ' under way.
 function apiWaitMs() as integer
-    if m.transfers.Count() > 0 or m.signIn <> invalid or m.later.Count() > 0 then return 250
+    if m.transfers.Count() > 0 or m.signIn <> invalid or m.later.Count() > 0 or m.switchHeld <> invalid then return 250
     if m.tokens <> invalid and m.tokens.proof <> invalid then return 30000
     return 0
 end function
@@ -127,7 +139,7 @@ function apiFail(code as string, message as string) as object
 end function
 
 function apiSignedOut() as object
-    return { ok: false, status: 401, data: invalid, error: "signed_out", message: "You were signed out: sign in again." }
+    return { ok: false, status: 401, data: invalid, error: "signed_out", message: t("common.errors.signedOut") }
 end function
 
 sub apiAnswer(request as dynamic, answer as object)
@@ -170,13 +182,16 @@ sub apiAccept(request as dynamic)
     else if op = "speedTest"
         apiSpeedTest(request, spec)
     else if op = "switchProfile"
-        apiSwitchProfile(request, spec)
+        apiSwitchAsked(request, spec)
     else if op = "liveWatch"
         apiLiveWatch(request, spec)
     else if op = "livePage"
         apiLivePage(request, spec)
     else if op = "liveGuide"
         apiLiveGuide(request, spec, spec.channels)
+    else if op = "serverInfo"
+        if not m.session.serverHeard then apiAskServerInfo()
+        apiAnswer(request, apiOk(invalid))
     else
         apiCall(request, spec)
     end if
@@ -184,9 +199,10 @@ end sub
 
 ' --- Transfers ---
 
-' A transfer to send; purpose says what its answer is for.
+' A transfer to send; purpose says what its answer is for, gen the
+' profile it is asked for.
 function apiJob(purpose as string, method as string, url as string) as object
-    return { purpose: purpose, method: method, url: url, body: "", contentType: "", auth: false, sent: "", retried: false, request: invalid, server: m.server, timeoutMs: 30000, play: false, network: "", toFile: "" }
+    return { purpose: purpose, method: method, url: url, body: "", contentType: "", auth: false, sent: "", retried: false, request: invalid, server: m.server, timeoutMs: 30000, play: false, network: "", toFile: "", gen: m.switches }
 end function
 
 function apiForm(job as object, params as object) as object
@@ -211,7 +227,7 @@ end function
 ' failed.
 sub apiCall(request as object, spec as object)
     if m.server = ""
-        apiAnswer(request, apiFail("no_server", "Choose a server first."))
+        apiAnswer(request, apiFail("no_server", t("signin.problems.chooseServer")))
         return
     end if
     method = UCase(httpString(spec.method))
@@ -224,6 +240,7 @@ sub apiCall(request as object, spec as object)
     job.badges = httpTrue(spec.badges)
     job.bitrate = httpTrue(spec.bitrate)
     job.play = httpTrue(spec.play)
+    job.profile = httpTrue(spec.profile)
     job.auth = true
     if GetInterface(spec.auth, "ifBoolean") <> invalid then job.auth = spec.auth
     if spec.json <> invalid
@@ -239,6 +256,11 @@ sub apiCall(request as object, spec as object)
 end sub
 
 sub apiSend(job as object)
+    if not authJobGoes(job, m.switches)
+        ' Asked for the profile before a switch: never sent as the new one.
+        apiAnswer(job.request, apiProfileChanged())
+        return
+    end if
     if job.auth
         decision = authBeforeRequest(m.tokens, apiNow(), m.refreshing.DoesExist(m.server))
         if decision = "signed_out"
@@ -268,6 +290,8 @@ sub apiSend(job as object)
     if LCase(Left(job.url, 8)) = "https://" then transfer.SetCertificatesFile("common:/certs/ca-bundle.crt")
     transfer.AddHeader("User-Agent", m.userAgent)
     transfer.AddHeader("Accept", "application/json")
+    ' What the server writes itself (Home's rows) comes in the language shown.
+    transfer.AddHeader("Accept-Language", i18nLanguage())
     ' The token goes in this header only, never in an address.
     if job.auth then transfer.AddHeader("Authorization", "Bearer " + job.sent)
     if job.contentType <> "" then transfer.AddHeader("Content-Type", job.contentType)
@@ -317,6 +341,8 @@ sub apiAnswered(job as object, status as integer, body as string, headers as dyn
         apiSwitchAnswered(job, status, body)
     else if purpose = "proof"
         apiProofAnswered(job, status, body)
+    else if purpose = "serverInfo"
+        apiServerInfoAnswered(job, status, body)
     else if purpose = "revoke"
         ' The app signed out whatever the answer; a busy server is asked
         ' once more.
@@ -356,6 +382,7 @@ sub apiTick()
     end if
     apiPollWhenDue(now)
     apiRenewProof(now)
+    apiSwitchWhenHeard(now)
 end sub
 
 sub apiCallAnswered(job as object, status as integer, body as string, headers as dynamic)
@@ -366,7 +393,9 @@ sub apiCallAnswered(job as object, status as integer, body as string, headers as
         apiProve(m.tokens)
     end if
     ' A switch stops the tokens it replaces at once: what they were sent
-    ' with goes again with the new pair, not taken for the sign-in's end.
+    ' with isn't taken for the sign-in's end. It waits for the switch to
+    ' end, and goes again only if the profile stayed (apiSend drops it
+    ' otherwise): a request asked for one profile never goes as another.
     if status = 401 and job.auth and job.server = m.server and m.switching and not job.retried
         job.retried = true
         m.waiting.Push(job)
@@ -407,15 +436,16 @@ sub apiCallAnswered(job as object, status as integer, body as string, headers as
     end if
     if job.network <> "" then aqNetworkKeep(m.networkKept, job.network, answer, m.clock.TotalMilliseconds())
     if httpTrue(job.me) then apiKnowProfile(job, answer)
+    if httpTrue(job.profile) then apiProfileLanguage(job, answer)
     if answer.ok and job.play and apiAbandoned(job.request)
         ' The player left before its session came: the server would go on
         ' preparing it.
-        apiCloseSession(answer.data)
+        apiCloseSession(answer.data, job.gen)
         return
     end if
     if answer.ok and httpTrue(job.liveWatch) and apiAbandoned(job.request)
         ' Zapped on or left before the channel came: its connection goes.
-        apiLeaveChannel(answer.data)
+        apiLeaveChannel(answer.data, job.gen)
         return
     end if
     if job.build = "livePage" or job.build = "liveGuide"
@@ -432,13 +462,15 @@ function apiAbandoned(request as dynamic) as boolean
 end function
 
 ' DELETE /api/playback/{session} of a PlaybackInfo; nothing waits for it.
-sub apiCloseSession(info as dynamic)
+' gen: the profile the session was asked for, whose tokens end it.
+sub apiCloseSession(info as dynamic, gen as integer)
     data = httpObject(info)
     if data = invalid then return
     sessionId = httpString(data.session_id)
     if sessionId = "" then return
     job = apiJob("close", "DELETE", m.server + "/api/playback/" + urlEncode(sessionId))
     job.auth = true
+    job.gen = gen
     apiSend(job)
 end sub
 
@@ -736,7 +768,16 @@ sub apiFailWaiting(answer as object)
         apiAnswer(m.switchWaiting.request, answer)
         m.switchWaiting = invalid
     end if
+    if m.switchHeld <> invalid
+        apiAnswer(m.switchHeld.request, answer)
+        m.switchHeld = invalid
+    end if
 end sub
+
+' The answer to a request asked for the profile before a switch, dropped.
+function apiProfileChanged() as object
+    return apiFail("profile_changed", t("signin.problems.profileChanged"))
+end function
 
 ' Ends the grant of tokens on its server (RFC 7009); nothing waits for it.
 ' A server that can't prove it holds their key gets nothing: the person can
@@ -786,10 +827,10 @@ sub apiBoot(request as object)
 end sub
 
 ' The first screen on the server in use, at a start or once it is chosen
-' (serversStart): "Who's watching?" first when the household had more than
-' one profile, unless Settings' "Always start as" names one of them, which
-' still opens it on the PIN pad of the profile signed in when that one has
-' a PIN (pin).
+' (serversStart): straight in as the profile signed in when it has no PIN;
+' else "Who's watching?" first when the household had more than one
+' profile, on that profile's PIN pad (pin) when Settings' "Always start as"
+' names one of them.
 function apiStartScreen() as object
     atStart = ""
     if m.tokens <> invalid
@@ -802,8 +843,13 @@ end function
 
 ' Makes url the server the screens talk to, signed in when it has tokens.
 sub apiSelect(url as string, name as string)
+    ' The language facts were the server before's, or are asked again.
+    m.session.accountHeard = false
+    m.session.accountLanguage = ""
+    m.session.serverHeard = false
+    m.session.serverLanguage = ""
     if url <> m.server
-        apiFailWaiting(apiFail("server_changed", "The server changed."))
+        apiFailWaiting(apiFail("server_changed", t("signin.problems.serverChanged")))
         ' The token in use goes before the address changes: the event
         ' stream follows the two apart (MainScene's onStream), so the server
         ' before's token never goes to the one chosen, proved or not.
@@ -830,6 +876,7 @@ sub apiSelect(url as string, name as string)
     end if
     apiPublish()
     m.session.signedIn = m.tokens <> invalid
+    apiAskServerInfo()
     apiAskProfile()
 end sub
 
@@ -843,12 +890,36 @@ sub apiReached(answered as boolean)
     m.session.offline = m.offline
 end sub
 
+' The server's language (GET /api/server): what a Roku in a language Pley
+' doesn't have shows, and whether the server keeps an account's (a Pley
+' from before languages names none). Anyone may ask, so it goes without the
+' token; the scene asks again as the event stream comes up when it got no
+' answer.
+sub apiAskServerInfo()
+    if m.server = "" then return
+    job = apiJob("serverInfo", "GET", m.server + "/api/server")
+    job.timeoutMs = 10000
+    apiSend(job)
+end sub
+
+sub apiServerInfoAnswered(job as object, status as integer, body as string)
+    if job.server <> m.server then return
+    data = httpObject(httpJson(body))
+    if status <> 200 or data = invalid or httpString(data.version) = "" then return
+    m.session.serverLanguage = httpString(data.language)
+    m.session.serverHeard = true
+end sub
+
 ' Who the sign-in acts as (GET /api/auth/me), for the screens: asked as a
 ' server is chosen signed in, and after each sign-in.
 sub apiAskProfile()
     m.networkKept = {}
     m.session.profileId = 0
     m.session.profileName = ""
+    ' Another profile, maybe with another language: the one shown stays
+    ' until it is heard.
+    m.session.accountHeard = false
+    m.session.accountLanguage = ""
     if m.tokens = invalid then return
     job = apiJob("call", "GET", m.server + "/api/auth/me")
     job.auth = true
@@ -867,13 +938,26 @@ sub apiKnowProfile(job as object, answer as object)
     if data = invalid then return
     m.session.profileId = httpNumber(data.id, 0)
     m.session.profileName = httpSentence(data.name)
+    m.session.accountLanguage = httpString(data.language)
+    m.session.accountHeard = true
     profKeepPin(CreateObject("roRegistrySection", "household"), m.server, data)
+end sub
+
+' A request that answers with the profile (spec.profile: PUT
+' /api/me/language): the account's language as it is now, unless another
+' profile or server came meanwhile.
+sub apiProfileLanguage(job as object, answer as object)
+    if not answer.ok or job.gen <> m.switches or job.server <> m.server then return
+    data = httpObject(answer.data)
+    if data = invalid or not data.DoesExist("language") then return
+    m.session.accountLanguage = httpString(data.language)
+    m.session.accountHeard = true
 end sub
 
 sub apiUseServer(request as object, spec as object)
     url = urlOrigin(httpString(spec.url))
     if url = invalid
-        apiAnswer(request, apiFail("address", "That isn't a server's address."))
+        apiAnswer(request, apiFail("address", t("signin.problems.notAnAddress")))
         return
     end if
     name = httpSentence(spec.name)
@@ -910,7 +994,7 @@ sub apiCheckServer(request as object, spec as object)
     address = httpString(spec.address).Trim()
     candidates = urlCandidates(address)
     if candidates.Count() = 0
-        apiAnswer(request, apiFail("address", "Enter an address such as nas, 192.168.1.20 or pley.example.com."))
+        apiAnswer(request, apiFail("address", t("signin.problems.badAddress")))
         return
     end if
     job = apiJob("check", "GET", candidates[0] + "/api/server")
@@ -931,12 +1015,12 @@ sub apiCheckAnswered(job as object, status as integer, body as string)
     if Len(body) <= discoveryAnswerMax() then data = httpObject(httpJson(body))
     if status = 200 and data <> invalid and discoveryVersion(data.version) <> ""
         if httpTrue(data.setup_required)
-            apiAnswer(job.request, apiFail("setup", "This server isn't set up yet: open " + urlDisplayAddress(server) + " in a browser first."))
+            apiAnswer(job.request, apiFail("setup", t("signin.problems.notSetUp", { address: urlDisplayAddress(server) })))
         else if urlUnencrypted(server)
             ' Android TV goes ahead once asked again; the Roku never sends a
             ' code or a token over plain HTTP beyond the home network
             ' (SECURITY.md), so it says why it won't.
-            apiAnswer(job.request, apiFail("unencrypted", job.address + " isn't encrypted: what you watch could be read on the way, and Pley for Roku doesn't sign in over plain HTTP beyond your network. Use its https address if it has one."))
+            apiAnswer(job.request, apiFail("unencrypted", t("signin.problems.unencryptedAddress", { address: job.address })))
         else
             name = httpSentence(data.name)
             if name = "" then name = urlDisplayAddress(server)
@@ -950,9 +1034,9 @@ sub apiCheckAnswered(job as object, status as integer, body as string)
         job.url = job.candidates[job.index] + "/api/server"
         apiSend(job)
     else if job.answered
-        apiAnswer(job.request, apiFail("not_pley", "Something answers at " + job.address + ", but it isn't Pley."))
+        apiAnswer(job.request, apiFail("not_pley", t("signin.problems.notPley", { address: job.address })))
     else
-        apiAnswer(job.request, apiFail("unreachable", "Couldn't reach " + job.address + ". Check the address, and that the server is on."))
+        apiAnswer(job.request, apiFail("unreachable", t("signin.problems.unreachableAddress", { address: job.address })))
     end if
 end sub
 
@@ -1028,11 +1112,11 @@ end sub
 sub apiSignInStart(request as object)
     m.signIn = invalid
     if m.server = ""
-        apiAnswer(request, apiFail("no_server", "Choose a server first."))
+        apiAnswer(request, apiFail("no_server", t("signin.problems.chooseServer")))
         return
     end if
     if urlUnencrypted(m.server)
-        apiAnswer(request, apiFail("unencrypted", "This server isn't on your network and isn't encrypted: open it by its https address to sign in."))
+        apiAnswer(request, apiFail("unencrypted", t("signin.problems.unencrypted")))
         return
     end if
     m.signIns = m.signIns + 1
@@ -1176,7 +1260,7 @@ sub apiSignedIn(signIn as object, body as string)
     fresh = tokensFrom(answer, meta.issuer, meta.tokenEndpoint, meta.revocationEndpoint)
     if authExtraScopes(fresh.scope, signIn.scope).Count() > 0
         apiRevoke(fresh)
-        apiSignInUpdate(signIn, { status: "failed", message: "The server allowed more than Pley for Roku asks for, so it was signed out again." })
+        apiSignInUpdate(signIn, { status: "failed", message: t("signin.problems.widerScope") })
         return
     end if
     previous = tokensLoad(m.tokensSection, fresh.issuer)
@@ -1202,12 +1286,69 @@ end sub
 
 ' --- Switching profiles ---
 
+' A switch asked for. A cast's (spec.drain) is held until the profile
+' before it has been heard: the scene ended what played as the switch was
+' asked, and its last progress, stopped report and session end go first,
+' with that profile's tokens (docs/ROKU.md, "Casts"). What hasn't gone in
+' authSwitchHoldMs is dropped. One held gives way to a switch asked
+' meanwhile.
+sub apiSwitchAsked(request as object, spec as object)
+    if m.switchHeld <> invalid
+        apiAnswer(m.switchHeld.request, apiFail("switch_replaced", t("signin.problems.anotherChosen")))
+        m.switchHeld = invalid
+    end if
+    if not httpTrue(spec.drain)
+        apiSwitchProfile(request, spec)
+        return
+    end if
+    m.switchHeld = { request: request, spec: spec, at: m.clock.TotalMilliseconds() }
+    apiSwitchWhenHeard(m.switchHeld.at)
+end sub
+
+' The switch held goes once the profile's requests are answered, or at
+' the hold's end, those left dropped (authSwitchHeld).
+sub apiSwitchWhenHeard(now as integer)
+    held = m.switchHeld
+    if held = invalid then return
+    jobs = []
+    for each key in m.transfers
+        jobs.Push(m.transfers[key])
+    end for
+    jobs.Append(m.waiting)
+    for each entry in m.later
+        jobs.Push(entry.job)
+    end for
+    verdict = authSwitchHeld(jobs, m.switches, held.at, now)
+    if verdict = "wait" then return
+    m.switchHeld = invalid
+    if verdict = "drop"
+        ' Those in flight went with the profile's tokens; those not sent
+        ' yet go no further.
+        dropped = m.waiting
+        m.waiting = []
+        later = []
+        for each entry in m.later
+            if entry.job.auth
+                dropped.Push(entry.job)
+            else
+                later.Push(entry)
+            end if
+        end for
+        m.later = later
+        for each job in dropped
+            apiAnswer(job.request, apiProfileChanged())
+        end for
+    end if
+    apiSwitchProfile(held.request, held.spec)
+end sub
+
 ' Moves the sign-in to another profile of the household, or checks the PIN
 ' of the one it acts as (docs/API.md, the switch-profile grant): with the
 ' refresh token, which a switch spends as a refresh does, so never beside
-' one. spec: { profile, pin ("" for none) }. The answer: ok ({ through:
-' true } when there was no PIN to check), or the refusal (authSwitchOutcome)
-' with its reason as the error.
+' one. spec: { profile, pin ("" for none), ticket (a cast's switch_ticket,
+' in place of the PIN, as the receiver of another profile's remote) }. The
+' answer: ok ({ through: true } when there was no PIN to check), or the
+' refusal (authSwitchOutcome) with its reason as the error.
 sub apiSwitchProfile(request as object, spec as object)
     tokens = m.tokens
     if tokens = invalid
@@ -1216,7 +1357,7 @@ sub apiSwitchProfile(request as object, spec as object)
     end if
     if m.refreshing.DoesExist(tokens.issuer)
         ' One switch waits at most: an earlier one asked for meanwhile gives way.
-        if m.switchWaiting <> invalid then apiAnswer(m.switchWaiting.request, apiFail("switch_replaced", "Another profile was chosen."))
+        if m.switchWaiting <> invalid then apiAnswer(m.switchWaiting.request, apiFail("switch_replaced", t("signin.problems.anotherChosen")))
         m.switchWaiting = { request: request, spec: spec }
         return
     end if
@@ -1225,12 +1366,16 @@ sub apiSwitchProfile(request as object, spec as object)
     params = { grant_type: authSwitchGrant(), client_id: httpClientId(), refresh_token: tokens.refresh, profile: urlValue(spec.profile) }
     pin = httpString(spec.pin)
     if pin <> "" then params.pin = pin
+    ticket = httpString(spec.ticket)
+    if ticket <> "" then params.ticket = ticket
     job = apiForm(apiJob("switch", "POST", tokens.tokenEndpoint), params)
     job.tokens = tokens
     job.request = request
+    job.profile = spec.profile
     ' As a refresh: an answer given up on can be a spent refresh token.
     job.timeoutMs = 120000
-    ' The refresh token and the PIN go only to a server that proves itself now.
+    ' The refresh token, the PIN and the ticket go only to a server that
+    ' proves itself now.
     apiSendProved(tokens, job)
 end sub
 
@@ -1255,13 +1400,16 @@ sub apiSwitchAnswered(job as object, status as integer, body as string)
         else if not current
             ' Signed out or in again meanwhile: those stay.
             apiRevoke(fresh)
-            apiAnswer(job.request, apiFail("server_changed", "The sign-in changed."))
+            apiAnswer(job.request, apiFail("server_changed", t("signin.problems.signInChanged")))
         else
             ' Saved before they are used: the old refresh token is spent.
             tokensSave(m.tokensSection, fresh)
             ' Another profile, maybe: whether it has a PIN isn't known until it says.
             profKeepPin(CreateObject("roRegistrySection", "household"), old.issuer, invalid)
             m.tokens = fresh
+            ' Another profile (not a PIN checked for this one): what was
+            ' asked for the one before goes no further.
+            if httpNumber(job.profile, 0) <> m.session.profileId then m.switches = m.switches + 1
             m.lastIssued = { token: fresh.access, at: apiNow() }
             m.session.scope = fresh.scope
             apiPublish()
@@ -1455,7 +1603,7 @@ end sub
 ' the server a few seconds.
 sub apiLiveWatch(request as object, spec as object)
     if m.server = ""
-        apiAnswer(request, apiFail("no_server", "Choose a server first."))
+        apiAnswer(request, apiFail("no_server", t("signin.problems.chooseServer")))
         return
     end if
     job = apiJob("call", "POST", m.server + "/api/live/channels/" + urlValue(spec.channelId) + "/watch")
@@ -1476,13 +1624,15 @@ sub apiLiveWatch(request as object, spec as object)
 end sub
 
 ' DELETE /api/live/sessions/{session} of a watch's answer; nothing waits.
-sub apiLeaveChannel(watching as dynamic)
+' gen: the profile the channel was watched as, whose tokens end it.
+sub apiLeaveChannel(watching as dynamic, gen as integer)
     data = httpObject(watching)
     if data = invalid then return
     sessionId = httpString(data.session_id)
     if sessionId = "" then return
     job = apiJob("leave", "DELETE", m.server + "/api/live/sessions/" + urlEncode(sessionId))
     job.auth = true
+    job.gen = gen
     apiSend(job)
 end sub
 
@@ -1493,7 +1643,7 @@ end sub
 ' Answers { total, offset, channels }; the guide's, with upto.
 sub apiLivePage(request as object, spec as object)
     if m.server = ""
-        apiAnswer(request, apiFail("no_server", "Choose a server first."))
+        apiAnswer(request, apiFail("no_server", t("signin.problems.chooseServer")))
         return
     end if
     category = httpString(spec.category)
@@ -1552,7 +1702,7 @@ end sub
 ' not kept yet fetched first.
 sub apiLiveGuide(request as object, spec as object, channels as dynamic, page = invalid as dynamic)
     if m.server = ""
-        apiAnswer(request, apiFail("no_server", "Choose a server first."))
+        apiAnswer(request, apiFail("no_server", t("signin.problems.chooseServer")))
         return
     end if
     start = Int(httpNumber(spec.start, 0))
@@ -1598,7 +1748,7 @@ end sub
 ' from the last 10 minutes at once.
 sub apiNetwork(request as object)
     if m.server = ""
-        apiAnswer(request, apiFail("no_server", "Choose a server first."))
+        apiAnswer(request, apiFail("no_server", t("signin.problems.chooseServer")))
         return
     end if
     kept = aqNetworkKept(m.networkKept, m.server, m.clock.TotalMilliseconds())
@@ -1620,7 +1770,7 @@ end sub
 ' the server's answer takes its place.
 sub apiTellNetwork(request as object, spec as object)
     if m.server = ""
-        apiAnswer(request, apiFail("no_server", "Choose a server first."))
+        apiAnswer(request, apiFail("no_server", t("signin.problems.chooseServer")))
         return
     end if
     m.networkKept.Delete(m.server)
@@ -1640,7 +1790,7 @@ end sub
 ' up after timeoutMs (what came by then counts, where the Roku wrote it).
 sub apiSpeedTest(request as object, spec as object)
     if m.server = ""
-        apiAnswer(request, apiFail("no_server", "Choose a server first."))
+        apiAnswer(request, apiFail("no_server", t("signin.problems.chooseServer")))
         return
     end if
     job = apiJob("call", "GET", m.server + "/api/playback/speedtest?bytes=" + urlValue(aqProbeBytes()))

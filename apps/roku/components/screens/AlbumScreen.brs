@@ -17,6 +17,7 @@ sub init()
     m.buttons = m.top.findNode("buttons")
     m.tracks = m.top.findNode("tracks")
     m.message = m.top.findNode("message")
+    m.message.text = t("common.states.loading")
     m.started = false
     m.album = invalid
     m.queue = []
@@ -49,9 +50,9 @@ sub showFailure(answer as object)
         uiToast(answer.message, true)
         return
     end if
-    m.message.title = "Couldn't load this album"
+    m.message.title = t("browse.music.albumFailed")
     typeSet(m.message, answer.message)
-    m.message.action = "Retry"
+    m.message.action = t("common.actions.retry")
     m.message.visible = true
     if m.top.hasFocus() or m.message.isInFocusChain() then m.message.setFocus(true)
 end sub
@@ -59,7 +60,7 @@ end sub
 ' Retry: what didn't come is asked again.
 sub onRetry()
     m.message.title = ""
-    m.message.text = "Loading…"
+    m.message.text = t("common.states.loading")
     m.message.action = ""
     m.top.setFocus(true)
     ask()
@@ -155,7 +156,7 @@ sub onTracks(event as object)
     if m.queue.Count() = 0
         m.message.title = ""
         m.message.action = ""
-        m.message.text = "This album has no tracks."
+        m.message.text = t("titles.music.noTracks")
         return
     end if
     m.message.visible = false
@@ -218,14 +219,14 @@ end sub
 ' playing while music plays; the focus stays on the button it was on.
 sub showButtons()
     actions = ["play", "shuffle"]
-    labels = ["Play", "Shuffle"]
+    labels = [t("common.actions.play"), t("titles.actions.shuffle")]
     if m.album <> invalid and httpNumber(m.album.parent_id, 0) > 0
         actions.Push("artist")
-        labels.Push("Go to artist")
+        labels.Push(t("titles.actions.goToArtist"))
     end if
     if m.global.music.state <> "stopped"
         actions.Push("nowPlaying")
-        labels.Push("Now playing")
+        labels.Push(t("titles.actions.nowPlaying"))
     end if
     m.actions = actions
     if FormatJson(labels) <> FormatJson(m.buttons.buttons)

@@ -3,8 +3,16 @@
 //! own. The rules are the other apps' players' (the Apple apps' `Remote.swift`), pinned by the
 //! TV apps' shared fixture (packages/tv/test/fixtures/remote.json); a video's tracks and quality,
 //! which the fixture doesn't have, by the tests here.
+//!
+//! A command never brings up a video player's controls: the person watching didn't press
+//! anything. What it changed is said instead for 2 s where the player puts its notices, in the
+//! words below (Android TV's remote notice).
 
+use pley_core::format::format_clock;
 use pley_core::model::{Control, ServerEvent, quality_preset};
+use pley_i18n::t;
+
+use crate::seeker::badge_text;
 
 /// "Previous" this far into a track starts it again, as the music's own button does.
 pub const RESTART_AFTER_MS: i64 = 3_000;
@@ -225,6 +233,47 @@ pub fn channel_step(at: Option<i64>, by: i64, total: i64) -> Option<i64> {
     Some(at.map_or(0, |at| (at + by).rem_euclid(total)))
 }
 
+/// What a video says of the remote's play.
+pub fn playing() -> &'static str {
+    t!("player.toasts.playing")
+}
+
+/// What a video says of the remote's pause.
+pub fn paused() -> &'static str {
+    t!("player.toasts.paused")
+}
+
+/// What a video says of the remote's skip: "+30 s", "−10 s", the whole seconds asked for, as the
+/// seek badge says them.
+pub fn skipped(offset_ms: i64) -> String {
+    badge_text(offset_ms)
+}
+
+/// What a video says of the remote's seek: "Jumped to 12:34", "Jumped to 1:02:03", in the
+/// player's own times.
+pub fn jumped(position_ms: i64) -> String {
+    t!("player.toasts.jumpedTo", time = format_clock(Some(position_ms)))
+}
+
+/// What a video says of the audio track the remote picked, named as the Audio menu names it.
+pub fn audio_picked(label: &str) -> String {
+    t!("player.toasts.audio", track = label)
+}
+
+/// What a video says of the subtitles the remote picked, named as the Subtitles menu names them,
+/// or that it turned them off.
+pub fn subtitles_picked(label: Option<&str>) -> String {
+    match label {
+        Some(label) => t!("player.toasts.subtitles", track = label),
+        None => t!("player.toasts.subtitlesOff").into(),
+    }
+}
+
+/// What a video says of the quality the remote picked, named as the Quality menu names it.
+pub fn quality_picked(label: &str) -> String {
+    t!("player.toasts.quality", quality = label)
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
@@ -425,6 +474,33 @@ mod tests {
         }
         // Another session's track is someone else's player's.
         assert_eq!(pick_in(RemoteKind::Video, "s2", Control::Audio, Some(2)), RemoteAction::None);
+    }
+
+    #[test]
+    fn a_video_says_what_the_remote_did_in_android_tvs_words() {
+        assert_eq!((playing(), paused()), ("Playing", "Paused"));
+        assert_eq!(skipped(30_000), "+30 s");
+        assert_eq!(skipped(-10_000), "−10 s");
+        assert_eq!(jumped(754_000), "Jumped to 12:34");
+        assert_eq!(jumped(3_723_000), "Jumped to 1:02:03");
+        assert_eq!(audio_picked("French (E-AC3 5.1)"), "Audio: French (E-AC3 5.1)");
+        assert_eq!(subtitles_picked(Some("English (SRT)")), "Subtitles: English (SRT)");
+        assert_eq!(subtitles_picked(None), "Subtitles off");
+        assert_eq!(quality_picked("8 Mbps 1080p"), "Quality: 8 Mbps 1080p");
+    }
+
+    #[test]
+    fn a_video_says_what_the_remote_did_in_french_and_spanish() {
+        pley_i18n::with_language(pley_i18n::Language::Fr, || {
+            assert_eq!((playing(), paused()), ("Lecture", "En pause"));
+            assert_eq!(jumped(754_000), "Position\u{a0}: 12:34");
+            assert_eq!(subtitles_picked(Some("Anglais (SRT)")), "Sous-titres\u{a0}: Anglais (SRT)");
+            assert_eq!(subtitles_picked(None), "Sous-titres désactivés");
+        });
+        pley_i18n::with_language(pley_i18n::Language::Es, || {
+            assert_eq!(skipped(-10_000), "−10 s");
+            assert_eq!(quality_picked("8 Mbps 1080p"), "Calidad: 8 Mbps 1080p");
+        });
     }
 
     #[test]

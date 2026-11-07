@@ -11,6 +11,102 @@ describes how they are made.
 
 ### Added
 
+- The web and desktop apps' home screen opens on a banner: the newest
+  films and shows you haven't watched, full width under the top bar, each
+  with its plot, Play, More info and My List, taking turns every few
+  seconds (holding still under the pointer, and for those who ask their
+  system for less motion). Swipe between them on a phone.
+
+## [0.1.8] - 2026-11-06
+
+### Added
+
+- Pley is in English, French and Spanish: each device's language by
+  default (the sign-in page has a globe to pick another), or the one an
+  account picks on its Account page, which follows it everywhere. The
+  server language, in Settings → General, is for the server's own words
+  (Home's rows, the tray's menu) and for devices in a language Pley
+  doesn't have.
+- Jellyfin apps that show seek-bar previews, such as Findroid and
+  Streamyfin, show Pley's as you scrub: the same previews Pley's own players
+  use. Jellyfin for Android TV doesn't show them.
+- The web and desktop apps' remote offers Skip Intro and Skip Credits while
+  what a device plays is in an intro or the credits, as its player would;
+  `GET /api/sessions` gives each session's intro and credits. Its back
+  button goes 30 seconds, as far as forward.
+- Your remote lists the TVs and other devices of everyone in your
+  household, not only those on your profile, each with the profile it is
+  on. Sending one something switches it to your profile first, so it plays
+  as you, after your PIN when your profile has one.
+- A device that gives itself a TV's name and id on the TV's profile is
+  listed beside the TV ("Living room TV (2)"), never in its place: the TV
+  is listed again the moment it is back from being off or reconnecting,
+  and what you send the TV reaches the TV alone.
+- The web app's Play on… lists your household's devices too, and asks for
+  your PIN in its menu's place when your profile has one. The desktop app
+  switches to the profile of the remote that sends it something, as a TV
+  does, and says so when it can't. An administrator's remote sends only to
+  Pley's apps, never to a browser or the desktop app, which would stay
+  signed in with the administrator's rights.
+- Jellyfin apps make, rename, fill, reorder and delete your playlists, and
+  with a token that may manage libraries, make and change collections. Each
+  playlist entry has an id of its own, so an app removes or moves the one
+  you picked when a title is there twice.
+- Pley reads the NFO files Kodi, Jellyfin, Emby, Radarr, Sonarr,
+  tinyMediaManager and MediaElch keep next to movies, shows, seasons and
+  episodes. Their ids decide what a title is matched to, and their titles,
+  summaries, dates, genres, content ratings and other fields win over
+  TMDB's, TheTVDB's and TVmaze's; your own edits still win over them, and
+  Fix Match to another title sets them aside. Without a TMDB key, movies
+  with NFO files get their metadata from them. Jellyfin's lockdata keeps an
+  item from being fetched online. Settings → Server has a switch for it, on
+  by default.
+- Scripts and tools edit metadata through the Jellyfin-compatible API with
+  a token that may manage libraries: titles' fields, locks, pictures and
+  Fix Match, as Pley's own editor does them.
+- In the web and desktop apps, an item's Edit details says which fields
+  come from its NFO file, and Fix match says when a title was matched by
+  hand, with Undo Fix Match to let its NFO file decide again.
+
+### Changed
+
+- The web and desktop apps' remote shows a command at once (the place a
+  seek goes, playing or paused), and keeps what plays while a next starts
+  the one after. Previous and Next sit at its edges, with the skips and
+  Play or Pause centred between them. A device that plays is chosen for
+  its controls, whose bar is the only one shown; one ready to play is only
+  listed.
+- Signing in on the web and in the desktop app goes straight in as the
+  profile the browser was last used as, when it has no PIN, where a
+  household of several profiles was asked "Who's watching?" each time. A
+  profile with a PIN, or another person signing in, still picks first.
+- The web and desktop apps' video player no longer brings up its controls
+  when a remote pauses it, seeks or changes its audio, subtitles or
+  quality: a brief notice says what changed ("Paused", "+30 s", "Jumped
+  to 12:34", "Subtitles off"), and the controls show as before once you
+  move the mouse, tap or press a key. On Live TV a remote's change of
+  channel shows only the channel's tuning screen.
+- With TMDB as the TV source, a show with an IMDb or TheTVDB id but no
+  TMDB id is found by that id before it is searched for by name.
+- The web and desktop apps' menus open above their button where the
+  window has no room for them below, as in a short window.
+- Jellyfin apps' streams go as far as Pley's own apps' do, by what their
+  device profile says: HEVC copied, or made in HEVC to stay HDR, in fMP4
+  segments where the app asks for them, VP9 and AV1 copied into fMP4, HDR
+  and Dolby Vision kept where the app shows them, and 5.1 sound (E-AC-3 or
+  AC-3) where it takes it. They were H.264 or copied HEVC, in SDR, with
+  stereo AAC.
+- Why a request couldn't be sent to Radarr or Sonarr ("Radarr isn't
+  answering", "Radarr refused: …") is in the language each administrator
+  sees Pley in, on Requests and in the notice that it failed, as is "Added
+  by hand". What Radarr and Sonarr say themselves stays as they said it.
+  A send that can't reach them says it isn't answering, as approving
+  does, where it gave the network's error.
+
+## [0.1.7] - 2026-11-05
+
+### Added
+
 - Pley for Home Assistant can sign in with a code, as Pley's TV apps do.
   It shows as Home Assistant in your signed-in apps and on a TV it plays
   something on.
@@ -701,7 +797,9 @@ describes how they are made.
 - First release with a version of its own (builds before it carried 0.2.0,
   the version every app shared).
 
-[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-04...HEAD
+[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-06...HEAD
+[0.1.8]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-06
+[0.1.7]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-05
 [0.1.6]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-04
 [0.1.5]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-03
 [0.1.4]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-02.2

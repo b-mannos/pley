@@ -12,6 +12,7 @@
         <field id="active" type="boolean" alwaysNotify="true" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/screens/NowPlayingScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/I18n.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
@@ -59,7 +60,7 @@
         </Label>
         <ChipRow id="buttons" translation="[96, 560]" />
         <!-- Up next: the queue, the track playing marked, OK playing one. -->
-        <Label id="upNextTitle" translation="[96, 652]" text="Up next" color="0xA1A9B6FF" visible="false">
+        <Label id="upNextTitle" translation="[96, 652]" color="0xA1A9B6FF" visible="false">
             <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="30" />
         </Label>
         <MarkupList id="upNext" translation="[96, 700]" itemComponentName="QueueRow" itemSize="[1728, 56]" itemSpacing="[0, 8]" numRows="5" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" visible="false" />

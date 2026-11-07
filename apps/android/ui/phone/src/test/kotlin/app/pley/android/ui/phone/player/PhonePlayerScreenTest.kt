@@ -144,6 +144,54 @@ class PhonePlayerScreenTest {
         onAllNodes(androidx.compose.ui.test.hasText(text)).fetchSemanticsNodes().size
 
     @Test
+    fun aPauseFromAnywhereShowsTheControlsButTheRemotesSaysSoInAToast() {
+        val fake = FakePlaybackController(playing())
+        compose.mainClock.autoAdvance = false
+        show(fake)
+        compose.mainClock.advanceTimeBy(4_000)
+        assertTrue(compose.onAllNodesWithTextCount("Fixture Show") == 0)
+
+        // The remote, on another device, pauses: its toast, not the controls.
+        fake.update { it.copy(phase = PlayerPhase.Paused, pausedByRemote = true, remoteNotice = "Paused") }
+        compose.mainClock.advanceTimeBy(500)
+        compose.onNodeWithText("Paused").assertIsDisplayed()
+        assertTrue(compose.onAllNodesWithTextCount("Fixture Show") == 0)
+        assertEquals(1, fake.calls("dismissRemoteNotice").size)
+
+        // Played again, then paused here (a headset): the controls show, and stay.
+        fake.update { it.copy(phase = PlayerPhase.Playing, pausedByRemote = false) }
+        compose.mainClock.advanceTimeBy(500)
+        fake.update { it.copy(phase = PlayerPhase.Paused) }
+        compose.mainClock.advanceTimeBy(500)
+        compose.onNodeWithText("Fixture Show").assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(10_000)
+        compose.onNodeWithText("Fixture Show").assertIsDisplayed()
+    }
+
+    @Test
+    fun theRemotesPauseKeepsNoControlsUntilATouchMakesThePauseThePersons() {
+        val fake = FakePlaybackController(playing())
+        compose.mainClock.autoAdvance = false
+        show(fake)
+        compose.mainClock.advanceTimeBy(500)
+        compose.onNodeWithText("Fixture Show").assertIsDisplayed()
+
+        // Showing as the remote pauses: they go after their time, as while playing.
+        fake.update { it.copy(phase = PlayerPhase.Paused, pausedByRemote = true) }
+        compose.mainClock.advanceTimeBy(4_000)
+        assertTrue(compose.onAllNodesWithTextCount("Fixture Show") == 0)
+
+        // A tap brings them back; the pause is the person's now, and they stay.
+        compose.mainClock.autoAdvance = true
+        compose.onNodeWithTag(TAG_PLAYER).performTouchInput { click(center) }
+        compose.waitForIdle()
+        compose.mainClock.autoAdvance = false
+        compose.onNodeWithText("Fixture Show").assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(10_000)
+        compose.onNodeWithText("Fixture Show").assertIsDisplayed()
+    }
+
+    @Test
     fun theNextItemShowsTheControlsWithItsTitleAsItBegins() {
         val fake = FakePlaybackController(playing())
         compose.mainClock.autoAdvance = false
@@ -521,15 +569,18 @@ class PhonePlayerScreenTest {
             bounds(compose.onNodeWithText("Lock")),
         )
 
-        // The player's first frame, before the bars have gone: the controls are clear of them.
-        bars(shown = true)
-        val screen = bounds(compose.onNodeWithTag(TAG_PLAYER))
-        val first = controls()
-        assertTrue(first[0].top >= screen.top + status.top)
-        assertTrue(first[2].bottom <= screen.bottom - navigation.bottom)
+        // Where the controls are on a screen without bars.
+        val bare = controls()
 
-        // The bars go a moment later: nothing moves.
+        // The player's first frame, before the bars have gone: nothing is where the bars would push it.
+        bars(shown = true)
+        val first = controls()
+        assertEquals(bare, first)
+
+        // The bars go a moment later, and a swipe brings them back over the picture: nothing moves.
         bars(shown = false)
+        assertEquals(first, controls())
+        bars(shown = true)
         assertEquals(first, controls())
     }
 

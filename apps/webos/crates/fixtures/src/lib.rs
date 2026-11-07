@@ -284,9 +284,12 @@ impl FixtureServer {
             requests: requests::Requests::new(now_ms.div_euclid(1_000)),
             subtitle_search: true,
             two_step_required: false,
+            server_language: Some("en".into()),
+            language_route_refusal: None,
             subtitle_asks: Default::default(),
             added_subtitles: Default::default(),
             casts_sent: Default::default(),
+            cast_tickets: Default::default(),
         };
         let libraries: Vec<(i64, i64)> = catalog.libraries.iter().map(|l| (l.id, l.item_count)).collect();
         let shared = Arc::new(Shared {
@@ -420,6 +423,33 @@ impl FixtureServer {
     /// The server requires two-step sign-in (`two_step_required` in `GET /api/server`).
     pub fn set_two_step_required(&self, on: bool) {
         lock(&self.shared.state).two_step_required = on;
+    }
+
+    /// The server language (`language` in `GET /api/server`).
+    pub fn set_server_language(&self, language: &str) {
+        lock(&self.shared.state).server_language = Some(language.to_string());
+    }
+
+    /// A Pley from before languages: `GET /api/server` names none, and `PUT /api/me/language`,
+    /// a route it hasn't, answers 404.
+    pub fn set_before_languages(&self) {
+        let mut state = lock(&self.shared.state);
+        state.server_language = None;
+        state.language_route_refusal = Some(404);
+    }
+
+    /// `PUT /api/me/language` answers `status` instead of changing the language, as a server
+    /// without the route can (404 or 405); none: it changes it.
+    pub fn refuse_language_route(&self, status: Option<u16>) {
+        lock(&self.shared.state).language_route_refusal = status;
+    }
+
+    /// Sets a profile's own language, as `PUT /api/me/language` does; none: Automatic.
+    pub fn set_account_language(&self, profile: i64, language: Option<&str>) {
+        let mut state = lock(&self.shared.state);
+        let p = state.profile_mut(profile);
+        p.language = language.map(str::to_string);
+        p.version += 1;
     }
 
     /// The apps play from another network than the server's: a speed test is

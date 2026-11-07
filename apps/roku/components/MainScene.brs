@@ -4,6 +4,13 @@ sub init()
     m.top.palette = uiPalette()
     m.screens = m.top.findNode("screens")
     m.stack = []
+    ' The language shown (I18n.brs): the one shown last until what picks it
+    ' is heard, so nothing flashes at a start.
+    m.languages = CreateObject("roRegistrySection", "language")
+    ' Nothing picks another until the API task has said, at boot, which
+    ' server and sign-in the app starts with.
+    m.booted = false
+    m.global.addFields({ language: i18nAtStart(m.languages.Read("shown"), CreateObject("roDeviceInfo").GetCurrentLocale()) })
     ' The sign-in screen shown at launch, until another replaces it.
     m.launchDialog = invalid
 
@@ -12,6 +19,11 @@ sub init()
     session.observeField("accessToken", "onAgentChanged")
     session.observeField("userAgent", "onAgentChanged")
     session.observeField("signedIn", "onSignedIn")
+    for each fact in ["accountHeard", "accountLanguage", "serverHeard", "serverLanguage", "server"]
+        session.observeField(fact, "onLanguageFacts")
+    end for
+    m.top.observeField("languageChoice", "onLanguageChoice")
+    m.top.observeField("languageRefused", "onLanguageFacts")
     onAgentChanged()
 
     m.api = CreateObject("roSGNode", "ApiTask")
@@ -43,9 +55,13 @@ sub init()
 
     ' Casts from the user's remotes (Cast.brs): which cast plays (an
     ' answer for an earlier one is left), an artist's albums gathered for
-    ' it, and the notice saying where it came from.
+    ' it, and the notice saying where it came from. A cast from another
+    ' profile of the household waits for the switch to it (castSwitched),
+    ' counted so that an answer for an earlier one is left too.
     m.castAsk = 0
     m.castGather = invalid
+    m.castSwitch = invalid
+    m.castSwitches = 0
     ' The toast (uiToast): one at a time, the latest in place of the one
     ' before.
     m.toast = m.top.findNode("toast")
@@ -131,6 +147,8 @@ end sub
 ' time Roku leaves out of the launch's.
 sub onBoot(event as object)
     answer = event.getData()
+    m.booted = true
+    onLanguageFacts()
     screen = "servers"
     if answer.ok then screen = answer.data.screen
     if screen = "link" then m.top.signalBeacon("AppDialogInitiate")
@@ -261,6 +279,11 @@ sub onProfile()
         askRequestSummary("start")
     end if
     pollRequests()
+    ' A cast that switched to this profile plays now; one that switched to
+    ' another is left.
+    pending = m.castSwitch
+    if pending <> invalid and pending.switched and session.profileId > 0 and session.profileId <> pending.profileId then m.castSwitch = invalid
+    castSwitched()
 end sub
 
 function requestsSection() as object
@@ -330,6 +353,8 @@ sub onStreamLive()
     end if
     if m.events.live and m.global.session.offline then reachServer()
     if m.events.live then askRequestSummary("live")
+    ' The server didn't say its language before: asked again.
+    if m.events.live and not m.global.session.serverHeard then uiRequest({ op: "serverInfo" }, "")
     pollRequests()
     pokeRequests({ requestId: 0, kind: "", tmdbId: 0 })
 end sub
@@ -635,15 +660,33 @@ end sub
 ' A cast from the user's remote, on another device (Cast.brs has the
 ' rules): for this Roku, while it takes casts, what it names plays as the
 ' Roku's own Play would, in place of what plays, once what it needs has
-' come, and "Playing from …" says where it came from. Of two casts close
-' together the later plays; an answer that comes once casts aren't taken
-' (signed out, "Who's watching?") is left.
+' come, and "Playing from …" says where it came from. One from another
+' profile of the household switches to it first (castSwitchTo). Of two
+' casts close together the later plays; an answer that comes once casts
+' aren't taken (signed out, "Who's watching?") is left.
 sub onCast(data as object)
-    action = castAction(m.global.session.playerId, castTaken(), data)
+    session = m.global.session
+    action = castAction(session.playerId, castTaken(), data)
     if action.act = "none" then return
+    need = castSwitch(session.profileId, data)
+    if need.needs = "ignore" then return
+    banner = castBanner(data.from)
+    ' While the Roku changes profiles for a cast, any other cast is
+    ' dropped; once switched, casts play as ever.
+    pending = m.castSwitch
+    if pending <> invalid and not pending.switched then return
+    m.castSwitch = invalid
     m.castAsk = m.castAsk + 1
     m.castGather = invalid
-    banner = castBanner(data.from)
+    if need.needs = "switch"
+        castSwitchTo(need, action, banner)
+    else
+        castPlay(action, banner)
+    end if
+end sub
+
+' What a cast names (castAction's) is fetched, then plays.
+sub castPlay(action as object, banner as string)
     if action.act = "channel"
         castRequest("/api/live/channels/" + urlValue(action.channelId), "onCastChannel", { banner: banner })
     else if action.act = "playlist"
@@ -651,6 +694,55 @@ sub onCast(data as object)
     else
         castRequest("/api/items/" + urlValue(action.itemId), "onCastItem", { banner: banner, startMs: action.startMs, shuffle: action.shuffle, audioIndex: action.audioIndex, subtitleIndex: action.subtitleIndex })
     end if
+end sub
+
+' A cast from another profile of the household (castSwitch's need): the
+' Roku switches to the remote's profile with the cast's ticket, then it
+' plays. What plays stops first, and its last progress, stopped report and
+' session end go before the switch (drain: the API task holds the switch
+' for them, 5 s at most), with the tokens of the profile that watched it,
+' never the remote's.
+sub castSwitchTo(need as object, action as object, banner as string)
+    m.castSwitches = m.castSwitches + 1
+    m.castSwitch = { seq: m.castSwitches, profileId: need.profileId, action: action, banner: banner, switched: false }
+    m.music.control = "stop"
+    if m.stack.Count() > 1
+        top = m.stack.Peek().subtype()
+        if top = "PlayerScreen" or top = "LivePlayerScreen" then pop()
+    end if
+    uiRequest({ op: "switchProfile", profile: need.profileId, ticket: need.ticket, castSwitch: m.castSwitches, drain: true }, "onCastSwitched")
+end sub
+
+' The switch's answer: switched, the cast plays once the Roku knows it is
+' on that profile (castSwitched); refused or failed, a notice says why and
+' nothing plays.
+sub onCastSwitched(event as object)
+    pending = m.castSwitch
+    if pending = invalid or event.getRoSGNode().spec.castSwitch <> pending.seq then return
+    answer = event.getData()
+    if answer.ok and not httpTrue(answer.data.through)
+        pending.switched = true
+        castSwitched()
+        return
+    end if
+    m.castSwitch = invalid
+    notice = castSwitchNotice(answer)
+    if notice <> "" and castTaken() then castSay(notice)
+end sub
+
+' Switched for a cast, and the profile known (GET /api/auth/me) as the
+' remote's: everything shows as that profile sees it, from Home, as after
+' "Who's watching?", and the cast plays over it, once. Casts no longer
+' taken meanwhile (signed out, "Who's watching?") leave it.
+sub castSwitched()
+    pending = m.castSwitch
+    if pending = invalid or not pending.switched or m.global.session.profileId <> pending.profileId then return
+    m.castSwitch = invalid
+    if not castTaken() then return
+    show({ to: "home", reset: true })
+    m.castAsk = m.castAsk + 1
+    m.castGather = invalid
+    castPlay(pending.action, pending.banner)
 end sub
 
 ' Whether casts are taken now: signed in, past the sign-in and "Who's
@@ -678,8 +770,9 @@ function castAnswer(event as object) as dynamic
     if event.getRoSGNode().spec.cast <> m.castAsk or not castTaken() then return invalid
     answer = event.getData()
     if answer.ok and answer.data <> invalid then return answer.data
-    ' Signed out, the scene shows sign-in.
-    if answer.error <> "signed_out" then castSay(answer.message)
+    ' Signed out, the scene shows sign-in; asked for the profile before a
+    ' switch, it was left.
+    if answer.error <> "signed_out" and answer.error <> "profile_changed" then castSay(answer.message)
     return invalid
 end function
 
@@ -907,7 +1000,7 @@ sub onOffline()
         m.offlinePoll.control = "start"
         top = ""
         if m.stack.Count() > 0 then top = m.stack.Peek().subtype()
-        if top <> "PlayerScreen" and top <> "LivePlayerScreen" then showToast("Pley is offline", false, 6)
+        if top <> "PlayerScreen" and top <> "LivePlayerScreen" then showToast(t("common.states.offline"), false, 6)
         return
     end if
     m.offlinePoll.control = "stop"
@@ -986,12 +1079,74 @@ end sub
 
 ' Signed out by the server (or by the person, in Settings): sign in again.
 sub onSignedIn()
+    onLanguageFacts()
     session = m.global.session
     if session.signedIn or m.stack.Count() = 0 or session.server = "" then return
     top = m.stack.Peek().subtype()
     if top = "LinkScreen" or top = "ServersScreen" then return
     show({ to: "link", reset: true, params: { reason: session.signOutReason } })
 end sub
+
+' --- The language ---
+
+' Something that picks the language shown changed (the account's, the
+' server's, signing in or out, the choice on this Roku): the screens show
+' the new one, and the registry keeps it for the next start.
+sub onLanguageFacts()
+    if not m.booted then return
+    shown = i18nShown(uiLanguageFacts())
+    if shown = "" or shown = m.global.language then return
+    m.global.language = shown
+    m.languages.Write("shown", shown)
+    m.languages.Flush()
+    ' A screen that draws its words again itself does (its language field);
+    ' the one on top is made again, asking for what it shows (Home's and
+    ' the libraries' rows, which the server writes), and those under it as
+    ' they show again. The players keep playing: their words come as they
+    ' show them.
+    for each screen in m.stack
+        if screen.hasField("language") then screen.language = shown
+    end for
+    if m.stack.Count() > 0 and stale(m.stack.Peek()) then renew(m.stack.Count() - 1)
+end sub
+
+' The language picked on this Roku (the globe, or Settings on a server that
+' keeps none): "" forgets it, for Automatic.
+sub onLanguageChoice()
+    choice = i18nSupported(m.top.languageChoice)
+    if choice = ""
+        m.languages.Delete("choice")
+    else
+        m.languages.Write("choice", choice)
+    end if
+    m.languages.Flush()
+    onLanguageFacts()
+end sub
+
+' Whether a screen shows another language than the one shown now, and is
+' made again for it.
+function stale(screen as object) as boolean
+    if screen.hasField("language") then return false
+    kind = screen.subtype()
+    if kind = "PlayerScreen" or kind = "LivePlayerScreen" or kind = "NowPlayingScreen" then return false
+    return screen.madeIn <> m.global.language
+end function
+
+' The screen at in the stack, made again in its place: on top, it shows.
+function renew(at as integer) as object
+    old = m.stack[at]
+    old.unobserveField("navigate")
+    old.active = false
+    screen = makeScreen(old.subtype(), old.route, old.params)
+    m.stack[at] = screen
+    m.screens.replaceChild(screen, at)
+    if at = m.stack.Count() - 1
+        screen.active = true
+    else
+        screen.visible = false
+    end if
+    return screen
+end function
 
 sub onNavigate(event as object)
     show(event.getData())
@@ -1030,13 +1185,9 @@ sub show(nav as object)
         covered.active = false
         covered.visible = false
     end if
-    screen = CreateObject("roSGNode", name)
     params = nav.params
     if params = invalid then params = {}
-    screen.route = route
-    screen.params = params
-    if screen.hasField("requestSummary") then screen.requestSummary = m.top.requestSummary
-    screen.observeField("navigate", "onNavigate")
+    screen = makeScreen(name, route, params)
     m.stack.Push(screen)
     m.screens.appendChild(screen)
     screen.active = true
@@ -1044,12 +1195,30 @@ sub show(nav as object)
     showNotice()
 end sub
 
+' A screen of the stack, in the language shown (madeIn).
+function makeScreen(name as string, route as string, params as object) as object
+    screen = CreateObject("roSGNode", name)
+    screen.route = route
+    screen.params = params
+    screen.addFields({ madeIn: m.global.language })
+    if screen.hasField("requestSummary") then screen.requestSummary = m.top.requestSummary
+    screen.observeField("navigate", "onNavigate")
+    return screen
+end function
+
 sub pop()
     if m.stack.Count() <= 1 then return
     coverNotice()
     m.pressAt.Mark()
     closeScreen(m.stack.Pop())
     top = m.stack.Peek()
+    ' Made in a language shown before: made again, asking anew.
+    if stale(top)
+        renew(m.stack.Count() - 1)
+        launchDialogDone()
+        showNotice()
+        return
+    end if
     top.visible = true
     top.active = true
     launchDialogDone()

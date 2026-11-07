@@ -15,6 +15,7 @@
     <script type="text/brightscript" uri="pkg:/components/items/LiveCard.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/I18n.brs" />
     <children>
         <Poster id="frame" uri="pkg:/images/tile.9.png" blendColor="0x262B35FF" />
         <Poster id="plate" uri="pkg:/images/tile.9.png" blendColor="0x2E3440FF" />

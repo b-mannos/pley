@@ -5,10 +5,10 @@ import androidx.media3.common.text.Cue
 import app.pley.android.model.Marker
 import app.pley.android.model.MarkerKind
 import app.pley.android.model.MarkerSource
+import app.pley.android.model.PlaybackMethod
 import app.pley.android.player.ChapterMark
-import app.pley.android.player.FoundSubtitle
-import app.pley.android.player.SubtitleSearchUi
 import app.pley.android.player.DetailRow
+import app.pley.android.player.FoundSubtitle
 import app.pley.android.player.PlayRequest
 import app.pley.android.player.PlaybackController
 import app.pley.android.player.PlaybackDetailsUi
@@ -17,6 +17,7 @@ import app.pley.android.player.PlayerEngine
 import app.pley.android.player.PlayerPhase
 import app.pley.android.player.PlayerUiState
 import app.pley.android.player.QualityChoice
+import app.pley.android.player.SubtitleSearchUi
 import app.pley.android.player.TrackChoice
 import app.pley.android.player.UpNextUi
 import app.pley.android.player.session.QualityPreset
@@ -119,6 +120,11 @@ class FakePlaybackController(initial: PlayerUiState = PlayerUiState()) : Playbac
         ui.update { it.copy(notice = null) }
     }
 
+    override fun dismissRemoteNotice() {
+        record("dismissRemoteNotice")
+        ui.update { it.copy(remoteNotice = null) }
+    }
+
     override suspend fun thumbnail(positionMs: Long): Bitmap? = thumbnails(positionMs)
 
     override fun saveState(): SavedPlaybackState = ui.value.let {
@@ -168,6 +174,7 @@ class FakePlaybackController(initial: PlayerUiState = PlayerUiState()) : Playbac
                 QualityChoice("4m", "4 Mbps 720p", null, true),
             ),
             method = "Transcoding",
+            playbackMethod = PlaybackMethod.Transcode,
             note = "The original didn't play smoothly on this device.",
             canPlayOriginal = true,
             suggestLowerQuality = true,
@@ -189,6 +196,9 @@ class FakePlaybackController(initial: PlayerUiState = PlayerUiState()) : Playbac
                 engine = listOf("Video decoder: fake"),
             ),
             notice = "This is the last episode",
+            remoteNotice = "Paused",
+            remoteNoticeId = 1,
+            pausedByRemote = true,
             subtitleOffsetMs = 500,
             subtitleSync = true,
             subtitleStyled = true,

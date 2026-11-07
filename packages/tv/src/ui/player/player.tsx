@@ -4,9 +4,9 @@ import { storedMemory } from "../../player/autoquality";
 import { initMusic } from "../../player/music";
 import { serverNetwork } from "../../player/network";
 import { PlaybackController, type PlayerEnv, type SavedPlayback } from "../../player/controller";
-import { T } from "../../player/details";
 import type { PlayRequest } from "../../player/plan";
-import type { Marker } from "../../api/types";
+import type { Marker, PlaybackMethod } from "../../api/types";
+import { t } from "../../i18n";
 import { thumbnailAt, sheetPath } from "../../player/nextup";
 import { badgeText, MEDIA_STEP_MS, Seeker, STEP_MS } from "../../player/seeker";
 import { LEAVE_AFTER_MS } from "../../player/sleep";
@@ -29,6 +29,8 @@ const RING_MS = 500;
 const SWITCH_RING_MS = 2_500;
 /** The player leaves this long after the server stopped it. */
 const STOPPED_LEAVE_MS = 20_000;
+/** A track picked with a media key, and what the user's remote on another device did, is said this long. */
+const BRIEF_MS = 2_000;
 
 const MEDIA_KEYS: Key[] = ["playPause", "play", "pause", "stop", "fastForward", "rewind", "next", "previous", "captions", "audio"];
 
@@ -111,7 +113,8 @@ export function PlayerScreen(p: { request: PlayRequest; pressedAt: number }) {
   return <PlayerView key={run} controller={controller} host={host} queued={!!(saved ? saved.request : p.request).queue} />;
 }
 
-function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDivElement | null }; queued: boolean }) {
+/** The screen of one run of the player: what `controller` plays, its controls and its notices. */
+export function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDivElement | null }; queued: boolean }) {
   const app = useApp();
   const ui = useUi();
   const c = p.controller;
@@ -146,10 +149,10 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
 
   // What the player did about the quality, and where to change it (6 s, as an error's toast).
   useEffect(() => {
-    if (s.canPlayOriginal && s.note) say(`${s.note} Play original is in Quality.`, 6_000);
+    if (s.canPlayOriginal && s.note) say(t("player.toasts.playOriginalInQuality", { note: s.note }), 6_000);
   }, [s.canPlayOriginal]);
   useEffect(() => {
-    if (s.suggestLowerQuality && s.note) say(`${s.note} Choose one in Quality.`, 6_000, true);
+    if (s.suggestLowerQuality && s.note) say(t("player.toasts.chooseInQuality", { note: s.note }), 6_000, true);
   }, [s.suggestLowerQuality]);
 
   // The TV keeps the screen on while a video plays.
@@ -169,6 +172,13 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
     say(s.notice);
     c.dismissNotice();
   }, [s.notice]);
+  // What the user's remote, on another device, did: said for a moment, the controls left as they are, since whoever pressed it isn't here.
+  // Keyed by its count: the same words again are said again.
+  useEffect(() => {
+    if (!s.remoteNotice) return;
+    say(s.remoteNotice, BRIEF_MS);
+    c.dismissRemoteNotice();
+  }, [s.remoteNoticeId]);
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), toast.ms);
@@ -209,14 +219,21 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
     setControls(false);
   }, [!!s.upNext, !!error]);
 
-  // Controls hide 5 s after the last key while a video plays.
+  // When the user's remote last paused it: a key here since makes the pause the person's.
+  const remotePausedAt = useRef(0);
   useEffect(() => {
-    if (!controls || panel || !playing || seeker.target !== null) return;
+    if (s.pausedByRemote) remotePausedAt.current = Date.now();
+  }, [s.pausedByRemote]);
+
+  // Controls hide 5 s after the last key while a video plays. A pause keeps them up; the remote's only once a key here makes it the person's.
+  useEffect(() => {
+    if (!controls || panel || !(playing || s.pausedByRemote) || seeker.target !== null) return;
     const t = setInterval(() => {
-      if (Date.now() - lastInput.current >= HIDE_MS) setControls(false);
+      const pausedHere = !playing && lastInput.current > remotePausedAt.current;
+      if (!pausedHere && Date.now() - lastInput.current >= HIDE_MS) setControls(false);
     }, 250);
     return () => clearInterval(t);
-  }, [controls, panel, playing, seeker.target]);
+  }, [controls, panel, playing, seeker.target, s.pausedByRemote]);
 
   const focusFid = (fid: string) =>
     setTimeout(() => {
@@ -300,13 +317,13 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
         if (on) {
           rememberedSubtitle.current = on.index;
           c.selectSubtitle(null);
-          say("Subtitles off", 2000);
+          say(t("player.toasts.subtitlesOff"), BRIEF_MS);
         } else {
           const tracks = s.subtitles.filter((t) => t.index !== null);
           const pick = tracks.filter((t) => t.index === rememberedSubtitle.current)[0] ?? tracks.filter((t) => !t.burnIn)[0] ?? tracks[0];
           if (pick) {
             c.selectSubtitle(pick.index);
-            say(`Subtitles: ${pick.label}`, 2000);
+            say(t("player.toasts.subtitles", { track: pick.label }), BRIEF_MS);
           }
         }
         return;
@@ -317,7 +334,7 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
         const at = tracks.findIndex((t) => t.selected);
         const next = tracks[(at + 1) % tracks.length]!;
         if (next.index !== null) c.selectAudio(next.index);
-        say(`Audio: ${next.label}`, 2000);
+        say(t("player.toasts.audio", { track: next.label }), BRIEF_MS);
         return;
       }
       default:
@@ -473,7 +490,7 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
       <div class={`player-scrim${controls ? " in" : ""}`} />
       {shown.picture && <PictureSubtitles frame={shown.picture} />}
       {shown.cues.length > 0 && <TextSubtitles cues={shown.cues} size={settings.subtitleSize} box={settings.subtitleBox} font={settings.subtitleFont} position={settings.subtitlePosition} lifted={controls} />}
-      <F class="video-holder" fid="video" disabled={controls} label="Video" />
+      <F class="video-holder" fid="video" disabled={controls} label={t("player.controls.video")} />
       <div class={`player-controls${controls ? " in" : ""}`} aria-hidden={!controls}>
         <div class="player-top">
           <div style="min-width:0;flex:1;padding-right:300px">
@@ -482,7 +499,7 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
           </div>
           <div class="player-clock">
             <div class="player-clock-row">
-              {s.method && <span class={`method-badge t-caption ${methodClass(s.method)}`}>{s.method}</span>}
+              {s.method && <span class={`method-badge t-caption ${methodClass(s.methodKind)}`}>{s.method}</span>}
               <TimeOfDay hours24={app.platform.clock24()} />
             </div>
             {s.phase.kind === "paused" && <EndsAt controller={c} hours24={app.platform.clock24()} />}
@@ -493,21 +510,28 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
         <Scrubber controller={c} targetMs={target} markers={s.markers} chapters={chapters.map((ch) => ch.startMs)} />
         <G kind="row" class="player-row">
           <div class="row-left">
-            {chapters.length > 1 && <PlayerButton fid="chapters" icon="list-video" label="Chapters" onSelect={() => openPanel("chapters")} />}
-            {s.speeds.length > 0 && <PlayerButton fid="speed" icon="fast-forward" label={s.speed === 1 ? "Speed" : `Speed ${speedLabel(s.speed)}`} onSelect={() => openPanel("speed")} />}
-            <PlayerButton fid="sleep" icon="moon" label="Sleep timer" onSelect={() => openPanel("sleep")} />
+            {chapters.length > 1 && <PlayerButton fid="chapters" icon="list-video" label={t("player.controls.chapters")} onSelect={() => openPanel("chapters")} />}
+            {s.speeds.length > 0 && (
+              <PlayerButton
+                fid="speed"
+                icon="fast-forward"
+                label={s.speed === 1 ? t("player.controls.speed") : t("player.controls.speedAt", { speed: speedLabel(s.speed) })}
+                onSelect={() => openPanel("speed")}
+              />
+            )}
+            <PlayerButton fid="sleep" icon="moon" label={t("player.controls.sleep")} onSelect={() => openPanel("sleep")} />
           </div>
           <div class="row-centre">
-            {hasPrevNext && <PlayerButton fid="previous" icon="skip-back" iconSize={24} label="Previous" onSelect={() => media("previous")} />}
-            <PlayerButton fid="playpause" icon={playing ? "pause" : "play"} label={playing ? "Pause" : "Play"} big onSelect={playPause} />
-            {hasPrevNext && <PlayerButton fid="next" icon="skip-forward" iconSize={24} label="Next" onSelect={() => media("next")} />}
+            {hasPrevNext && <PlayerButton fid="previous" icon="skip-back" iconSize={24} label={t("player.controls.previous")} onSelect={() => media("previous")} />}
+            <PlayerButton fid="playpause" icon={playing ? "pause" : "play"} label={playing ? t("player.controls.pause") : t("common.actions.play")} big onSelect={playPause} />
+            {hasPrevNext && <PlayerButton fid="next" icon="skip-forward" iconSize={24} label={t("player.controls.next")} onSelect={() => media("next")} />}
           </div>
           <div class="row-right">
             {/* Without subtitles too: Find subtitles… is there. */}
-            {s.itemId > 0 && <PlayerButton fid="subtitles" icon="captions" label="Subtitles" onSelect={() => openPanel("subtitles")} />}
-            {s.audio.length > 1 && <PlayerButton fid="audio" icon="audio-lines" label="Audio" onSelect={() => openPanel("audio")} />}
-            {s.qualities.length > 0 && <PlayerButton fid="quality" icon="gauge" label="Quality" onSelect={() => openPanel("quality")} />}
-            <PlayerButton fid="info" icon="info" label="Info" onSelect={() => openPanel("info")} />
+            {s.itemId > 0 && <PlayerButton fid="subtitles" icon="captions" label={t("player.controls.subtitles")} onSelect={() => openPanel("subtitles")} />}
+            {s.audio.length > 1 && <PlayerButton fid="audio" icon="audio-lines" label={t("player.controls.audio")} onSelect={() => openPanel("audio")} />}
+            {s.qualities.length > 0 && <PlayerButton fid="quality" icon="gauge" label={t("player.controls.quality")} onSelect={() => openPanel("quality")} />}
+            <PlayerButton fid="info" icon="info" label={t("player.controls.info")} onSelect={() => openPanel("info")} />
           </div>
         </G>
       </div>
@@ -523,9 +547,9 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
       {sleepShown && (
         <G kind="row" class={`sleep-notice${controls ? " lifted" : ""}`}>
           <Icon name="moon" size={20} color="var(--muted)" />
-          <span class="t-label c-fg">{`Pausing in ${s.sleep.secondsLeft} s`}</span>
-          <F class="keep-btn t-label" fid="keep" label="Keep watching" onSelect={() => c.keepWatching()}>
-            Keep watching
+          <span class="t-label c-fg">{t("player.sleep.pausingIn", { seconds: s.sleep.secondsLeft! })}</span>
+          <F class="keep-btn t-label" fid="keep" label={t("player.sleep.keepWatching")} onSelect={() => c.keepWatching()}>
+            {t("player.sleep.keepWatching")}
           </F>
         </G>
       )}
@@ -536,13 +560,13 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
         </div>
       )}
       {ring && !error && (
-        <div class="player-ring" role="status" aria-label="Loading">
+        <div class="player-ring" role="status" aria-label={t("common.states.loading")}>
           <div />
         </div>
       )}
       {ring && !error && s.reconnecting && (
         <div class="player-reconnecting t-label c-fg" role="status" aria-live="polite">
-          {T.reconnecting}
+          {t("player.errors.reconnecting")}
         </div>
       )}
       {panel && (
@@ -560,7 +584,7 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
       {error && (
         <div class="player-error">
           <div class="t-page c-fg" style="text-align:center">
-            {s.stoppedByServer ? "Playback stopped" : error.title ?? "Can't play this item"}
+            {s.stoppedByServer ? t("player.errors.stopped") : error.title ?? t("player.errors.cantPlay")}
           </div>
           <div class="t-body c-muted lines-4" style="margin-top:12px;text-align:center;white-space:pre-line">
             {sentence(error.message)}
@@ -568,11 +592,11 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
           <G kind="row" class="buttons" style="margin-top:32px;justify-content:center">
             {error.canRetry ? (
               <>
-                <Pill label="Try again" icon="refresh-cw" fid="retry" onSelect={() => c.retry()} />
-                <TextButton label="Back" fid="back" onSelect={leave} />
+                <Pill label={t("common.actions.tryAgain")} icon="refresh-cw" fid="retry" onSelect={() => c.retry()} />
+                <TextButton label={t("common.actions.back")} fid="back" onSelect={leave} />
               </>
             ) : (
-              <Pill label="Back" icon="arrow-left" fid="back" onSelect={leave} />
+              <Pill label={t("common.actions.back")} icon="arrow-left" fid="back" onSelect={leave} />
             )}
           </G>
         </div>
@@ -585,25 +609,28 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
 /**
  * A button of the control row (the Android TV app's PlayerRoundButton): 36 px
  * with a 20 px glyph (Play/Pause 44 and 26; the transport's 24), the glyph
- * alone until focused, its label 8 under it while focused.
+ * alone until focused, its label 8 under it while focused. `bare`, the label
+ * is only heard (a star that says it all).
  */
-export function PlayerButton(p: { fid: string; icon: IconName; label: string; big?: boolean; iconSize?: number; onSelect: () => void }) {
+export function PlayerButton(p: { fid: string; icon: IconName; label: string; big?: boolean; bare?: boolean; iconSize?: number; onSelect: () => void }) {
   return (
     <div class={`pbtn-box${p.big ? " big" : ""}`}>
       <F class={`pbtn${p.big ? " big" : ""}`} fid={p.fid} label={p.label} onSelect={p.onSelect}>
         <Icon name={p.icon} size={p.big ? 26 : p.iconSize ?? 20} />
       </F>
-      <div class="pbtn-label t-caption" aria-hidden="true">
-        {p.label}
-      </div>
+      {!p.bare && (
+        <div class="pbtn-label t-caption" aria-hidden="true">
+          {p.label}
+        </div>
+      )}
     </div>
   );
 }
 
 /** The badge's colour for how it plays: a file as it is, a direct stream, or a transcode. */
-function methodClass(method: string): string {
-  if (method.indexOf("Direct play") === 0 || method.indexOf("Downloaded") === 0) return "direct";
-  if (method.indexOf("Direct stream") === 0) return "stream";
+function methodClass(method: PlaybackMethod | null): string {
+  if (method === "direct") return "direct";
+  if (method === "remux") return "stream";
   return "transcode";
 }
 
@@ -651,7 +678,7 @@ function EndsAt(p: { controller: PlaybackController; hours24: boolean }) {
   });
   if (clock.durationMs <= 0) return null;
   const end = new Date(Date.now() + Math.max(0, clock.durationMs - clock.positionMs));
-  return <div class="t-label c-muted">{`Ends at ${formatTimeOfDay(end, p.hours24)}`}</div>;
+  return <div class="t-label c-muted">{t("player.controls.endsAt", { time: formatTimeOfDay(end, p.hours24) })}</div>;
 }
 
 /** The scrubber: played, buffered, chapter gaps, the thumb at the seek target (else where it plays), the marker's name under it. */
@@ -671,7 +698,7 @@ function Scrubber(p: { controller: PlaybackController; targetMs: number | null; 
   };
   return (
     <>
-      <F class="scrubber" fid="scrubber" label={`${formatClock(clock.positionMs)} of ${formatClock(d)}`} onClick={seekAt}>
+      <F class="scrubber" fid="scrubber" label={t("player.controls.seekValue", { time: formatClock(clock.positionMs), duration: formatClock(d) })} onClick={seekAt}>
         <div class="bar">
           <div class="bar-buffered" style={`width:${frac(clock.bufferedMs) * 100}%`} />
           <div class="bar-played" style={`width:${frac(clock.positionMs) * 100}%`} />
@@ -686,7 +713,7 @@ function Scrubber(p: { controller: PlaybackController; targetMs: number | null; 
       </F>
       {marker && (
         <div class="marker-label t-caption c-muted" style={`left:${markerX}px`}>
-          {marker.kind === "intro" ? "Intro" : "Credits"}
+          {marker.kind === "intro" ? t("player.controls.intro") : t("player.controls.credits")}
         </div>
       )}
     </>
@@ -761,12 +788,12 @@ function UpNextCard(p: { card: NonNullable<ReturnType<PlaybackController["state"
         <div class="t-caption c-muted one-line">{p.card.heading}</div>
         <div class="t-title c-fg lines-2">{p.card.title}</div>
         <G kind="row" class="upnext-buttons">
-          <F class="playnow t-label" fid="playnow" label="Play now" onSelect={p.onPlay}>
+          <F class="playnow t-label" fid="playnow" label={t("player.upNext.playNow")} onSelect={p.onPlay}>
             <Icon name="play" size={22} />
-            <span style="margin-left:10px">Play now</span>
+            <span style="margin-left:10px">{t("player.upNext.playNow")}</span>
             {left !== null &&
               (p.reduced ? (
-                <span class="t-caption" style="margin-left:12px">{`Next in ${left}`}</span>
+                <span class="t-caption" style="margin-left:12px">{t("player.upNext.nextIn", { seconds: left })}</span>
               ) : (
                 <svg width="22" height="22" viewBox="0 0 22 22" style="margin-left:12px" aria-hidden="true">
                   <circle cx="11" cy="11" r="9.5" fill="none" stroke="currentColor" stroke-opacity="0.25" stroke-width="3" />
@@ -774,7 +801,7 @@ function UpNextCard(p: { card: NonNullable<ReturnType<PlaybackController["state"
                 </svg>
               ))}
           </F>
-          <TextButton label="Cancel" variant="tall" onSelect={p.onCancel} />
+          <TextButton label={t("common.actions.cancel")} variant="tall" onSelect={p.onCancel} />
         </G>
       </div>
     </div>

@@ -59,7 +59,7 @@ function musicDiscRows(tracks as object) as object
     out = []
     for i = 0 to tracks.Count() - 1
         if several and (i = 0 or tracks[i].disc <> tracks[i - 1].disc)
-            out.Push({ title: "Disc " + urlValue(tracks[i].disc), subtitle: "", duration: "", kind: "disc", at: -1 })
+            out.Push({ title: t("titles.music.disc", { number: tracks[i].disc }), subtitle: "", duration: "", kind: "disc", at: -1 })
         end if
         rows[i].at = i
         out.Push(rows[i])
@@ -74,11 +74,7 @@ function musicAlbumLine(album as object, tracks as object) as string
     if artist <> "" then parts.Push(artist)
     year = httpNumber(album.year, 0)
     if year > 0 then parts.Push(urlValue(year))
-    if tracks.Count() = 1
-        parts.Push("1 track")
-    else if tracks.Count() > 1
-        parts.Push(urlValue(tracks.Count()) + " tracks")
-    end if
+    if tracks.Count() > 0 then parts.Push(t("titles.counts.tracks", { count: tracks.Count() }))
     total = 0
     for each track in tracks
         total = total + track.durationMs
@@ -96,7 +92,7 @@ function musicRatingLine(album as object) as string
     if state = invalid then return ""
     stars = contentStars(state.rating)
     if stars = 0 then return ""
-    return "Your rating: " + contentStarsLabel(stars)
+    return t("browse.title.yourRating", { stars: contentStarsLabel(stars) })
 end function
 
 ' An album's rows (musicDiscRows) with the track whose id is trackId
@@ -176,17 +172,9 @@ end function
 function musicArtistLine(artist as object, albums as integer) as string
     parts = []
     count = Int(httpNumber(artist.child_count, albums))
-    if count = 1
-        parts.Push("1 album")
-    else if count > 1
-        parts.Push(urlValue(count) + " albums")
-    end if
+    if count > 0 then parts.Push(t("titles.counts.albums", { count: count }))
     tracks = Int(httpNumber(artist.leaf_count, 0))
-    if tracks = 1
-        parts.Push("1 track")
-    else if tracks > 1
-        parts.Push(urlValue(tracks) + " tracks")
-    end if
+    if tracks > 0 then parts.Push(t("titles.counts.tracks", { count: tracks }))
     genres = 0
     for each genre in httpArray(artist.genres)
         name = httpSentence(genre)
@@ -228,8 +216,8 @@ end function
 ' other apps' words: the server out of reach, or the track that can't be
 ' played.
 function musicFailure(answer as object) as string
-    if answer.error = "network" then return "Can't reach the server."
-    return "This track can't be played."
+    if answer.error = "network" then return t("player.errors.cantReach")
+    return t("player.nowPlaying.cantPlay")
 end function
 
 ' The music player's queue: the tracks as given, the order they play in

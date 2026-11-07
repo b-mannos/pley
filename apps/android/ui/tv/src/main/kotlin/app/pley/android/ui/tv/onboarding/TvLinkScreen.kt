@@ -25,6 +25,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -40,11 +41,14 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import app.pley.android.common.Language
+import app.pley.android.common.UiText
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.PleyType
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcons
+import app.pley.android.designsystem.text.asString
 import app.pley.android.screens.PleyKey
 import app.pley.android.screens.onboarding.LinkCode
 import app.pley.android.screens.onboarding.LinkPurpose
@@ -53,7 +57,8 @@ import app.pley.android.screens.onboarding.LinkUiState
 import app.pley.android.screens.onboarding.LinkViewModel
 import app.pley.android.screens.onboarding.go
 import app.pley.android.screens.onboarding.onboardingSource
-import app.pley.android.screens.onboarding.sentence
+import app.pley.android.screens.settings.DeviceLanguageUiState
+import app.pley.android.screens.settings.DeviceLanguageViewModel
 import app.pley.android.ui.tv.R
 import app.pley.android.ui.tv.kit.TvPillButton
 import app.pley.android.ui.tv.kit.TvTextButton
@@ -70,11 +75,15 @@ internal fun TvLinkScreen(server: String) {
     LaunchedEffect(vm) { vm.navigation.collect { navigator.go(it) } }
     TvLinkRunner(vm)
     val state by vm.state.collectAsStateWithLifecycle()
+    val languageModel: DeviceLanguageViewModel = viewModel(factory = DeviceLanguageViewModel.factory)
+    val language by languageModel.state.collectAsStateWithLifecycle()
     TvLinkContent(
         state = state,
         onNewCode = vm::newCode,
         backLabel = stringResource(R.string.tv_onboarding_change_server),
         onBack = { navigator.restart(PleyKey.Servers) },
+        language = language,
+        onLanguage = languageModel::choose,
     )
 }
 
@@ -119,6 +128,8 @@ private fun TvLinkRunner(vm: LinkViewModel) {
  * the steps and the code on the left from x = 96, the QR code and
  * [backLabel] on the right from x = 600. [backLabel] has focus, except
  * after a decline or once the code expired, when "Get a new code" has it.
+ * Signing in, the globe in the top-right corner, over the QR code, picks
+ * this device's [language].
  */
 @Composable
 internal fun TvLinkContent(
@@ -129,13 +140,20 @@ internal fun TvLinkContent(
     title: String = stringResource(R.string.tv_onboarding_link_title),
     /** Under the title. Signing in, it says when the server requires two-step sign-in. */
     intro: String? = if (state.twoStepRequired) stringResource(R.string.tv_onboarding_two_step_required) else null,
+    /** This device's language, for the globe; `null`, as when a profile is approved: no globe. */
+    language: DeviceLanguageUiState? = null,
+    onLanguage: (Language?) -> Unit = {},
 ) {
+    val picker = rememberTvLanguagePicker()
     val status = state.status
     val code = state.code
     val newCode = remember { FocusRequester() }
     val back = remember { FocusRequester() }
     val needsNewCode = status == LinkStatus.Declined || status == LinkStatus.Expired
-    LaunchedEffect(needsNewCode) {
+    // Asked again once the window has focus: asked before, on a cold start, it is lost, and the
+    // window's own first focus goes wherever Compose enters the screen.
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
+    LaunchedEffect(needsNewCode, windowFocused) {
         if (needsNewCode) runCatching { newCode.requestFocus() } else runCatching { back.requestFocus() }
     }
     Box(Modifier.fillMaxSize().brandGlow().testTag(LINK_TAG)) {
@@ -218,6 +236,11 @@ internal fun TvLinkContent(
                 modifier = Modifier.focusRequester(back).initialFocus(enabled = !needsNewCode).testTag(BACK_TAG),
             )
         }
+        if (language != null && status !is LinkStatus.SignedIn) {
+            // Centred on the logo's line (40 dp tall from 56), "FR" at the screen's right edge.
+            TvLanguageButton(picker, language, Modifier.align(Alignment.TopEnd).padding(top = 60.dp, end = 48.dp - GLOBE_PADDING))
+        }
+        if (language != null) TvLanguagePanel(picker, language, onLanguage)
     }
 }
 
@@ -295,7 +318,7 @@ private fun Status(status: LinkStatus, modifier: Modifier) {
         }
         LinkStatus.Declined -> StatusLine(stringResource(R.string.tv_onboarding_declined), live, style = danger)
         LinkStatus.Expired -> StatusLine(stringResource(R.string.tv_onboarding_expired), live, style = muted)
-        is LinkStatus.Failed -> StatusLine(sentence(status.message), live.width(440.dp), style = danger)
+        is LinkStatus.Failed -> StatusLine(UiText.Sentence(status.text).asString(), live.width(440.dp), style = danger)
         is LinkStatus.SignedIn -> Unit
     }
 }

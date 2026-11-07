@@ -15,8 +15,9 @@
 // managers' Requests (Approve, then Yours), a ready-to-watch notice on
 // Home whose movie's audio and subtitles are picked on its page, a USB
 // drive plugged in (its page, a folder, an empty one, a video's menu and
-// its subtitle file picked) and pulled out, Settings, the server gone (a
-// drive's page opened from there) and back by itself, then signing out and in again on a server
+// its subtitle file picked) and pulled out, Settings (its Language chosen
+// for the account, Home asked for again in it), the server gone (a drive's
+// page opened from there) and back by itself, then signing out and in again on a server
 // too old for QR codes, requests and two-step sign-in. Then it starts
 // the app again, signed in,
 // and times how soon Home is asked for. Fails on a BrightScript error or
@@ -441,6 +442,8 @@ async function signOut() {
 }
 
 const qr = { shown: false, hidden: false };
+// Home asked for in the language chosen in Settings.
+const language = { home: false, refusedHome: false, afterRefused: "" };
 // The line saying the server requires two-step sign-in.
 const twoStep = { shown: false, hidden: false };
 // The player's notice when every connection is in use.
@@ -1503,12 +1506,71 @@ async function walk() {
   await waitFor(/^GET \/api\/libraries$/, since, "Home's libraries after sorting");
   await press("right"); // the rows, where the next steps start
   await openFromMenu(11, /^GET \/api\/auth\/me$/, "Settings");
+  // Language, Profile's row after Switch profile, Audio language and
+  // Subtitles: Español for the account, the screen in Spanish once the
+  // server has it, and Home asked for again in it, its rows' titles being
+  // the server's; then Automatic again, which the rest of the walk expects.
+  await settle();
+  since = mark();
+  await press("right"); // Profile's rows, at Switch profile
+  await press("down", 3); // Language
+  await press("select"); // its choices, Automatic checked
+  await sleep(500);
+  await press("down", 3); // Español
+  await press("select");
+  await waitFor(/^PUT \/api\/me\/language$/, since, "the account's language saved");
+  shoot("settings-language");
+  since = mark();
+  await press("back"); // Home, made again in Spanish
+  await waitFor(/^GET \/api\/hubs\/home$/, since, "Home in Spanish");
+  language.home = fixture.requests.slice(since).some((r) => r.path === "/api/hubs/home" && r.language === "es");
+  shoot("home-spanish");
+  await press("right");
+  await openFromMenu(11, /^GET \/api\/auth\/me$/, "Settings");
+  await settle();
+  since = mark();
+  await press("right");
+  await press("down", 3); // Language, Español checked
+  await press("select");
+  await sleep(500);
+  await press("up", 3); // Automatic
+  await press("select");
+  await waitFor(/^PUT \/api\/me\/language$/, since, "Automatic saved");
+  // A server without the route, though it names a language: Français is
+  // answered 404 and kept on this Roku, the screen and Home in French.
+  // Settings opened again still says Français, and Automatic there forgets
+  // it with no request, the screen in English again.
+  fixture.languageRoute = false;
+  await settle();
+  since = mark();
+  await press("select"); // Language, Automatic checked
+  await sleep(500);
+  await press("down", 2); // Français
+  await press("select");
+  await waitFor(/^PUT \/api\/me\/language$/, since, "Français answered 404");
+  await settle();
+  since = mark();
+  await press("back"); // Home, made again in French
+  await waitFor(/^GET \/api\/hubs\/home$/, since, "Home in French");
+  language.refusedHome = fixture.requests.slice(since).some((r) => r.path === "/api/hubs/home" && r.language === "fr");
+  await press("right");
+  await openFromMenu(11, /^GET \/api\/auth\/me$/, "Settings");
+  await settle();
+  await press("right");
+  await press("down", 3); // Language, Français checked
+  await press("select");
+  await sleep(500);
+  await press("up", 2); // Automatic
+  await press("select");
+  await settle();
+  fixture.languageRoute = true;
   // Profile's Subtitles, under Switch profile and Audio language: from
   // "Only for foreign dialogue" to "Always", saved at once with the
   // languages left as they were; Subtitle language shows then.
   await settle();
   since = mark();
-  await press("right"); // Profile's rows
+  await press("left"); // the categories
+  await press("right"); // Profile's rows, at Switch profile
   await press("down", 2);
   await press("select"); // Subtitles: its choices, Forced focused
   await sleep(500);
@@ -1516,6 +1578,7 @@ async function walk() {
   shoot("settings-subtitles");
   await press("select"); // Always
   await waitFor(/^PUT \/api\/me\/track-defaults$/, since, "the subtitle mode saved");
+  language.afterRefused = fixture.requests.slice(since).find((r) => r.path === "/api/me/track-defaults")?.language ?? "";
   await settle();
   shoot("settings-saved");
   // Switch profile, Profile's first row: "Who's watching?", Ben chosen,
@@ -1659,6 +1722,11 @@ const checks = [
   ["told the server what the speed test measured", fixture.networkTold.some((t) => t.probe_kbps > 0 && t.probe_complete === false && t.client_id)],
   ["kept the server's answer instead of asking before each play", fixture.requests.filter((r) => r.method === "GET" && r.path.startsWith("/api/playback/network")).length < fixture.playbacks.filter((p) => p.kind !== "track").length],
   ["played the original in Automatic, the default", fixture.playbacks.length > 0 && fixture.playbacks.filter((p) => p.kind !== "track").every((p) => p.mode === "auto" && p.max_bitrate === null)],
+  ["chose Español for the account in Settings, Home asked for again in it, then Automatic", JSON.stringify(fixture.languagesSaved) === '["es",null]' && language.home],
+  [
+    "on a server without the language route, Français kept on the Roku, and Automatic in Settings opened again forgot it with no request",
+    JSON.stringify(fixture.languagesRefused) === '["fr"]' && language.refusedHome && language.afterRefused === "en",
+  ],
   ["kept 8 Mbps 1080p chosen in Settings", registry !== null && /playback.quality","8m"/.test(JSON.stringify([...registry]))],
   ["kept Anna as the profile to always start as", registry !== null && /startAs\.http[^"]*","1"/.test(JSON.stringify([...registry]))],
   ["showed subtitle sync", sync.label],

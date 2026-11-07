@@ -24,7 +24,7 @@ details.
 - [Types](#types)
 - [Public endpoints](#public-endpoints), [Auth](#auth),
   [Two-step sign-in](#two-step-sign-in), [Your account](#your-account),
-  [Compatibility tokens](#compatibility-tokens)
+  [Language](#language), [Compatibility tokens](#compatibility-tokens)
 - [Apps (OAuth 2.1)](#apps-oauth-21): [Discovery](#discovery),
   [Telling servers apart](#telling-servers-apart),
   [Signing in](#signing-in), [Tokens](#tokens), [TVs](#tvs),
@@ -221,6 +221,7 @@ interface User {
   audio_language: string | null;    // ISO 639 code ("eng", "fr"); null = the file's default track
   subtitle_language: string | null; // null = the audio language
   subtitle_mode: "off" | "forced" | "foreign" | "always";
+  language: "en" | "fr" | "es" | null; // the language Pley is in for the account; null = automatic (see Language)
   has_password: boolean;            // false: a managed profile, or an account without a password
   two_step: boolean;                // two-step sign-in is on
   request_access: "off" | "ask" | "auto"; // Requests: may not ask, asks an administrator, or approved as
@@ -302,7 +303,9 @@ interface ItemDetail extends ItemSummary {
   content_rating: string | null;    // "PG-13"
   tmdb_id: number | null;
   imdb_id: string | null;
-  locked_fields: string[];          // fields an administrator edited (PATCH /api/items/{id})
+  locked_fields: string[];          // fields an administrator edited (PATCH /api/items/{id}), and "match"
+                                    // after Fix Match
+  nfo_fields: string[];             // fields the item's NFO file sets, named as locked_fields are, and "rating"
   files: MediaFile[];               // empty for containers (show, season, artist, album)
   markers: Marker[];                // intro and credits (Skip Intro, Skip Credits)
   extras: ItemSummary[];            // movies and shows: trailers first, then other bonus material (kind "extra")
@@ -509,12 +512,14 @@ lists carry (Kodi).
 | Method | Path | Who | What |
 |---|---|---|---|
 | GET | `/api/health` | `public` | `{ "status": "ok" }` |
-| GET | `/api/server` | `public` | `{ id, name, version, commit, source, setup_required, setup_code_required, two_step_required, proof? }` |
+| GET | `/api/server` | `public` | `{ id, name, language, version, commit, source, setup_required, setup_code_required, two_step_required, proof? }` |
 | GET | `/api/oauth/device/qr?code=` | `public` | where to type a TV's code, as a QR code (PNG): see [TVs](#tvs) |
 | POST | `/api/setup` | `public` | `{ username, password, setup_code }` → `{ user: User, token? }`: creates the first (admin) account and signs in |
 | POST | `/api/auth/login` | `public` | `{ username, password, code?, setup_id? }` → `{ user: User, token?, recovery_codes? }` |
 
 - `/api/server`: `id` is the one [discovery](#discovery) answers with.
+  `language` is the server [language](#language), for devices in a
+  language Pley doesn't have.
   With `?challenge=…&proof_id=…` it also answers `proof`, for an app
   making sure this is its server ([Telling servers
   apart](#telling-servers-apart)). `commit` is the build's short hash,
@@ -641,8 +646,9 @@ it of every account with a password (`require_two_step` in the
 
 | Method | Path | Who | What |
 |---|---|---|---|
-| PATCH | `/api/me` | `user` | `{ display_name?, avatar_color?, audio_language?, subtitle_language?, subtitle_mode? }` (`null` clears) → `User` |
+| PATCH | `/api/me` | `user` | `{ display_name?, avatar_color?, audio_language?, subtitle_language?, subtitle_mode?, language? }` (`null` clears) → `User` |
 | PUT | `/api/me/track-defaults` | `play` | `{ audio_language?, subtitle_language?, subtitle_mode? }` → the profile as [`GET /api/auth/me`](#auth) shows it |
+| PUT | `/api/me/language` | `play` | `{ language }` (`"en"`, `"fr"`, `"es"`, or `null` for the server's) → the profile as [`GET /api/auth/me`](#auth) shows it |
 | PUT | `/api/me/pin` | `user` | `{ pin: string \| null, password }` → `204`. 4–8 digits; `null` removes it; `403` for a wrong password, and for a managed profile (an administrator sets its PIN) |
 | PUT | `/api/me/avatar` | `user` | raw image bytes (JPEG, PNG, WebP, GIF, BMP; ≤ 10 MB) → `User`. Stored as a 256 px square JPEG |
 | DELETE | `/api/me/avatar` | `user` | `204` |
@@ -673,6 +679,34 @@ A choice made for a show or movie wins over these defaults. Subtitles count
 as forced when flagged so, or when their title says so ("forced", or
 "signs" as in "Signs & Songs"). Languages match in any ISO 639 form (`en`,
 `eng`; `fr`, `fre`, `fra`); an untagged or `und` track has no language.
+
+## Language
+
+Pley is in English, French and Spanish (`en`, `fr`, `es`). The language
+an account sees is, in order:
+
+1. its own, `User.language` (`PATCH /api/me` with `{ "language": "fr" }`,
+   or `PUT /api/me/language` from an app; `null`, Automatic, goes back to
+   the next two);
+2. the device's: one picked on the device (the web app's globe on the
+   pages before signing in), else the first language of the browser or
+   the system, or of the request's `Accept-Language`, that Pley has;
+3. the server language, `Settings.language` (an administrator's choice in
+   Settings → General; English until there is one), which
+   `GET /api/server` shows as `language`.
+
+Any other code is `400`. The server writes its own words in that language:
+Home's and the libraries' hub titles (`Hub.title`), and on requests why one
+couldn't be sent (`MediaRequest.reason` of a failed one, `request_failed`'s
+`reason`, an approval option's `error`) and `MediaRequest.note`. What
+Radarr, Sonarr or the network said goes in those as it came. Apps send
+`Accept-Language` with the language they show, and write the rest
+themselves. Error messages (`message`) are in English. The web app loads
+a language's words when it is first shown, and remembers the last one on
+the device so the next visit starts in it. The tray of a server on a
+desktop is in the server language once an administrator has chosen one,
+else the desktop's; its menu takes a new one when Pley starts again (on
+Linux, the next time it opens).
 
 ## Compatibility tokens
 
@@ -1092,6 +1126,10 @@ apps allowed `profiles` move to another profile of the household. Send
   a right PIN answers as a switch does. Without a `pin`, or for a profile
   without one, it is `invalid_request` with no `reason`, which apps read as
   "this server can't check PINs".
+- A cast from another profile's remote carries a `switch_ticket`
+  ([Casting](#casting)): sent as `ticket`, with `profile` the cast's
+  `profile_id`, it stands for the PIN and the rest of the rules. It is good
+  once, for this app on the profile it acts as now.
 
 | Answer | When |
 |---|---|
@@ -1102,6 +1140,7 @@ apps allowed `profiles` move to another profile of the household. Send
 | `invalid_grant`, `"reason": "throttled"` | too many wrong PINs for it lately (5 in 15 minutes) |
 | `invalid_grant`, `"reason": "browser"` | it can see more than the app's profile and has no PIN: sign in to the app again and pick it in the browser (apps never see passwords) |
 | `invalid_grant`, `"reason": "not_allowed"` | not a household profile, disabled, or can see more with neither PIN nor password |
+| `invalid_grant`, `"reason": "ticket_spent"` | a cast's `ticket` that expired, was spent, or isn't this app's for this switch |
 | `invalid_grant` | the refresh token doesn't work, as for a refresh (a spent one ends the grant) |
 | `503 temporarily_unavailable` | Pley is too busy to check the PIN now: nothing is counted, try again |
 
@@ -1554,7 +1593,7 @@ user's watch state and their access are unchanged.
 | POST | `/api/items/{id}/unwatched` | `play` | `204` |
 | PUT | `/api/items/{id}/rating` | `play` | `{ rating: number \| null }` → `204`: the user's own rating (`user_state.rating`); `400` outside 0-10 |
 | PUT | `/api/items/{id}/streams` | `play` | `{ file_id?, audio_index?, subtitle_index? }` → `204`: remembers track choices |
-| PATCH | `/api/items/{id}` | `admin` | `{ title?, sort_title?, original_title?, year?, summary?, tagline?, studio?, content_rating?, release_date?, genres? }` → `ItemDetail` |
+| PATCH | `/api/items/{id}` | `admin` | `{ title?, sort_title?, original_title?, year?, summary?, tagline?, studio?, content_rating?, release_date?, genres?, match? }` → `ItemDetail` |
 | GET | `/api/items/{id}/matches?title=&year=` | `admin` | TMDB candidates `{ tmdb_id, title, original_title, year, overview, poster_url }[]` for movies and shows (needs a TMDB key) |
 | POST | `/api/items/{id}/match` | `admin` | `{ tmdb_id }` → `ItemDetail`, re-matched and refreshed |
 | GET | `/api/items/{id}/artwork/{poster\|backdrop\|thumb}` | `admin` | TMDB images `{ url, preview_url, width, height, language, votes }[]` |
@@ -1615,11 +1654,22 @@ user's watch state and their access are unchanged.
     audio track.
 - **`PATCH`**: a value edits and locks the field (refreshes and scans keep
   it); `null` unlocks it. `ItemDetail.locked_fields` lists locked fields.
+  An edit wins over the item's NFO file
+  ([CONFIGURATION.md](CONFIGURATION.md#nfo-files)), whose fields
+  `ItemDetail.nfo_fields` lists. `match` takes only `null`, which undoes
+  Fix Match: the NFO file's ids decide the match again (any other value:
+  `400`).
 - **`match`**: a show whose TV source is TVmaze or TheTVDB is found there by
-  the chosen entry's IMDb and TheTVDB ids.
+  the chosen entry's IMDb and TheTVDB ids. The choice wins over the NFO
+  file's ids, and `locked_fields` then lists `"match"`. When none of the
+  NFO file's ids is the chosen entry's, its fields and lockdata stop
+  applying and `nfo_fields` is empty, until Fix Match is undone or the
+  file names that entry.
 - **`refresh`** sources: movies, TMDB; shows, seasons and episodes, the TV
   source; artists, albums and tracks, MusicBrainz. `400` when that source
-  is off or lacks its key.
+  is off or lacks its key. An item its NFO file locks (`<lockdata>`) is
+  never fetched, by `refresh` (still `202`) or by `match` to the title the
+  file names.
 - **`analyze`**: a movie's chapters, or every episode of the season of an
   episode, a season or a show. `400` for other kinds.
 
@@ -2347,7 +2397,9 @@ pseudo-random data, made as it is sent, with `Content-Length`,
 ### Version 2
 
 `caps_version: 2` turns on these rules. A report without it (the web app,
-the Android app's web view, the compatibility APIs' clients) decides as version 1,
+the Android app's web view, the Plex-compatible API's clients, and the
+Jellyfin-compatible API's as it decides whether a file plays as it is)
+decides as version 1,
 whatever else it sends: the web app's `subtitle_codecs` and
 `picture_subtitles_sideload` only tell the server it draws picture
 subtitles from their `.mks` (it asks for no `subtitle_index` of a track it
@@ -2422,7 +2474,9 @@ fragmented MP4 (fMP4) segments, not from MPEG-TS. A version 2 player whose
 HLS session in fMP4, when the server's transcoder makes it
 (`fmp4_segments` in its capabilities). A player that lists `"ts"` first
 (the Android app sends `["ts", "fmp4"]`), every version 1 player,
-downloads, Live TV and the compatibility API get MPEG-TS, as before.
+downloads, Live TV and the Plex-compatible API get MPEG-TS, as before; a
+Jellyfin app gets fMP4 when its device profile asks
+([COMPATIBILITY.md](COMPATIBILITY.md#playing)).
 
 - The playlists say `#EXT-X-VERSION:7` and name the init segment first,
   `#EXT-X-MAP:URI="init.mp4"` (a smaller size's `v{k}-init.mp4`); segments
@@ -2544,7 +2598,7 @@ index.m3u8
   `dby1` brand. A remux that doesn't keep Dolby Vision carries no record.
   Profile 8.1 converted from 7 and HDR10+ left out work as in MPEG-TS.
 - Without `master_playlist` (and for every version 1 player, the web player
-  and the compatibility APIs' clients) the session starts at `index.m3u8`, and
+  and the Plex-compatible API's clients) the session starts at `index.m3u8`, and
   remuxes name nothing.
 
 For players with master playlists, the Dolby Vision rules of version 2
@@ -3017,7 +3071,8 @@ An app's token without the route's scope is refused before all of it
   folder (anime's own where set) or those given, and searched for unless
   `radarr_search` / `sonarr_search` is off. A title already there is
   monitored again, the seasons asked for too, and searched for. Should that
-  fail, the request is `failed`, `reason` says why and managers hear it
+  fail, the request is `failed`, `reason` says why (in the language each
+  manager reads, [Language](#language)) and managers hear it
   (`request_failed`); approving it again (`retry`) tries again. The request
   keeps what its approval chose while it is being sent: a send a restart
   cut short is made again when the server starts, and should how it went
@@ -3051,8 +3106,8 @@ An app's token without the route's scope is refused before all of it
   an approval preselects (anime's for anime). The lists are kept 5 minutes,
   then asked for again (one question at a time) and waited for 3 seconds at
   most: a service that hasn't answered by then has the lists it gave last
-  (none, if it never did), and `error` says why ("Radarr isn't answering",
-  or what went wrong).
+  (none, if it never did), and `error` says why in the manager's language
+  ("Radarr isn't answering", or what went wrong).
 - **Actions** (`MediaRequest.actions`): what this session may do to the
   request now, in the order clients list them. Clients offer exactly these
   and work out none themselves; one refused anyway, after a race, answers
@@ -3262,8 +3317,10 @@ interface MediaRequest {
   stage: RequestStage;              // where it is: draw a request from this
   stage_at: null;                   // always null: no stage says when it ends
   reason: string | null;            // declined: the administrator's (or null), for its maker and managers;
-                                    // failed: what went wrong, for managers; null for others
-  note: string | null;              // managers: what to know of it ("Added by hand")
+                                    // failed: what went wrong, for managers, in their language ("Radarr
+                                    // isn't answering", "Radarr refused: …" with Radarr's words as it
+                                    // said them); null for others
+  note: string | null;              // managers: what to know of it, in their language ("Added by hand")
   mine: boolean;                    // this account made it
   watching: boolean;                // this account follows it
   watchers: number;                 // managers: how many follow it; 0 for others
@@ -3329,7 +3386,8 @@ interface ApprovalOptions {
   root_folder: string | null;
   anime_quality_profile: number | null; // for anime requests; null: as above
   anime_root_folder: string | null;
-  error: string | null;             // it didn't answer: "Radarr isn't answering"; the lists are its last
+  error: string | null;             // it didn't answer, in the manager's language: "Radarr isn't answering";
+                                    // the lists are its last
 }
 ```
 
@@ -3346,8 +3404,8 @@ MediaRequest, retry_at: Timestamp | null }`, and a `409 declined` is
 | GET | `/api/sessions` | `play` | `PlayingSession[]`: the caller's own sessions whose players are there, oldest first ([Remote control](#remote-control)) |
 | DELETE | `/api/sessions/{id}` | `play` or `activity` | optional body `{ message?: string }` (at most 200 characters, else `400`) → `204`: stops a playback session at once |
 | POST | `/api/sessions/{id}/command` | `play` | `{ command: Control, position_ms?: number, offset_ms?: number, stream_index?: number }` → `202`: sends one of the caller's own players a command ([Remote control](#remote-control)) |
-| GET | `/api/remote/devices` | `play` | `RemoteDevice[]`: the caller's own devices that take casts, one each, by name ([Casting](#casting)) |
-| POST | `/api/remote/devices/{id}/cast` | `play` | `{ item_id?: Id, playlist_id?: Id, channel_id?: Id, start_ms?: number, shuffle?: boolean }` → `202`: sends one of the caller's own devices (`{id}`: its `receiver_id`) something to play ([Casting](#casting)) |
+| GET | `/api/remote/devices` | `play` | `RemoteDevice[]`: the caller's own devices that take casts, one each, by name, and with `?household=1` and `profiles`, for one of Pley's own apps, those of the household's other profiles that switch ([Casting](#casting)) |
+| POST | `/api/remote/devices/{id}/cast` | `play` | `{ item_id?: Id, playlist_id?: Id, channel_id?: Id, start_ms?: number, shuffle?: boolean, profile_id?: Id, pin?: string }` → `202`: sends one of the caller's own devices (`{id}`: its `receiver_id`), or with `profile_id` and `profiles`, for one of Pley's own apps, a device of another of the household's profiles, something to play ([Casting](#casting)) |
 | GET | `/api/events` | `library` | optional `?receiver=&device_name=&device_kind=&casts=` → Server-Sent Events; each `data:` is a JSON `ServerEvent` |
 
 `/api/activity`: `seasons_pending` counts seasons waiting for intro and
@@ -3413,9 +3471,12 @@ don't restart the stopped session.
 
 A user's devices control what plays on their other devices: pause the TV
 from a phone, skip a track from the browser, change the TV's subtitles,
-or start a film on it. Only the session's or the device's own user does;
+or start a film on it. Only the session's own user controls it;
 administrators, and Pley's own apps allowed `activity` on their accounts,
-stop other people's sessions (above) and nothing more.
+stop other people's sessions (above) and nothing more. A home member also
+casts to the household's other profiles' devices, which switch to the
+caster's profile first ([Casting](#casting)): a device plays as the
+profile of the remote that sent it something.
 
 - **Players say what they obey.** A play request's `controls` lists the
   commands its player acts on: `play`, `pause`, `seek`, `skip`, `next`,
@@ -3513,6 +3574,16 @@ stop other people's sessions (above) and nothing more.
   the last report (a seek, a skip), sends `sessions_changed`, as a pause
   does, so remotes fetch the list again. The first report isn't compared:
   until then the session is starting.
+- **Without its controls.** Whoever sent a command is on another device,
+  so Pley's players don't bring up their controls for it: what it changed
+  shows for a moment where the player puts its brief notices ("Paused",
+  "Playing", "+30 s" or "−30 s" as far as a skip asked, "Jumped to 12:34"
+  where a seek went, "Audio: …", "Subtitles: …" or "Subtitles off" and
+  "Quality: …" as the menus name them), and a command that changes
+  nothing shows nothing. The remote's pause doesn't keep the controls up
+  as a pause there does, until someone there touches a key, the mouse or
+  the screen. Kodi's skin still shows its own controls as for any pause
+  ([KODI.md](KODI.md)); the Apple apps' players show no notice.
 
 ### Casting
 
@@ -3523,21 +3594,41 @@ would.
 - **Receivers.** A player that plays what it is sent (one of Pley's
   apps) opens its event stream as a receiver, with `receiver`,
   `device_name`, `device_kind` and `casts` in the query
-  (`/api/events?receiver=den-tv&device_kind=tv&casts=item,live`).
+  (`/api/events?receiver=den-tv&device_kind=tv&casts=item,live,switch`).
   `receiver` is the app's own id for the device, 1 to 128 letters, digits,
   `.`, `_`, `:` and `-` (anything else and the stream isn't a receiver).
   `device_name` and `device_kind` are what a play request's are, and
   without them the server names the device and tells its kind the same
   way. `casts` says what it plays: `item` (titles and playlists), `live`
-  (channels), comma-separated; others are left out. The device takes casts
-  while the stream is open: several streams with the same `receiver` count
-  once, and it goes when the last one closes. A user has at most 32
-  receivers; a stream past them still gets its events, but isn't one. A
-  receiver appearing or going sends `sessions_changed`.
-- **`GET /api/remote/devices`** lists the caller's own receivers, an
-  administrator's too: one per device (`device_id`, as sessions say it),
-  the one that connected last, by name. Remotes show them with the
-  sessions of the same `device_id`; an app leaves out its own receiver.
+  (channels), comma-separated; others are left out. With `switch` too, the
+  app switches to the profile of a remote of another profile that casts to
+  it ([below](#casting)); only such receivers are offered across profiles,
+  since an app that doesn't would play the cast as the profile it is on.
+  The device takes casts
+  while the stream is open: several streams of one device (`device_id`,
+  as sessions say it) with the same `receiver` count once, and it goes
+  when the last one closes. A receiver is its device's: another device
+  whose stream names the same `receiver` (a sign-in that copies a TV's id
+  from the list, or the TV back with a new token while its old stream
+  lingers) is a receiver of its own, listed beside it, never in its place,
+  whichever came first. A user has at most 32 receivers; a stream past
+  them still gets its events, but isn't one. A receiver appearing or going
+  sends `sessions_changed`.
+- **`GET /api/remote/devices`** lists the caller's receivers, an
+  administrator's too. With `?household=1`, for a home member, it adds
+  those of the household's other profiles (home members, not disabled)
+  whose stream named `switch`, each with the `profile` it is on, `{ id,
+  name }`, its name as "Who's watching?" says it; the caller's own have no
+  `profile`. A remote that doesn't ask (an older app) gets its own alone,
+  and so does an app other than Pley's own, or one not allowed `profiles`:
+  a cast there switches someone's device to the caller's profile, which
+  only a switch's own apps may do. One per device
+  (`device_id`, as sessions say it), the one that connected last, by name;
+  two devices may have the same `receiver_id` and name, which apps number
+  ("Living room TV (2)").
+  Remotes show them with the sessions of the same `device_id`; another
+  profile's sessions stay theirs, so its devices show as on that profile,
+  without what they play. An app leaves out its own receiver.
 - **`POST /api/remote/devices/{id}/cast`**, `{id}` being a `receiver_id`,
   names exactly one of `item_id`, `playlist_id` and `channel_id`;
   `start_ms` (from 0 to a day) is where a title starts, and `shuffle`
@@ -3545,14 +3636,28 @@ would.
   episode, `audio_index` and `subtitle_index` (`-1`: none) are the tracks
   the remote had picked on its page, by stream index of one of its files.
   The quality stays the receiver's own: what suits a phone's network
-  doesn't suit a TV's. It answers `202` and sends the user's event
-  streams `{ type: "cast", receiver_id, item_id, playlist_id, channel_id,
-  start_ms, shuffle, audio_index, subtitle_index, from }`, `from` being the
-  remote's device name or `null`: the `device_name` its device gave as a
-  receiver, where it is one, else one from its User-Agent. It answers, in
-  this order:
-  - `404` for a receiver unknown, gone or someone else's (an
-    administrator's request too: it never says which);
+  doesn't suit a TV's. A receiver of another of the household's profiles
+  takes that profile's id, `profile_id` (its `profile.id` in the list), the
+  `device_id` the list shows for it, and the caller's `pin` when their
+  profile has one: the cast goes to that device or to none, so another
+  device with the same receiver id never gets it. A cast to one of the
+  caller's own is checked against the device of that id that connected
+  last. It answers `202` and sends the event streams of the profile the
+  receiver is on `{ type: "cast",
+  receiver_id, item_id, playlist_id, channel_id, start_ms, shuffle,
+  audio_index, subtitle_index, from }`, `from` being the remote's device
+  name or `null`: the `device_name` its device gave as a receiver, where it
+  is one, else one from its User-Agent. To another profile's receiver it
+  adds the caller's `profile_id` and a `switch_ticket` (below), and goes to
+  that receiver's streams alone, on its device: the profile's other
+  devices don't hear what someone else cast, nor the ticket. It answers,
+  in this order:
+  - `403` `{ code: "not_allowed" }` for `profile_id` from an app other
+    than Pley's own, or one not allowed `profiles`;
+  - `404` for a receiver unknown, gone, or of a profile outside the
+    caller's household or without `profile_id` (an administrator's request
+    too: it never says which), or not on its `device_id`; `400` for
+    `profile_id` without `device_id`;
   - `400` for a body that doesn't name exactly one of the three;
   - `404` for a title the user can't see, `400` for one that isn't a
     movie, an episode, a show, a season, a track, an album or an artist;
@@ -3563,6 +3668,18 @@ would.
     `casts` doesn't name (`live` for a channel, `item` otherwise);
   - `400` for a `start_ms` out of range, or a track that isn't one of the
     title's (or with something other than a movie or an episode);
+  - for another profile's receiver, by a switch's rules from the profile
+    it is on (without an administrator's exemption: the receiver may be an
+    app): `403` `{ code: "not_allowed" }` when the caller's profile is
+    freer (an administrator, a higher age limit, other libraries) and has
+    no PIN, as there is no password on a TV, or has to set up two-step
+    sign-in, which the server requires, or is an administrator's and the
+    receiver isn't an app (`device_id` `app-…`): a browser's or the desktop
+    app's sign-in would stay one with administrator rights, where an app's
+    tokens never have them; then, when the caller's profile has
+    a PIN, `403` `{ code: "pin_needed" }` without `pin`, `wrong_pin` for a
+    wrong one, `pin_locked` once it is locked, `429` after too many wrong
+    ones, counted and throttled with the switches to the caller's profile;
   - `429` past 10 casts a second to one receiver.
 - **The receiver plays it**, if `receiver_id` is its own, as its own
   *Play* on that page would: a movie, an episode or a track where *Play*
@@ -3574,6 +3691,27 @@ would.
   them). Its player then starts
   a session as any play does, which the remote sees in `GET /api/sessions`
   with the receiver's `device_id`.
+- **Switching to the remote's profile.** A cast with `profile_id` comes
+  from another profile of the household: the receiver switches to it before
+  it plays, with `switch_ticket`, in place of a PIN or password. An app
+  sends it as `ticket` to its switch-profile grant ([Apps (OAuth
+  2.1)](#apps-oauth-21), `profile` being the cast's `profile_id`); the
+  desktop app's window to `POST /api/auth/switch` (`{ user_id, ticket }`).
+  A ticket is good once, for 60 seconds, for that device switching from
+  the profile it is on to the caster's: shown for anything else it is
+  spent, `invalid_grant` with reason `ticket_spent` from the grant and
+  `403` `{ code: "ticket_spent" }` from the switch. Both profiles must
+  still be home members, and the caster's enabled. The ticket stands for
+  the PIN the caster gave; the rest of a switch's rules are checked again
+  as it is spent, from the rights the device has: a caster's profile that
+  would now take its password (its PIN removed meanwhile) or whose PIN is
+  locked isn't switched to, and `POST /api/auth/switch` never switches to
+  an administrator's profile with a ticket. A device keeps its 4 newest
+  tickets. A receiver that doesn't name `switch`, or whose stream comes
+  from an app other than Pley's own or one not allowed `profiles`, gets no
+  such cast: it isn't offered across profiles. A progress report naming
+  another profile's session (one that left with this profile's token as
+  its device switched) is answered `204` and kept for neither.
 
 ### Watch state on other devices
 
@@ -3637,7 +3775,10 @@ too. Whether a stream is a manager's is checked again as its session is
 - `request_created`: a new request, `pending` or approved as made: to
   managers but its maker.
 - `request_failed`: a request couldn't be sent to Radarr or Sonarr and
-  waits for a manager: to managers (`retry_at` is always `null`).
+  waits for a manager: to managers (`retry_at` is always `null`), with
+  `reason` in the language the stream's account sees (its own, else the
+  language of the device that opened the stream, else the server
+  language), as `GET /api/requests/{id}` words it.
 - `requests_settings_changed` has no audience: see the union below.
 
 Clients fetch the request summary again on each, and what shows that
@@ -3707,6 +3848,8 @@ interface PlayingSession {      // GET /api/sessions
   quality: string | null;       // the Quality menu's pick, by id ("auto", "8m"); null until its player says
   qualities: { id: string; label: string }[]; // what its menu offers for the file, which `quality`
                                 // picks from; empty for music and on live (Remote control, "Quality")
+  markers: Marker[];            // the intro and credits of the file it plays, for a remote's Skip Intro
+                                // and Skip Credits (a seek); empty on live
 }
 
 interface TrackOption {
@@ -4149,6 +4292,7 @@ interface Network {
 
 interface Settings {
   server_name: string;
+  language: "" | "en" | "fr" | "es"; // the server language (see Language); "" = not chosen, English
   tmdb_api_key: string;             // "" = movies only from file names and local artwork
   metadata_language: string;        // "en-US" (TMDB and TheTVDB; TVmaze is English)
   tv_metadata: "auto" | "tmdb" | "tvdb" | "tvmaze"; // TV source. "auto" (default): TMDB if it has a key,
@@ -4157,6 +4301,8 @@ interface Settings {
   tvdb_api_key: string;             // TheTVDB v4 key; "" = not set
   tvdb_pin: string;                 // TheTVDB subscriber PIN, for user-supported keys
   music_metadata: boolean;          // MusicBrainz + Cover Art Archive for music libraries (default true)
+  read_nfo: boolean;                // read NFO files next to movies, shows, seasons and episodes (default
+                                    // true; see CONFIGURATION.md). A change scans every library
   hwaccel: "auto" | "none" | "nvenc" | "qsv" | "amf" | "vaapi" | "videotoolbox" | "vulkan";
   hardware_decoding: boolean;       // decode on the GPU when possible
   tonemapping: "auto" | "libplacebo" | "opencl" | "zscale" | "none"; // HDR10/HLG/Dolby Vision to SDR

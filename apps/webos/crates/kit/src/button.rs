@@ -4,7 +4,7 @@
 //! a small scale when focused, and AccentBright while pressed; none glows. Disabled ones are drawn
 //! at 40 % and can't take focus.
 
-use pley_base::{Color, Icon, Point, Rect, Size};
+use pley_base::{Color, Icon, Point, Rect, Size, TextStyle};
 use pley_ui::theme::{self, focus, radius};
 use pley_ui::{Dir, Edge, FocusOpts, Group, Id, Motion, Response, Ui};
 
@@ -25,6 +25,9 @@ pub enum ButtonKind {
     Tab,
     /// A show's season tabs: as tabs, padding 20 (`TvEpisodes.kt`).
     SeasonTab,
+    /// The globe before signing in: 32 tall, padding 10, a 16 dp icon 6 from a `Caption` label,
+    /// no fill until focused (the Samsung apps' `Small`).
+    Small,
 }
 
 /// A button of the [`ButtonKind`]s, built with the methods below and drawn with [`Button::show`].
@@ -50,6 +53,11 @@ pub const TEXT_MIN_WIDTH: f32 = 58.0;
 pub const TALL_HEIGHT: f32 = 48.0;
 /// The gap between an icon and its label.
 const ICON_GAP: f32 = 8.0;
+/// A small button's height, padding, icon and gap (`Small`).
+pub const SMALL_HEIGHT: f32 = 32.0;
+pub const SMALL_PADDING: f32 = 10.0;
+const SMALL_ICON: f32 = 16.0;
+const SMALL_ICON_GAP: f32 = 6.0;
 
 impl<'a> Button<'a> {
     fn new(kind: ButtonKind, label: &'a str) -> Button<'a> {
@@ -90,6 +98,11 @@ impl<'a> Button<'a> {
     /// A tab; `current` is the one shown.
     pub fn tab(label: &'a str, current: bool) -> Button<'a> {
         Button { selected: current, ..Button::new(ButtonKind::Tab, label) }
+    }
+
+    /// A small button.
+    pub fn small(label: &'a str) -> Button<'a> {
+        Button::new(ButtonKind::Small, label)
     }
 
     /// A season tab; `current` is the season shown.
@@ -145,6 +158,7 @@ impl<'a> Button<'a> {
     fn padding(&self) -> f32 {
         match self.kind {
             ButtonKind::Pill | ButtonKind::SeasonTab => 20.0,
+            ButtonKind::Small => SMALL_PADDING,
             _ => 16.0,
         }
     }
@@ -153,7 +167,7 @@ impl<'a> Button<'a> {
         let mut look = match self.kind {
             ButtonKind::Pill => focus::PILL,
             ButtonKind::Text => focus::TEXT_BUTTON,
-            ButtonKind::Link => focus::LINK,
+            ButtonKind::Link | ButtonKind::Small => focus::LINK,
             ButtonKind::Chip => focus::CHIP,
             ButtonKind::Tab | ButtonKind::SeasonTab if self.selected => focus::TAB_CURRENT,
             ButtonKind::Tab | ButtonKind::SeasonTab => focus::TAB,
@@ -170,7 +184,25 @@ impl<'a> Button<'a> {
     }
 
     fn height(&self) -> f32 {
-        if self.tall { TALL_HEIGHT } else { theme::BUTTON_HEIGHT }
+        match self.kind {
+            ButtonKind::Small => SMALL_HEIGHT,
+            _ if self.tall => TALL_HEIGHT,
+            _ => theme::BUTTON_HEIGHT,
+        }
+    }
+
+    fn style(&self) -> &'static TextStyle {
+        static CAPTION: TextStyle = theme::CAPTION;
+        static LABEL: TextStyle = theme::LABEL;
+        if self.kind == ButtonKind::Small { &CAPTION } else { &LABEL }
+    }
+
+    fn icon_size(&self) -> f32 {
+        if self.kind == ButtonKind::Small { SMALL_ICON } else { theme::ICON_SIZE }
+    }
+
+    fn icon_gap(&self) -> f32 {
+        if self.kind == ButtonKind::Small { SMALL_ICON_GAP } else { ICON_GAP }
     }
 
     fn min(&self) -> f32 {
@@ -185,9 +217,9 @@ impl<'a> Button<'a> {
     /// The button's size: its label and icon with the padding either side, at least its least
     /// width, 40 tall.
     pub fn size(&self, ui: &Ui) -> Size {
-        let label = ui.measure(self.label, &theme::LABEL, &line_within(self.max_label)).w;
+        let label = ui.measure(self.label, self.style(), &line_within(self.max_label)).w;
         let icon = if self.lead().is_some() {
-            theme::ICON_SIZE + if self.label.is_empty() { 0.0 } else { ICON_GAP }
+            self.icon_size() + if self.label.is_empty() { 0.0 } else { self.icon_gap() }
         } else {
             0.0
         };
@@ -217,15 +249,15 @@ impl<'a> Button<'a> {
             if let Some(edge) = s.edge {
                 inner_stroke(ui, rect, edge, radius::CONTROL, focus::REST_EDGE);
             }
-            let layout = ui.layout(self.label, &theme::LABEL, &line_within(self.max_label));
+            let layout = ui.layout(self.label, self.style(), &line_within(self.max_label));
             let lead = self.lead();
-            let icon_w = if lead.is_some() { theme::ICON_SIZE } else { 0.0 };
-            let gap = if lead.is_some() && !self.label.is_empty() { ICON_GAP } else { 0.0 };
+            let icon_w = if lead.is_some() { self.icon_size() } else { 0.0 };
+            let gap = if lead.is_some() && !self.label.is_empty() { self.icon_gap() } else { 0.0 };
             let content = icon_w + gap + layout.size.w;
             let mut x = rect.x + (rect.w - content) / 2.0;
             if let Some(icon) = lead {
                 let tint = if self.kind == ButtonKind::Chip && self.selected { check_color } else { s.content };
-                let r = Rect::new(x, rect.y + (rect.h - theme::ICON_SIZE) / 2.0, theme::ICON_SIZE, theme::ICON_SIZE);
+                let r = Rect::new(x, rect.y + (rect.h - icon_w) / 2.0, icon_w, icon_w);
                 ui.icon(r, icon, tint);
                 x += icon_w + gap;
             }
@@ -237,7 +269,8 @@ impl<'a> Button<'a> {
 /// The 40 dp "round" button (a rounded square, radius 6): From start, Mark as watched, More. Its
 /// label (`Tv.Caption`, Fg, one line, as wide as it needs) fades in 6 dp below it while it has focus
 /// (150 ms, kept with Reduce motion); rows of them keep [`theme::BUTTON_LABEL_ROOM`] under themselves
-/// so nothing jumps (`TvButtons.kt` `TvRoundButton`).
+/// so nothing jumps (`TvButtons.kt` `TvRoundButton`). Without [`RoundButton::show_label`] (a star
+/// that says it all) the label is only read by Audio Guidance.
 #[derive(Clone, Copy, Debug)]
 pub struct RoundButton<'a> {
     icon: Icon,
@@ -245,6 +278,7 @@ pub struct RoundButton<'a> {
     on_art: bool,
     enabled: bool,
     long_press: bool,
+    show_label: bool,
 }
 
 /// A round button's side.
@@ -255,7 +289,7 @@ pub const ROUND_LABEL_TOP: f32 = 46.0;
 impl<'a> RoundButton<'a> {
     /// A round button over art (Bg at 80 %), the usual place for one.
     pub fn new(icon: Icon, label: &'a str) -> RoundButton<'a> {
-        RoundButton { icon, label, on_art: true, enabled: true, long_press: false }
+        RoundButton { icon, label, on_art: true, enabled: true, long_press: false, show_label: true }
     }
 
     /// Off art it sits on Surface3 instead.
@@ -271,6 +305,11 @@ impl<'a> RoundButton<'a> {
     /// OK held 500 ms is a long press.
     pub fn long_press(self) -> RoundButton<'a> {
         RoundButton { long_press: true, ..self }
+    }
+
+    /// With `false`, no label shows under it; Audio Guidance still reads it.
+    pub fn show_label(self, show_label: bool) -> RoundButton<'a> {
+        RoundButton { show_label, ..self }
     }
 
     /// The square's size (the label hangs below it).
@@ -291,11 +330,13 @@ impl<'a> RoundButton<'a> {
         let r = register(ui, id, rect, opts);
         let s = shade(ui, &look, &r);
         self.paint(ui, rect, &s);
-        let reveal = ui.animate(id.with("kit.label"), if r.focused { 1.0 } else { 0.0 }, Motion::REVEAL);
-        if reveal > 0.0 && !self.label.is_empty() {
-            let layout = ui.layout(self.label, &theme::CAPTION, &free_line());
-            let x = rect.center().x - layout.size.w / 2.0;
-            ui.opacity(reveal, |ui| ui.draw_text(Point::new(x, at.y + ROUND_LABEL_TOP), layout, theme::FG));
+        if self.show_label {
+            let reveal = ui.animate(id.with("kit.label"), if r.focused { 1.0 } else { 0.0 }, Motion::REVEAL);
+            if reveal > 0.0 && !self.label.is_empty() {
+                let layout = ui.layout(self.label, &theme::CAPTION, &free_line());
+                let x = rect.center().x - layout.size.w / 2.0;
+                ui.opacity(reveal, |ui| ui.draw_text(Point::new(x, at.y + ROUND_LABEL_TOP), layout, theme::FG));
+            }
         }
         r
     }

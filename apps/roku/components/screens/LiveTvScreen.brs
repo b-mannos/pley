@@ -30,6 +30,10 @@ sub init()
     m.retry = m.top.findNode("retry")
     m.clock = m.top.findNode("clock")
     m.hint = m.top.findNode("hint")
+    m.top.findNode("title").text = t("livetv.title")
+    typeSet(m.messageText, t("common.states.loading"))
+    m.guide.loadingDataText = t("livetv.page.loadingGuide")
+    m.guide.channelNoDataText = t("livetv.guide.noInformation")
     ' Named "panel", as every page's panel is: the ready-to-watch card
     ' never shows over one (MainScene's noticeFree).
     m.detailsGroup = m.top.findNode("panel")
@@ -46,6 +50,7 @@ sub init()
     m.detailsLeft = m.top.findNode("detailsLeft")
     m.detailsText = m.top.findNode("detailsText")
     m.detailsEnded = m.top.findNode("detailsEnded")
+    m.detailsEnded.text = t("livetv.details.ended")
     m.detailsButtons = m.top.findNode("detailsButtons")
     ' The programme the panel shows ({ channel, program, back: what had
     ' the focus }), or invalid.
@@ -53,7 +58,7 @@ sub init()
     m.started = false
     ' The scene's liveChanges this screen has shown.
     m.liveSeen = 0
-    m.twelve = CreateObject("roDeviceInfo").GetClockFormat() <> "24h"
+    m.twelve = fmtTwelveHour()
     m.view = { tab: "guide", category: "all" }
     m.viewKey = ""
     ' The groups ({ total, favorites, recent } and [{ name, region, label,
@@ -102,9 +107,9 @@ sub init()
     m.span = CreateObject("roTimespan")
     ' When what's on in the cards was last asked for again (m.span's ms).
     m.refreshedAt = -1
-    m.retry.buttons = ["Try again"]
+    m.retry.buttons = [t("common.actions.tryAgain")]
     m.retry.observeField("buttonSelected", "onRetry")
-    m.tabs.chips = [{ label: "Guide", width: 228, icon: "calendar-days" }, { label: "Channels", width: 228, icon: "layout-grid" }]
+    m.tabs.chips = [{ label: t("livetv.tabs.guide"), width: 228, icon: "calendar-days" }, { label: t("livetv.tabs.channels"), width: 228, icon: "layout-grid" }]
     m.tabs.observeField("chosen", "onTabChosen")
     m.rail.observeField("itemSelected", "onRailSelected")
     m.rail.observeField("itemFocused", "onRailFocused")
@@ -168,7 +173,7 @@ sub onActive()
         if m.view.tab = "channels" then m.tabs.current = 1
         m.tabs.focusIndex = m.tabs.current
         m.rail.setFocus(true)
-        showMessage("", "Loading…")
+        showMessage("", t("common.states.loading"))
         loadGroups(true)
         return
     end if
@@ -369,12 +374,18 @@ end sub
 ' has the words in it, and the groups whose names do.
 sub askSearch()
     dialog = CreateObject("roSGNode", "StandardKeyboardDialog")
-    dialog.title = "Search Live TV"
-    dialog.message = ["Channels, groups and what's on"]
+    dialog.title = t("livetv.search.title")
+    dialog.message = [t("livetv.search.prompt")]
     dialog.text = m.query
-    buttons = ["Search"]
-    if m.query <> "" then buttons.Push("Clear")
-    buttons.Push("Cancel")
+    ' What each button does, in their order: Clear only with words.
+    buttons = [t("livetv.search.search")]
+    m.searchActions = ["search"]
+    if m.query <> ""
+        buttons.Push(t("livetv.search.clear"))
+        m.searchActions.Push("clear")
+    end if
+    buttons.Push(t("common.actions.cancel"))
+    m.searchActions.Push("cancel")
     dialog.buttons = buttons
     dialog.observeField("buttonSelected", "onSearchAnswered")
     m.top.getScene().dialog = dialog
@@ -383,17 +394,14 @@ end sub
 sub onSearchAnswered(event as object)
     dialog = m.top.getScene().dialog
     text = ""
-    labels = []
-    if dialog <> invalid
-        text = dialog.text.Trim()
-        labels = dialog.buttons
-    end if
+    if dialog <> invalid then text = dialog.text.Trim()
     uiCloseDialog()
     chosen = event.getData()
-    if chosen < 0 or chosen >= labels.Count() then return
-    label = labels[chosen]
-    if label = "Cancel" then return
-    if label = "Clear" or text = ""
+    actions = m.searchActions
+    if actions = invalid or chosen < 0 or chosen >= actions.Count() then return
+    action = actions[chosen]
+    if action = "cancel" then return
+    if action = "clear" or text = ""
         if searching()
             leaveSearch()
         else
@@ -503,7 +511,7 @@ end sub
 sub onRetry()
     m.toContent = m.retry.isInFocusChain()
     if m.retryWhat = "groups"
-        showMessage("", "Loading…")
+        showMessage("", t("common.states.loading"))
         loadGroups(true)
     else
         showCategory(m.retryAround)
@@ -566,7 +574,7 @@ sub loadGuidePage(offset as integer, around as integer, focus as string)
     end if
     m.asked = m.asked + 1
     m.loading = true
-    if m.guide.content = invalid then showMessage("", "Loading the guide…")
+    if m.guide.content = invalid then showMessage("", t("livetv.page.loadingGuide"))
     uiRequest({ op: "livePage", kind: "guide", category: m.view.category, offset: offset, limit: livePageSize(), around: around, start: m.guideStart, upto: m.loadedTo, asked: m.asked, focus: focus, focusId: around }, "onGuide")
 end sub
 
@@ -630,7 +638,7 @@ sub onGuide(event as object)
     m.guide.visible = true
     m.info.visible = true
     showCount()
-    m.hint.text = "OK: watch   ·   Options (*): details   ·   Rewind and fast forward: earlier and later   ·   Play: now   ·   Replay: search"
+    m.hint.text = t("livetv.page.guideHint")
     showProgram()
     if m.toContent then focusContent()
 end sub
@@ -657,8 +665,7 @@ sub showCount()
         m.count.text = ""
         return
     end if
-    text = liveThousands(total) + " channels"
-    if total = 1 then text = "1 channel"
+    text = t("livetv.page.channelCount", { count: total })
     range = liveRange(offset, shown, total)
     if range <> "" then text = text + "   ·   " + range
     typeSet(m.count, text)
@@ -771,15 +778,18 @@ sub showProgram()
     if p = invalid
         placeBadge(m.infoBadge, m.infoTitle, "", 1020)
         typeSet(m.infoTitle, channel.name)
-        m.infoMeta.text = "No information for this time"
-        if not channel.hasGuide then m.infoMeta.text = "No guide for this channel"
+        if channel.hasGuide
+            m.infoMeta.text = t("livetv.guide.noInformation")
+        else
+            m.infoMeta.text = t("livetv.noGuideHere")
+        end if
         m.infoText.text = ""
         return
     end if
     now = nowSeconds()
     meta = []
     if p.start <= now and p.ends > now
-        meta.Push("On now")
+        meta.Push(t("livetv.guide.onNow"))
         meta.Push(liveSpan(p, m.twelve))
         meta.Push(liveTimeLeft(p, now))
     else
@@ -806,7 +816,7 @@ sub placeBadge(badge as object, title as object, text as string, width as intege
         return
     end if
     badge.color = "0x7DD3FCFF"
-    if text = "LIVE" then badge.color = "0xEB6B70FF"
+    if liveBadgeIsLive(text) then badge.color = "0xEB6B70FF"
     room = Int(badge.boundingRect().width) + 16
     title.translation = [x + room, y]
     title.width = width - room
@@ -821,8 +831,8 @@ end function
 function daySpan(p as object, now as integer) as string
     span = liveSpan(p, m.twelve)
     day = liveDay(p.start, now, fmtZoneSeconds())
-    if day <> "Today" then span = day + " " + span
-    return span
+    if day = t("livetv.time.today") then return span
+    return t("livetv.time.dayAndTime", { day: day, time: span })
 end function
 
 ' OK on a programme: one on now (or time without a guide) watches the
@@ -849,7 +859,7 @@ end sub
 sub loadCards(offset as integer, around as integer, before as boolean, replace as boolean)
     if m.cardsLoading and not replace then return
     m.cardsLoading = true
-    if m.cardChannels.Count() = 0 then showMessage("", "Loading…")
+    if m.cardChannels.Count() = 0 then showMessage("", t("common.states.loading"))
     m.cardsRequest = uiRequest({ op: "livePage", kind: "cards", category: m.view.category, offset: offset, limit: livePageSize(), around: around, before: before, replace: replace, focusId: around }, "onCards")
 end sub
 
@@ -912,7 +922,7 @@ sub onCards(event as object)
     m.cards.visible = true
     m.guide.visible = false
     m.info.visible = false
-    m.hint.text = "OK: watch   ·   Options (*): details   ·   Replay: search"
+    m.hint.text = t("livetv.page.cardsHint")
     showCount()
     if m.toContent then focusContent()
 end sub

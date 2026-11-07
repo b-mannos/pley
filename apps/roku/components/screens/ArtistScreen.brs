@@ -18,6 +18,9 @@ sub init()
     m.albumsLabel = m.top.findNode("albumsLabel")
     m.albums = m.top.findNode("albums")
     m.message = m.top.findNode("message")
+    m.message.text = t("common.states.loading")
+    typeSet(m.kindLabel, t("titles.music.artist"))
+    typeSet(m.albumsLabel, t("titles.music.albums"))
     m.started = false
     ' The artist's details once they came; their albums' ids in the
     ' server's order, invalid until they came.
@@ -79,16 +82,16 @@ sub showFailure(answer as object)
         uiToast(answer.message, true)
         return
     end if
-    m.message.title = "Couldn't load this artist"
+    m.message.title = t("browse.music.artistFailed")
     typeSet(m.message, answer.message)
-    m.message.action = "Retry"
+    m.message.action = t("common.actions.retry")
     m.message.visible = true
     if m.top.hasFocus() or m.message.isInFocusChain() then m.message.setFocus(true)
 end sub
 
 sub onRetry()
     m.message.title = ""
-    m.message.text = "Loading…"
+    m.message.text = t("common.states.loading")
     m.message.action = ""
     m.top.setFocus(true)
     ask()
@@ -137,7 +140,7 @@ sub onAlbums(event as object)
     if answer.data.shown = 0
         m.message.title = ""
         m.message.action = ""
-        m.message.text = "No albums found."
+        m.message.text = t("titles.music.noAlbums")
         if (m.top.hasFocus() or m.message.isInFocusChain()) and m.buttons.visible then m.buttons.setFocus(true)
         return
     end if
@@ -182,11 +185,11 @@ sub showButtons()
     labels = []
     if m.albumIds <> invalid and m.albumIds.Count() > 0
         actions.Append(["play", "shuffle"])
-        labels.Append(["Play", "Shuffle"])
+        labels.Append([t("common.actions.play"), t("titles.actions.shuffle")])
     end if
     if m.global.music.state <> "stopped"
         actions.Push("nowPlaying")
-        labels.Push("Now playing")
+        labels.Push(t("titles.actions.nowPlaying"))
     end if
     m.actions = actions
     if FormatJson(labels) <> FormatJson(m.labels)
@@ -263,7 +266,7 @@ sub onAlbumTracks(event as object)
     ' Left meanwhile: nothing starts behind the screen now on top.
     if not m.top.active then return
     if tracks.Count() = 0
-        uiToast("Nothing to play")
+        uiToast(t("titles.nothingToPlay"))
         return
     end if
     at = 0

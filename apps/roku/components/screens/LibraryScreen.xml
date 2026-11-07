@@ -14,6 +14,7 @@
         <field id="active" type="boolean" alwaysNotify="true" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/screens/LibraryScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/I18n.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
@@ -51,7 +52,7 @@
             <Font role="rowLabelFont" uri="pkg:/fonts/roboto-700.ttf" size="36" />
         </RowList>
         <!-- Loading, an empty tab, No matches with Clear filters. -->
-        <PageMessage id="message" translation="[960, 440]" width="1728" text="Loading…" />
+        <PageMessage id="message" translation="[960, 440]" width="1728" />
         <!-- The sort's or the filters' choices, over the right half. -->
         <Group id="panel" visible="false">
             <Rectangle translation="[1000, 0]" width="920" height="1080" color="0x1E222AFF" />

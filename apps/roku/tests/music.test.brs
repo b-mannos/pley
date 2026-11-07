@@ -89,8 +89,24 @@ sub test_music_now_playing_dims_after_two_minutes()
 end sub
 
 sub test_music_failures_in_words()
-    tkEqual(musicFailure({ ok: false, status: 0, error: "network", message: "No answer." }), "Can't reach the server.")
-    tkEqual(musicFailure({ ok: false, status: 500, error: "http", message: "The transcoder failed." }), "This track can't be played.")
+    tkEqual(musicFailure({ ok: false, status: 0, error: "network", message: "No answer." }), "Can't reach your server")
+    tkEqual(musicFailure({ ok: false, status: 500, error: "http", message: "The transcoder failed." }), "This track can't be played on this Roku.")
+end sub
+
+sub test_music_in_french_and_spanish()
+    track = musicTrack(musicTestTrack(), "http://nas:7539")
+    second = musicTrack(musicTestTrack(), "http://nas:7539")
+    second.disc = 2
+    album = { title: "Blue", parent_title: "The Fixtures", year: 2001 }
+    i18nUse("fr")
+    tkEqual(musicAlbumLine(album, [track, track, track]), "The Fixtures · 2001 · 3 titres · 10 min")
+    tkEqual(musicAlbumLine(album, [track]), "The Fixtures · 2001 · 1 titre · 3 min")
+    tkEqual(musicArtistLine({ child_count: 1, leaf_count: 1234 }, 0), "1 album · 1" + Chr(160) + "234 titres")
+    tkEqual(musicDiscRows([track, second])[0].title, "Disque 1")
+    i18nUse("es")
+    tkEqual(musicArtistLine({ child_count: 4, leaf_count: 40, genres: ["Rock"] }, 0), "4 álbumes · 40 pistas · Rock")
+    tkEqual(musicArtistLine({ child_count: 1, leaf_count: 1 }, 0), "1 álbum · 1 pista")
+    tkEqual(musicDiscRows([track, second])[2].title, "Disco 2")
 end sub
 
 sub test_music_stream_formats()

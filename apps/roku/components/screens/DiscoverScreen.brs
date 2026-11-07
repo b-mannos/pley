@@ -40,6 +40,8 @@ sub init()
     m.problemButtons = m.top.findNode("problemButtons")
     m.busy = m.top.findNode("busy")
     m.rest = m.top.findNode("rest")
+    m.top.findNode("heading").text = t("requests.names.discover")
+    m.credit.text = t("requests.credit")
     m.started = false
     ' The rows in order: { key (a list's, or "requests"), title, state
     ' ("waiting", "asked", "shown"), page (the last one asked for), seen
@@ -137,7 +139,7 @@ sub showPage()
     for each list in reqLists()
         m.lists.Push(newList(list.key, list.title))
     end for
-    if reqShowsRequests(summary) and summary.own > 0 then m.lists.Push(newList("requests", "Your requests"))
+    if reqShowsRequests(summary) and summary.own > 0 then m.lists.Push(newList("requests", t("requests.names.yours")))
     content = CreateObject("roSGNode", "ContentNode")
     for each list in m.lists
         row = content.createChild("ContentNode")
@@ -233,9 +235,9 @@ sub onListRow(event as object)
         list.failed = answer.message
         ' What came before stays, See all going on from it.
         if shown.Count() > 0
-            setRow(index, shown, reqMoreTile("See all", list.key, ""))
+            setRow(index, shown, reqMoreTile(t("common.actions.seeAll"), list.key, ""))
         else
-            setRow(index, [], reqNoticeTile("Couldn't load these. Select to try again.", "retry"))
+            setRow(index, [], reqNoticeTile(t("requests.tiles.theseFailed"), "retry"))
         end if
         ' Without trending, the hero comes from the other lists: every one
         ' at once, as when trending has nothing to ask for.
@@ -271,7 +273,7 @@ sub onListRow(event as object)
         dropRow(index)
     else
         extra = invalid
-        if more then extra = reqMoreTile("See all", list.key, "")
+        if more then extra = reqMoreTile(t("common.actions.seeAll"), list.key, "")
         setRow(index, shown, extra)
     end if
     ' Trending has nothing the profile may ask for: every list comes at
@@ -296,7 +298,7 @@ sub onRequestsRow(event as object)
         if m.requestsShown
             restartPoll(false)
         else
-            setRow(index, [], reqNoticeTile("Couldn't load these. Select to try again.", "retry"))
+            setRow(index, [], reqNoticeTile(t("requests.tiles.theseFailed"), "retry"))
         end if
         return
     end if
@@ -307,7 +309,7 @@ sub onRequestsRow(event as object)
         return
     end if
     m.requestsShown = true
-    setRow(index, tiles, reqMoreTile("See all", "requests", ""))
+    setRow(index, tiles, reqMoreTile(t("common.actions.seeAll"), "requests", ""))
     restartPoll(answer.data.busy)
 end sub
 
@@ -689,8 +691,8 @@ sub showProblem(problem as object)
     typeSet(m.problemTitle, problem.title)
     typeSet(m.problemText, problem.text)
     buttons = []
-    if problem.signIn then buttons.Push("Sign in")
-    if problem.retry then buttons.Push("Try again")
+    if problem.signIn then buttons.Push(t("requests.buttons.signIn"))
+    if problem.retry then buttons.Push(t("common.actions.retry"))
     m.problemButtons.buttons = buttons
     m.problemButtons.visible = buttons.Count() > 0
     m.problem.visible = true
@@ -734,9 +736,10 @@ sub addRequestsRow(summary as object)
     for each list in m.lists
         if list.key = "requests" then return
     end for
-    m.lists.Push(newList("requests", "Your requests"))
+    title = t("requests.names.yours")
+    m.lists.Push(newList("requests", title))
     row = m.rows.content.createChild("ContentNode")
-    row.title = "Your requests"
+    row.title = title
     nodesAppend(row, reqSkeletonTiles())
     position = m.rows.rowItemFocused
     if m.rows.isInFocusChain() and position <> invalid and position.Count() = 2 then ensureRows(position[0] + 1)

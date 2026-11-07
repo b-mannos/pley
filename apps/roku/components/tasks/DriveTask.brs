@@ -15,6 +15,10 @@ sub driveRun()
     m.top.observeField("request", port)
     m.fs = CreateObject("roFileSystem")
     m.fs.SetMessagePort(port)
+    ' The drive's name and lines in the language the scene shows, as the
+    ' API task's answers are.
+    i18nUse(m.global.language)
+    m.global.observeField("language", port)
     driveLook()
     m.top.ready = true
     while true
@@ -26,6 +30,7 @@ sub driveRun()
         kind = LCase(type(msg))
         if kind = "rosgnodeevent"
             if msg.getField() = "request" then driveAccept(msg.getData())
+            if msg.getField() = "language" then i18nUse(msg.getData())
         else if kind = "rofilesystemevent"
             ' A drive plugged in or pulled out: the volumes say which is left.
             driveLook()
@@ -87,7 +92,7 @@ sub driveList(request as object, folder as string)
     end if
     entries = driveEntries(folder, read.files)
     content = CreateObject("roSGNode", "ContentNode")
-    if data.up then driveNode(content, { path: "", title: "..", subtitle: "Up a folder", size: "", progress: 0, icon: "corner-left-up" })
+    if data.up then driveNode(content, { path: "", title: "..", subtitle: t("drive.up"), size: "", progress: 0, icon: "corner-left-up" })
     ' Where videos stopped, by their key: looked up only when some are kept.
     kept = {}
     for each point in driveResumePoints(CreateObject("roRegistrySection", "driveResume"))

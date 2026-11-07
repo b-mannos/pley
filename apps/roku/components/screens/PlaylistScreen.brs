@@ -21,6 +21,9 @@ sub init()
     m.entries = m.top.findNode("entries")
     m.message = m.top.findNode("message")
     m.hint = m.top.findNode("hint")
+    m.message.text = t("common.states.loading")
+    typeSet(m.hint, t("titles.playlist.movingHint"))
+    typeSet(m.smartText, t("titles.smart"))
     m.started = false
     ' The entry lifted (its place now), -1 for none; the rows' fields as
     ' they are now, and as they were when it was lifted.
@@ -44,7 +47,7 @@ end sub
 ' Retry, after the playlist couldn't load.
 sub onRetry()
     m.message.title = ""
-    m.message.text = "Loading…"
+    m.message.text = t("common.states.loading")
     m.message.action = ""
     m.top.setFocus(true)
     load()
@@ -86,9 +89,9 @@ sub onPlaylist(event as object)
     if not answer.ok
         ' The first time, the page says so, with Retry, as on Android TV.
         if m.playlist = invalid and not uiFailed(answer)
-            m.message.title = "Couldn't load this playlist"
+            m.message.title = t("browse.playlists.playlistFailed")
             typeSet(m.message, answer.message)
-            m.message.action = "Retry"
+            m.message.action = t("common.actions.retry")
             if m.top.hasFocus() or m.message.isInFocusChain() then m.message.setFocus(true)
         end if
         return
@@ -107,8 +110,8 @@ sub onPlaylist(event as object)
     m.entries.content = event.getRoSGNode().content
     if keep > 0 and keep < m.playlist.shown then m.entries.jumpToItem = keep
     if m.playlist.shown = 0
-        m.message.text = "This playlist is empty. Add titles to it with the Options key on them."
-        if m.playlist.smart then m.message.text = "Nothing matches this playlist's filter yet."
+        m.message.text = t("titles.playlist.empty")
+        if m.playlist.smart then m.message.text = t("browse.playlists.smartEmpty")
         m.message.visible = true
         if m.entries.isInFocusChain() then m.buttons.setFocus(true)
     else
@@ -140,18 +143,18 @@ sub showButtons()
     labels = []
     if m.playlist.shown > 0
         actions.Push("play")
-        labels.Push("Play")
+        labels.Push(t("common.actions.play"))
     end if
     if m.playlist.shown > 1
         actions.Push("shuffle")
-        labels.Push("Shuffle")
+        labels.Push(t("titles.actions.shuffle"))
     end if
     if not m.playlist.smart
         actions.Push("rename")
-        labels.Push("Rename")
+        labels.Push(t("titles.actions.rename"))
     end if
     actions.Push("delete")
-    labels.Push("Delete")
+    labels.Push(t("common.actions.delete"))
     m.actions = actions
     if FormatJson(labels) <> FormatJson(m.buttons.buttons)
         focused = m.buttons.buttonFocused
@@ -163,24 +166,24 @@ end sub
 
 sub onButton(event as object)
     if m.playlist = invalid then return
-    chosen = m.actions[event.getData()]
-    if chosen = "play"
+    action = m.actions[event.getData()]
+    if action = "play"
         play(0, false)
-    else if chosen = "shuffle"
+    else if action = "shuffle"
         play(0, true)
-    else if chosen = "rename"
+    else if action = "rename"
         dialog = CreateObject("roSGNode", "StandardKeyboardDialog")
-        dialog.title = "Rename playlist"
+        dialog.title = t("titles.playlist.renameTitle")
         dialog.text = m.playlist.title
-        dialog.buttons = ["Rename", "Cancel"]
+        dialog.buttons = [t("titles.actions.rename"), t("common.actions.cancel")]
         dialog.observeField("buttonSelected", "onRename")
         m.dialog = dialog
         m.top.getScene().dialog = dialog
     else
         dialog = CreateObject("roSGNode", "StandardMessageDialog")
-        dialog.title = "Delete " + m.playlist.title + "?"
-        dialog.message = ["The playlist goes; its titles stay in your libraries."]
-        dialog.buttons = ["Delete", "Cancel"]
+        dialog.title = t("titles.playlist.deleteTitle", { title: m.playlist.title })
+        dialog.message = [t("titles.playlist.deleteBody")]
+        dialog.buttons = [t("common.actions.delete"), t("common.actions.cancel")]
         dialog.observeField("buttonSelected", "onDelete")
         m.dialog = dialog
         m.top.getScene().dialog = dialog
@@ -249,7 +252,7 @@ sub onChanged(event as object)
     answer = event.getData()
     if answer.ok
         removed = httpString(event.getRoSGNode().spec.removed)
-        if removed <> "" then uiToast("Removed “" + removed + "”")
+        if removed <> "" then uiToast(t("browse.playlists.removed", { title: removed }))
         load()
     else if not uiFailed(answer)
         uiToast(pagePlaylistRefusal(answer), true)
@@ -266,10 +269,10 @@ sub entryOptions()
     tile = { itemId: entry.itemId, kind: entry.kind, title: entry.title, watched: entry.watched, parentId: entry.parentId, grandparentId: entry.grandparentId }
     options = []
     if not m.playlist.smart
-        if m.entries.content.getChildCount() > 1 then options.Push({ label: "Move", action: "move" })
-        options.Push({ label: "Remove from playlist", action: "remove" })
+        if m.entries.content.getChildCount() > 1 then options.Push({ label: t("titles.actions.move"), action: "move" })
+        options.Push({ label: t("titles.actions.removeFromPlaylist"), action: "remove" })
     end if
-    if navForTile(tile) <> invalid then options.Push({ label: "Go to " + httpSentence(entry.title), action: "open" })
+    if navForTile(tile) <> invalid then options.Push({ label: t("titles.actions.goTo", { title: httpSentence(entry.title) }), action: "open" })
     for each option in pageTileOptions(tile, false, invalid)
         if option.action <> "playlist" then options.Push(option)
     end for
@@ -277,7 +280,7 @@ sub entryOptions()
     for each option in options
         labels.Push(option.label)
     end for
-    labels.Push("Cancel")
+    labels.Push(t("common.actions.cancel"))
     dialog = CreateObject("roSGNode", "StandardMessageDialog")
     dialog.title = entry.title
     dialog.buttons = labels
@@ -337,7 +340,7 @@ sub retitle(first as integer, last as integer)
         if i < content.getChildCount()
             fields = {}
             fields.Append(m.rows[i])
-            if i = m.moving then fields.title = fields.title + "  (moving)"
+            if i = m.moving then fields.title = t("titles.playlist.moving", { title: fields.title })
             fresh = CreateObject("roSGNode", "ContentNode")
             nodesFill(fresh, fields)
             content.replaceChild(fresh, i)

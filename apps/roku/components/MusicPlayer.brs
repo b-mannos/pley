@@ -211,7 +211,7 @@ sub onState(event as object)
         if not m.played and m.mode <> "transcode" and httpString(m.info.method) <> "transcode"
             playTrack(m.queue.at, "transcode")
         else
-            failed("This track can't be played.")
+            failed(t("player.nowPlaying.cantPlay"))
         end if
     end if
 end sub

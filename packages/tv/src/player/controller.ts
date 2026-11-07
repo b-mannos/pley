@@ -9,6 +9,7 @@ import type {
   MediaFile,
   MediaStream,
   PlaybackInfo,
+  PlaybackMethod,
   PlaybackMode,
   PlaybackRequest,
   PlayingTracks,
@@ -20,11 +21,12 @@ import type {
 } from "../api/types";
 import { SignedOutError } from "../auth/tokens";
 import { Cancel } from "../net/transport";
-import { episodeLabel, streamLabel, twoLetterCode } from "../format/format";
+import { episodeLabel, formatClock, streamLabel, twoLetterCode } from "../format/format";
+import { t } from "../i18n";
 import { decide } from "../caps/policy";
 import { NOTHING_SHOWN, SubtitlePresenter, type ShownSubtitles } from "../subs/presenter";
 import { clampOffset, type OffsetStore } from "../subs/sync";
-import { buildDetails, fallbackText, methodText, stoppedText, T, type PlaybackDetails } from "./details";
+import { automaticAt, automaticNow, buildDetails, fallbackText, loweredText, methodText, stoppedText, upNextHeading, type PlaybackDetails } from "./details";
 import type { EngineSource, EngineStatus, PlayerEngine } from "./engine";
 import { activeMarker, CreditsGate, markersOf, skipLabel, skipTarget } from "./markers";
 import { hasNext, labelOf, nextAfter, startOf, TRICKPLAY_GIVE_UP_MS, TRICKPLAY_RETRY_MS } from "./nextup";
@@ -55,6 +57,7 @@ import { AUTO, autoLadder, chooseQuality, fileHint, liveFloor, liveLabel, modeOf
 import { failureText, Recovery, StruggleMeter, type EngineError, type RecoveryAction } from "./recovery";
 import { qualityAction, remoteAction, trackAction, videoControls, type PlayerCommand } from "./remote";
 import type { Reporter } from "./reporter";
+import { badgeText } from "./seeker";
 import { SLEEP_OFF, SleepTimer, type SleepChoice, type SleepState } from "./sleep";
 import { SPEEDS } from "./speed";
 
@@ -117,7 +120,9 @@ export interface PlayerState {
   subtitles: TrackChoice[];
   quality: string;
   qualities: QualityChoice[];
+  /** How it plays, in words ("Direct play"), and which way, for the badge's colour. */
   method: string | null;
+  methodKind: PlaybackMethod | null;
   note: string | null;
   canPlayOriginal: boolean;
   suggestLowerQuality: boolean;
@@ -128,6 +133,16 @@ export interface PlayerState {
   upNext: UpNextCard | null;
   details: PlaybackDetails | null;
   notice: string | null;
+  /**
+   * What the user's remote, on another device, just did ("Paused", "+30 s"):
+   * said for a moment, where the person's own keys would bring up the
+   * controls; `null` once said.
+   */
+  remoteNotice: string | null;
+  /** Counts `remoteNotice`s, so the same words twice ("+30 s", "+30 s") are said twice. */
+  remoteNoticeId: number;
+  /** The user's remote paused it, and nothing has played it since: the controls don't stay up for that pause, as they do for the person's own. */
+  pausedByRemote: boolean;
   subtitleOffsetMs: number;
   subtitleSync: boolean;
   /** How fast it plays (1: normal), for this title; `speeds`: what the TV's player plays at, empty when only normal. */
@@ -155,7 +170,8 @@ export interface PlayerClock {
   bufferedMs: number;
 }
 
-const INITIAL: PlayerState = {
+/** The state before anything is known, its words in the language shown. */
+const initial = (): PlayerState => ({
   phase: { kind: "preparing" },
   itemId: 0,
   kind: null,
@@ -163,9 +179,10 @@ const INITIAL: PlayerState = {
   subtitle: null,
   audio: [],
   subtitles: [],
-  quality: "Original",
+  quality: ORIGINAL.label,
   qualities: [],
   method: null,
+  methodKind: null,
   note: null,
   canPlayOriginal: false,
   suggestLowerQuality: false,
@@ -176,6 +193,9 @@ const INITIAL: PlayerState = {
   upNext: null,
   details: null,
   notice: null,
+  remoteNotice: null,
+  remoteNoticeId: 0,
+  pausedByRemote: false,
   subtitleOffsetMs: 0,
   subtitleSync: false,
   speed: 1,
@@ -186,7 +206,7 @@ const INITIAL: PlayerState = {
   firstFrameMs: null,
   stalls: 0,
   switching: false,
-};
+});
 
 /** What a player needs from the app around it. */
 export interface PlayerEnv {
@@ -284,10 +304,11 @@ interface Outage {
  * - **The remote** on the user's other devices: play, pause, seek, skip,
  *   next, and the audio, subtitles and quality, through the menus' own
  *   paths; every report says which tracks play and which quality is picked
- *   (remote.ts has the rules).
+ *   (remote.ts has the rules). What it did is said for a moment, never by
+ *   bringing up the controls.
  */
 export class PlaybackController {
-  readonly state: Signal<PlayerState> = signal(INITIAL);
+  readonly state: Signal<PlayerState> = signal(initial());
   readonly clock: Signal<PlayerClock> = signal({ positionMs: 0, durationMs: 0, bufferedMs: 0 });
   readonly subs: Signal<ShownSubtitles> = signal(NOTHING_SHOWN);
 
@@ -387,7 +408,7 @@ export class PlaybackController {
       position: () => this.livePosition(),
       offsetMs: () => this.offset,
       onShown: (shown) => (this.subs.value = shown),
-      onFailed: () => this.notice(T.subtitlesFailed),
+      onFailed: () => this.notice(t("player.toasts.subtitlesNotLoaded")),
       onPicturesUnavailable: () => this.picturesFailed(),
     });
     this.sleep = new SleepTimer({
@@ -569,7 +590,7 @@ export class PlaybackController {
     if (!detail) return;
     const chosen = this.file;
     if (!chosen) {
-      this.fail(T.noFile, false);
+      this.fail(t("player.errors.noFile"), false);
       return;
     }
     let alongside = prepared;
@@ -643,7 +664,7 @@ export class PlaybackController {
     }
     if (this.env.keyedUrls && !isKeyed(info.url)) {
       this.discard(info);
-      this.fail("This server is too old to play on this TV: update it.", false);
+      this.fail(t("player.errors.serverTooOld"), false);
       return;
     }
     if (alongside && preparing) {
@@ -674,6 +695,7 @@ export class PlaybackController {
     }
     this.update({
       method: methodText(info),
+      methodKind: info.method,
       note: this.noteText(),
       canPlayOriginal: this.recovery.struggleSwitched && this.recovery.fallbackMode !== null,
     });
@@ -913,10 +935,10 @@ export class PlaybackController {
         break;
       }
       case "suggest_lower_quality":
-        this.update({ suggestLowerQuality: true, note: T.slowServer });
+        this.update({ suggestLowerQuality: true, note: t("player.errors.slowServer") });
         break;
       case "fail":
-        this.fail(failureText(action.failure, action.detail), action.failure !== "unplayable", action.failure === "network" ? T.offlineTitle : undefined);
+        this.fail(failureText(action.failure, action.detail), action.failure !== "unplayable", action.failure === "network" ? t("common.server.cantReach") : undefined);
         break;
     }
   }
@@ -1162,6 +1184,11 @@ export class PlaybackController {
    * with its own session; a play or pause that finds it so already says it
    * again. A remote's next that finds nothing says nothing here, whoever
    * pressed it being elsewhere.
+   *
+   * Whoever pressed it isn't at the TV, so the controls aren't brought up
+   * for it: a play, pause, seek or skip is said for a moment instead
+   * (`remoteNotice`), and the next title shows as it begins. What changes
+   * nothing says nothing.
    */
   private obey(command: PlayerCommand): void {
     const info = this.info;
@@ -1191,9 +1218,12 @@ export class PlaybackController {
       case "play":
         this.play();
         this.report("playing");
+        this.sayRemote(t("player.toasts.playing"));
         break;
       case "pause":
         this.pause();
+        this.update({ pausedByRemote: true });
+        this.sayRemote(t("player.toasts.paused"));
         break;
       case "none":
         // Playing or paused already: said again, so a remote a little behind settles.
@@ -1201,6 +1231,8 @@ export class PlaybackController {
         break;
       case "seek":
         this.seekTo(action.positionMs);
+        // A skip by the offset asked for, as the seek badge says it; a seek by where it went.
+        this.sayRemote(command.command === "skip" ? badgeText(command.offset_ms ?? 0) : t("player.toasts.jumpedTo", { time: formatClock(action.positionMs) }));
         // Not a second later, as after the screen's seeks; a seek that started a new session has that report itself.
         if (this.seekReportTimer === null) break;
         clearTimeout(this.seekReportTimer);
@@ -1218,6 +1250,7 @@ export class PlaybackController {
    * track menus' own path, picks saved as theirs are. Switched in place, it
    * reports at once; a new session (a stream's audio, pictures to burn in)
    * reports as it begins. A pick of what is chosen already says so again.
+   * The track picked is said for a moment, as its menu names it.
    */
   private obeyTrack(info: PlaybackInfo, command: PlayerCommand): void {
     const action = trackAction(
@@ -1234,6 +1267,16 @@ export class PlaybackController {
       if (action.report) this.report(this.wantPlay ? "playing" : "paused");
       return;
     }
+    // The rule found the track among the file's.
+    const index = action.index;
+    const label = (streams: MediaStream[]) => streamLabel(streams.filter((s) => s.index === index)[0]!);
+    this.sayRemote(
+      action.act === "audio"
+        ? t("player.toasts.audio", { track: label(audioStreams(this.file)) })
+        : index < 0
+          ? t("player.toasts.subtitlesOff")
+          : t("player.toasts.subtitles", { track: label(subtitleStreams(this.file)) }),
+    );
     // Set first: a new session may begin before the switch returns.
     this.reportBegun = true;
     const generation = this.generation;
@@ -1249,14 +1292,18 @@ export class PlaybackController {
    * The remote's quality (remote.ts has the rule), as picked in the Quality
    * menu, kept for the next titles as a pick there is. A new session
    * reports as it begins; the same stream playing on reports at once. A
-   * pick of what is picked already says so again.
+   * pick of what is picked already says so again. The quality picked is
+   * said for a moment, as the menu names it.
    */
   private obeyQuality(info: PlaybackInfo, command: PlayerCommand): void {
-    const action = qualityAction({ session: info.session_id, offered: qualitiesFor(this.file).map((p) => p.id), picked: this.quality.id }, command);
+    const offered = qualitiesFor(this.file);
+    const action = qualityAction({ session: info.session_id, offered: offered.map((p) => p.id), picked: this.quality.id }, command);
     if (action.act === "none") {
       if (action.report) this.report(this.wantPlay ? "playing" : "paused");
       return;
     }
+    const id = action.id;
+    this.sayRemote(t("player.toasts.quality", { quality: offered.filter((p) => p.id === id)[0]!.label }));
     // Set first: a new session may begin before the switch returns.
     this.reportBegun = true;
     const generation = this.generation;
@@ -1293,6 +1340,8 @@ export class PlaybackController {
     const was = this.wantPlay;
     this.wantPlay = play;
     if (play) this.sleep.resumed();
+    // Played again, by anyone: the remote's pause is over.
+    if (play && this.state.value.pausedByRemote) this.update({ pausedByRemote: false });
     if (!this.info || was === play) return;
     if (!play) {
       this.struggle.reset();
@@ -1382,7 +1431,7 @@ export class PlaybackController {
   addFoundSubtitle(result: SubtitleResult): Promise<void> {
     const item = this.item;
     const file = this.file;
-    if (!item || !file) return Promise.reject(new Error(T.noFile));
+    if (!item || !file) return Promise.reject(new Error(t("player.errors.noFile")));
     return this.env.api.addSubtitle(item.id, file.id, result.id).then((track) => this.subtitleAdded(track));
   }
 
@@ -1409,7 +1458,7 @@ export class PlaybackController {
     this.item = { ...item, files: item.files.map((f) => (f.id === updated.id ? updated : f)) };
     const info = this.info;
     if (info) this.info = { ...info, subtitles: info.subtitles.filter((t) => t.index !== track.index).concat([track]) };
-    this.notice(T.subtitlesAdded(streamLabel(stream)));
+    this.notice(t("player.toasts.subtitlesAdded", { track: streamLabel(stream) }));
     if (this.subtitle?.index === track.index) this.publishChoices();
     else this.selectSubtitle(track.index);
   }
@@ -1496,7 +1545,7 @@ export class PlaybackController {
     }
     this.lookUpNext((found) => {
       if (found) this.switchTo(found);
-      else if (!quiet) this.notice(this.current.queue ? T.lastInQueue : T.lastEpisode);
+      else if (!quiet) this.notice(this.current.queue ? t("player.toasts.lastInQueue") : t("player.toasts.lastEpisode"));
     });
   }
 
@@ -1561,6 +1610,15 @@ export class PlaybackController {
 
   dismissNotice(): void {
     this.update({ notice: null });
+  }
+
+  dismissRemoteNotice(): void {
+    this.update({ remoteNotice: null });
+  }
+
+  /** What the remote did, said for a moment (`remoteNotice`). */
+  private sayRemote(text: string): void {
+    this.update({ remoteNotice: text, remoteNoticeId: this.state.value.remoteNoticeId + 1 });
   }
 
   retry(): void {
@@ -1652,7 +1710,7 @@ export class PlaybackController {
     const card: UpNextCard = {
       itemId: found.id,
       title: found.title,
-      heading: T.upNext(labelOf(found)),
+      heading: upNextHeading(labelOf(found)),
       imageUrl: image ? this.env.api.url(withWidth(image, UP_NEXT_IMAGE_WIDTH)) : null,
       secondsLeft: null,
     };
@@ -1709,11 +1767,11 @@ export class PlaybackController {
       subtitleIndex: null,
     };
     this.current = req;
-    const sleep = this.state.value.sleep;
-    const title = this.state.value.title;
+    const { sleep, title, pausedByRemote, remoteNoticeId } = this.state.value;
     // The next title plays at normal speed.
     if (this.state.value.speed !== 1) this.engineRef?.setSpeed?.(1);
-    this.state.value = { ...INITIAL, itemId: target.id, title, sleep, speeds: this.state.value.speeds };
+    // The next title starts paused when this one is: the remote's pause stays the remote's.
+    this.state.value = { ...initial(), itemId: target.id, title, sleep, pausedByRemote, remoteNoticeId, speeds: this.state.value.speeds };
     this.setClock({ positionMs: req.startMs ?? 0, bufferedMs: 0 });
     const generation = this.nextGeneration();
     const prefetched = this.nextDetail?.id === target.id ? this.nextDetail : null;
@@ -1873,7 +1931,7 @@ export class PlaybackController {
     const to = stream ? liveLabel(this.file, stream, step.bitrate!) : namedFor(this.file, presetById(step.to) ?? ORIGINAL).label;
     this.update({ suggestLowerQuality: false, note: this.noteText() });
     this.publishChoices();
-    if (step.why) this.notice(T.smoother(to));
+    if (step.why) this.notice(t("player.toasts.qualityLowered", { quality: to }));
     this.struggle.reset();
     if (step.bitrate !== undefined) this.sendBitrate(step.bitrate);
     else this.restart(this.livePosition(), true);
@@ -1884,7 +1942,7 @@ export class PlaybackController {
   private noteText(): string | null {
     if (this.recovery.fallbackReason) return fallbackText(this.recovery.fallbackReason);
     const auto = this.auto;
-    return auto && auto.lowered && (auto.playing !== ORIGINAL.id || auto.liveLowered) ? T.lowered[auto.lowered] : null;
+    return auto && auto.lowered && (auto.playing !== ORIGINAL.id || auto.liveLowered) ? loweredText(auto.lowered) : null;
   }
 
   // ---------------------------------------------------------------- state
@@ -1895,7 +1953,7 @@ export class PlaybackController {
     const info = this.info;
     const audio = audioStreams(file).map((s) => ({ index: s.index, label: streamLabel(s), selected: s.index === this.audio?.index, burnIn: false }));
     const subs = subtitleStreams(file);
-    const off: TrackChoice = { index: null, label: T.subtitlesOff, selected: !this.subtitle, burnIn: false };
+    const off: TrackChoice = { index: null, label: t("player.subtitles.off"), selected: !this.subtitle, burnIn: false };
     const subtitles: TrackChoice[] = subs.length
       ? [off].concat(
           subs.map((s) => ({ index: s.index, label: streamLabel(s), selected: s.index === this.subtitle?.index, burnIn: isPicture(s) && !this.sideload, added: !!s.added })),
@@ -1922,8 +1980,8 @@ export class PlaybackController {
       hint:
         p.id === AUTO.id
           ? auto
-            ? T.autoNow(autoNow, auto.lowered && (playing.id !== ORIGINAL.id || eased) ? T.lowered[auto.lowered] : null)
-            : T.autoHint
+            ? automaticNow(autoNow, auto.lowered && (playing.id !== ORIGINAL.id || eased) ? loweredText(auto.lowered) : null)
+            : t("player.quality.automaticHint")
           : p.id === ORIGINAL.id
             ? hint
             : null,
@@ -1933,7 +1991,7 @@ export class PlaybackController {
       audio,
       subtitles,
       qualities,
-      quality: auto ? T.automatic(autoNow) : this.quality.label,
+      quality: auto ? automaticAt(autoNow) : this.quality.label,
       subtitleSync: syncable,
       subtitleOffsetMs: this.offset,
     });
@@ -1992,7 +2050,7 @@ export class PlaybackController {
       return;
     }
     if (unreachable(e)) {
-      this.fail(T.offlineBody, true, T.offlineTitle);
+      this.fail(t("player.errors.reachHint"), true, t("common.server.cantReach"));
       return;
     }
     const canRetry = !(e instanceof SignedOutError) && !(e instanceof ApiError && (e.status === 403 || e.status === 404 || e.status === 401));
@@ -2046,7 +2104,7 @@ export class PlaybackController {
           this.reachBack(outage, true);
         } else if (this.now() - outage.since >= OUTAGE_MS) {
           this.endOutage();
-          this.fail(T.offlineBody, true, T.offlineTitle);
+          this.fail(t("player.errors.reachHint"), true, t("common.server.cantReach"));
         } else {
           this.askAgainLater(outage);
         }

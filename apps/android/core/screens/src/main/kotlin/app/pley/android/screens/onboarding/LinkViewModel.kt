@@ -5,11 +5,12 @@ import androidx.lifecycle.viewModelScope
 import app.pley.android.auth.AuthException
 import app.pley.android.auth.DeviceCode
 import app.pley.android.auth.DevicePoll
-import app.pley.android.common.describe
+import app.pley.android.common.UiText
 import app.pley.android.screens.PleyKey
 import java.io.IOException
 import java.net.URI
 import java.net.URISyntaxException
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -60,8 +61,8 @@ sealed interface LinkStatus {
     /** "Signed in as Anna", for a moment, then in. */
     data class SignedIn(val name: String?) : LinkStatus
 
-    /** It can't go on: an older server, or a refusal, in the module's words. */
-    data class Failed(val message: String) : LinkStatus
+    /** It can't go on: an older server, or a refusal, in the sign-in's words ([text]). */
+    data class Failed(val text: UiText) : LinkStatus
 }
 
 data class LinkUiState(
@@ -170,7 +171,7 @@ class LinkViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: AuthException) {
-                _state.update { it.copy(status = LinkStatus.Failed(e.message.orEmpty())) }
+                _state.update { it.copy(status = LinkStatus.Failed(e.text)) }
                 return@launch
             } catch (e: IOException) {
                 // Can't reach the server: try again after a while, as the polling does.
@@ -201,7 +202,7 @@ class LinkViewModel(
                 DevicePoll.Denied -> _state.update { it.copy(status = LinkStatus.Declined) }
                 DevicePoll.Expired -> expired()
                 is DevicePoll.SignedIn -> signedIn()
-                is DevicePoll.Failed -> _state.update { it.copy(status = LinkStatus.Failed(poll.message)) }
+                is DevicePoll.Failed -> _state.update { it.copy(status = LinkStatus.Failed(poll.text)) }
             }
         }
     }
@@ -281,9 +282,35 @@ class LinkViewModel(
 /**
  * Whether "Who's watching?" was answered in this process: the TV asks at a
  * cold start only, and not after signing in (the approver picked the
- * profile on /link).
+ * profile on /link). And whether it shows now, on a phone or a TV, its PIN
+ * pad too: no cast plays over it, since whoever is at the device is
+ * choosing, and a cast would choose for them.
  */
 object ProfileGate {
     @Volatile
     var passed: Boolean = false
+
+    /** The "Who's watching?" screens showing now (one, but two as one gives way to the next). */
+    private val shown = AtomicInteger(0)
+
+    /** Whether "Who's watching?" shows now. */
+    val showing: Boolean get() = shown.get() > 0
+
+    /** "Who's watching?" shows, until [hidden]. */
+    fun shows() {
+        shown.incrementAndGet()
+    }
+
+    /** One that [shows] said shows is gone. */
+    fun hidden() {
+        shown.updateAndGet { (it - 1).coerceAtLeast(0) }
+    }
+
+    /**
+     * None shows: tests, which share the process, start from this, as a
+     * screen torn down with its test needn't say it went.
+     */
+    fun reset() {
+        shown.set(0)
+    }
 }

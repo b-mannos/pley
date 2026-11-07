@@ -39,6 +39,8 @@ sub onContent()
     m.avatar.visible = m.profile
     m.hint.visible = m.profile
     if m.profile
+        ' In the language shown, which may have changed since the rail was drawn.
+        typeSet(m.hint, t("settings.rows.switchProfile"))
         showAvatar(entry)
         m.nameClosed = [48, -18]
         m.nameOpen = [112, -18]

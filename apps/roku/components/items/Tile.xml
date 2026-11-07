@@ -23,6 +23,7 @@
     <script type="text/brightscript" uri="pkg:/components/items/Tile.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/I18n.brs" />
     <children>
         <Group id="body">
             <!-- The picture and what is on it, which grows to 1.05 with the

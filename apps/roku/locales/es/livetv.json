@@ -1,0 +1,138 @@
+{
+  "title": "TV en vivo",
+  "tabs": {
+    "guide": "Guía",
+    "channels": "Canales"
+  },
+  "categories": {
+    "title": "Categorías",
+    "all": "Todos los canales",
+    "favourites": "Favoritos",
+    "recent": "Vistos recientemente",
+    "regions": "Regiones",
+    "groups": "Grupos",
+    "moreGroups": "Otros grupos",
+    "noGroup": "Sin grupo",
+    "found": "Grupos encontrados",
+    "region_one": "{{region}}  ·  {{count, number}} grupo",
+    "region_many": "{{region}}  ·  {{count, number}} de grupos",
+    "region_other": "{{region}}  ·  {{count, number}} grupos",
+    "resultsFor": "Resultados de «{{search}}»"
+  },
+  "search": {
+    "rail": "Buscar",
+    "railWith": "Buscar: «{{search}}»",
+    "title": "Buscar en TV en vivo",
+    "prompt": "Canales, grupos y programas en emisión",
+    "search": "Buscar",
+    "clear": "Borrar",
+    "channelsTitle": "Buscar canales",
+    "channelsPrompt": "Canales y programas en emisión"
+  },
+  "page": {
+    "notOpen": "La TV en vivo no está abierta a este perfil",
+    "notOpenHint": "Un administrador puede abrirla en la aplicación web de Pley, en Ajustes → TV en vivo.",
+    "failed": "No se pudo cargar la TV en vivo",
+    "noChannels": "Aún no hay canales",
+    "noChannelsHint": "Los canales aparecen aquí cuando un administrador añade un proveedor de IPTV en la aplicación web de Pley.",
+    "loadingGuide": "Cargando la guía…",
+    "channelCount_one": "{{count, number}} canal",
+    "channelCount_many": "{{count, number}} de canales",
+    "channelCount_other": "{{count, number}} canales",
+    "noMatch": "Ningún canal coincide",
+    "noMatchHint": "Ningún canal tiene «{{search}}» en su nombre, su número o el programa en emisión.",
+    "noFavourites": "Aún no hay favoritos",
+    "noFavouritesHint": "Pulsa el botón Opciones (*) sobre un canal y añádelo a tus favoritos para encontrarlo aquí.",
+    "nothingWatched": "Aún no has visto nada",
+    "nothingWatchedHint": "Aquí aparecen los canales que ves, el más reciente primero.",
+    "emptyGroup": "No hay canales en este grupo.",
+    "guideHint": "OK: ver   ·   Opciones (*): detalles   ·   Retroceder/Avanzar: antes, después   ·   Reproducir: ahora   ·   Repetir: buscar",
+    "cardsHint": "OK: ver   ·   Opciones (*): detalles   ·   Repetir: buscar"
+  },
+  "channelRange": "Canales {{from, number}}–{{to, number}} de {{total, number}}",
+  "unnamedChannel": "Canal {{id}}",
+  "nothingNow": "Nada en la guía ahora",
+  "noGuide": "Sin guía",
+  "noGuideHere": "Sin guía para este canal",
+  "guide": {
+    "noInformation": "Sin información para esta hora",
+    "onNow": "En emisión"
+  },
+  "program": {
+    "untitled": "Sin título",
+    "live": "En vivo",
+    "new": "Estreno"
+  },
+  "details": {
+    "watchNow": "Ver ahora",
+    "watchChannel": "Ver canal",
+    "nothingMore": "La guía no dice nada más.",
+    "ended": "Ya terminó."
+  },
+  "time": {
+    "today": "Hoy",
+    "tomorrow": "Mañana",
+    "yesterday": "Ayer",
+    "days": {
+      "sunday": "Domingo",
+      "monday": "Lunes",
+      "tuesday": "Martes",
+      "wednesday": "Miércoles",
+      "thursday": "Jueves",
+      "friday": "Viernes",
+      "saturday": "Sábado"
+    },
+    "dayAndTime": "{{day}} {{time}}",
+    "minutesLeft_one": "Queda {{count}} min",
+    "minutesLeft_many": "Quedan {{count}} min",
+    "minutesLeft_other": "Quedan {{count}} min",
+    "hoursLeft_one": "Queda {{count}} h",
+    "hoursLeft_many": "Quedan {{count}} h",
+    "hoursLeft_other": "Quedan {{count}} h",
+    "hoursMinutesLeft": "Quedan {{hours}} h {{minutes}} min"
+  },
+  "favourites": {
+    "add": "Añadir a favoritos",
+    "remove": "Quitar de favoritos",
+    "mark": "Favorito",
+    "notSaved": "No se guardó el favorito.",
+    "notSavedBecause": "No se guardó el favorito: {{reason}}"
+  },
+  "player": {
+    "tuning": "Sintonizando…",
+    "radio": "Solo sonido",
+    "next": "A continuación   {{time}}   {{title}}",
+    "channels": "Canales",
+    "listHint": "OK: ver   ·   Opciones (*): favorito   ·   Atrás: cerrar",
+    "listMoreHint": "Izquierda: categorías   ·   Repetir: buscar",
+    "categoriesHint": "OK: sus canales   ·   Atrás: los canales",
+    "stalled": "Se detuvo y no pudo continuar.",
+    "channelStopped": "{{channel}} se detuvo",
+    "watchAgain": "Volver a ver",
+    "otherChannels": "Otros canales",
+    "backToGuide": "Volver a la guía",
+    "watchHere": "Ver aquí en su lugar"
+  },
+  "trouble": {
+    "busy": "Todas las conexiones están en uso",
+    "didntStart": "{{channel}} no se inició",
+    "notPlaying": "{{channel}} no está emitiendo",
+    "gone": "Este canal ya no existe",
+    "goneHint": "Puede que se haya ocultado o que se haya quitado su fuente.",
+    "notOpen": "La TV en vivo no está abierta a este perfil",
+    "notOpenHint": "Un administrador puede abrirla en la aplicación web de Pley, en Ajustes → TV en vivo.",
+    "stopped": "La TV en vivo se detuvo",
+    "notWatched": "Este canal ya no se está viendo.",
+    "stoppedByAdmin": "El administrador del servidor detuvo la TV en vivo.",
+    "stoppedElsewhere": "La TV en vivo se detuvo desde otro dispositivo.",
+    "you": "Tú, en otro dispositivo",
+    "someoneElse": "Otra persona",
+    "people_one": "{{count, number}} persona",
+    "people_many": "{{count, number}} de personas",
+    "people_other": "{{count, number}} personas",
+    "connectionsWatching_one": "Su única conexión está ocupada con:",
+    "connectionsWatching_many": "Sus {{count, number}} de conexiones están ocupadas con:",
+    "connectionsWatching_other": "Sus {{count, number}} conexiones están ocupadas con:",
+    "joinHint": "Puedes unirte a un canal que ya se está viendo, o volver a intentarlo cuando se detenga alguno."
+  }
+}

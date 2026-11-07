@@ -32,6 +32,7 @@ sub init()
     m.spinner.poster.width = 64
     m.spinner.poster.height = 64
     m.reconnecting = m.top.findNode("reconnecting")
+    m.top.findNode("reconnectingText").text = t("player.reconnecting")
     m.waiting = false
     m.spinnerTimer = m.top.findNode("spinnerTimer")
     m.spinnerTimer.observeField("fire", "onSpinnerTimer")
@@ -90,6 +91,10 @@ sub init()
     ' track or a quality picked, a cast naming tracks), which hears of it as
     ' it plays.
     m.reportAtPlay = false
+    ' Whether the Video node's own controls are off for a pause of the
+    ' user's remote, which brings them up as any pause does: on again as
+    ' the video plays, or at the person's own key.
+    m.remoteQuiet = false
     ' The audio a cast named for its title (-1: the server's pick by the
     ' user's choices); its subtitles are in the item's file
     ' (Cast.brs's castGivenTracks).
@@ -145,7 +150,16 @@ sub init()
     m.sleepNotice = m.top.findNode("sleepNotice")
     m.sleepText = m.top.findNode("sleepText")
     m.sleepButtons = m.top.findNode("sleepButtons")
-    m.sleepButtons.buttons = ["Keep watching"]
+    keepWatching = t("player.sleep.keepWatching")
+    m.sleepButtons.buttons = [keepWatching]
+    ' Longer words ("Continuer à regarder") make the button wider than its
+    ' least, and the notice behind it with it: measured in the focused
+    ' button's font (Buttons.brs), the wider of its two.
+    button = Int(typeWidth(typeFont(700, 30), keepWatching)) + 64
+    if button < m.sleepButtons.minWidth then button = m.sleepButtons.minWidth
+    back = m.top.findNode("sleepBack")
+    width = m.sleepButtons.translation[0] + button + 40
+    if width > back.width then back.width = width
     m.sleepButtons.observeField("buttonSelected", "onKeepWatching")
     m.sleepTimer = m.top.findNode("sleepTimer")
     m.sleepTimer.observeField("fire", "onSleepTick")
@@ -186,7 +200,10 @@ sub init()
     m.picturesTimer = m.top.findNode("picturesTimer")
     m.picturesTimer.duration = picAgainMs() / 1000
     m.picturesTimer.observeField("fire", "askPictures")
-    m.syncButtons.buttons = ["Done", "Reset"]
+    m.top.findNode("syncTitle").text = t("player.menu.sync")
+    m.top.findNode("syncHint").text = t("player.sync.hint")
+    ' Done, then Reset.
+    m.syncButtons.buttons = [t("common.actions.done"), t("player.sync.reset")]
     m.syncButtons.observeField("buttonSelected", "onSyncButton")
     m.video.notificationInterval = 1
     m.video.observeField("state", "onState")
@@ -196,13 +213,16 @@ sub init()
     end for
     m.skip.observeField("pressed", "onSkip")
     m.skip.observeField("playKey", "onSkipKey")
-    m.nextButtons.buttons = ["Play now", "Cancel"]
+    m.nextButtons.buttons = [t("player.upNext.playNow"), t("common.actions.cancel")]
     m.nextButtons.observeField("buttonSelected", "onNextButton")
+    ' What the notice's buttons do ("retry", "back"), in their order.
+    m.noticeActions = []
     m.noticeButtons.observeField("buttonSelected", "onNoticeButton")
     m.countdownTimer.observeField("fire", "onCountdown")
     ' The title at the top as each item begins, once it plays (bannerUp),
     ' and while paused or Roku's bar shows (barShown), with how it plays,
-    ' the clock on this Roku's 12- or 24-hour clock, and when it ends.
+    ' the clock (on this Roku's 12- or 24-hour clock in English, 24 hours in
+    ' French and Spanish), and when it ends.
     m.banner = m.top.findNode("banner")
     m.bannerTitle = m.top.findNode("bannerTitle")
     m.bannerLine = m.top.findNode("bannerLine")
@@ -213,7 +233,7 @@ sub init()
     m.bannerUp = false
     m.barShown = false
     m.clockTicking = false
-    m.twelve = CreateObject("roDeviceInfo").GetClockFormat() <> "24h"
+    m.twelve = fmtTwelveHour()
     m.bannerTimer = m.top.findNode("bannerTimer")
     m.bannerTimer.duration = playerBannerMs() / 1000
     m.bannerTimer.observeField("fire", "hideBanner")
@@ -306,7 +326,9 @@ end sub
 ' A play or pause is reported as the video's own are, when its state
 ' changes; a seek at once; the next item with its own session; audio and
 ' subtitles as Pley's menu picks them (obeyTrack), and the quality too
-' (obeyQuality).
+' (obeyQuality). None brings up the player's controls: what it did shows
+' for a moment in the toast (Remote.brs's remoteNotice), and the next
+' title as it begins.
 sub onPlayerCommand(event as object)
     state = m.video.state
     if m.sessionId = "" or not m.top.active or not m.played or m.ended or m.notice.visible then return
@@ -328,6 +350,11 @@ sub onPlayerCommand(event as object)
     if action.act = "play"
         m.video.control = "resume"
     else if action.act = "pause"
+        ' Paused, the Video node shows its title, clock and bar, and Pley its
+        ' banner (controlsShown), whoever paused it: off until the video
+        ' plays or the person presses a key.
+        m.remoteQuiet = true
+        m.video.enableUI = false
         m.video.control = "pause"
     else if action.act = "report"
         ' As it is already: said again, so a remote a little behind settles.
@@ -344,12 +371,27 @@ sub onPlayerCommand(event as object)
     else if action.act = "next"
         playNext(false)
     end if
+    remoteSays(remoteNotice(command, action))
+end sub
+
+' What the user's remote did, for a moment in the scene's toast.
+sub remoteSays(text as string)
+    if text <> "" then uiToast(text, false, remoteNoticeSeconds())
+end sub
+
+' The Video node's own controls back after the remote's pause, and Pley's
+' with them (controlsShown).
+sub endQuiet()
+    if not m.remoteQuiet then return
+    m.remoteQuiet = false
+    m.video.enableUI = true
 end sub
 
 ' The remote's audio or subtitles (Remote.brs's remoteTrackAction), on the
 ' path of Pley's menu: saved for the show or the movie, and the stream
-' opened again with it, which tells the server at once as it plays. The
-' track playing already is said again at once.
+' opened again with it, which tells the server at once as it plays; the
+' toast names it for a moment. The track playing already is said again at
+' once, and shows nothing.
 sub obeyTrack(command as object)
     tracks = tracksIndexes(playingFile())
     player = { session: m.sessionId, audio: tracks.audio, subtitles: tracks.subtitles, audioIndex: m.audioPlaying, subtitleIndex: subtitlePlaying() }
@@ -358,14 +400,16 @@ sub obeyTrack(command as object)
         if action.report then report(reportedState())
         return
     end if
+    remoteSays(remoteTrackNotice(action, mediaTracks(playingFile())))
     m.reportAtPlay = true
     pickTrack(action.act, action.index)
 end sub
 
 ' The remote's quality (Remote.brs's remoteQualityAction), as a pick in
 ' Pley's Quality menu: kept as the Roku's, and the title opened again at
-' it where it was, which tells the server at once as it plays. The quality
-' picked already is said again at once.
+' it where it was, which tells the server at once as it plays; the toast
+' names it for a moment. The quality picked already is said again at
+' once, and shows nothing.
 sub obeyQuality(command as object)
     player = { session: m.sessionId, qualities: aqMenuIds(playingFile()), quality: qualityPicked() }
     action = remoteQualityAction(player, command)
@@ -373,6 +417,7 @@ sub obeyQuality(command as object)
         if action.report then report(reportedState())
         return
     end if
+    remoteSays(remoteQualityNotice(action, aqMenuFor(playingFile())))
     m.reportAtPlay = true
     chooseQuality(action.quality)
 end sub
@@ -470,7 +515,7 @@ sub openLocal(startMs as integer)
     m.video.content = content
     m.video.control = "play"
     m.video.setFocus(true)
-    m.loading.visible = true
+    showWaiting()
     m.localFrom = m.clock.TotalMilliseconds()
     m.localKeptAt = m.localFrom
     m.localKeptMs = -1
@@ -517,20 +562,20 @@ end sub
 sub localStallTick(now as integer, state as string)
     if m.notice.visible or m.ended then return
     if not m.played
-        if now - m.localFrom >= playerStallMs() then localFailed("This video didn't start.")
+        if now - m.localFrom >= playerStallMs() then localFailed(t("player.local.didntStart"))
         return
     end if
     meant = state = "playing" or state = "buffering"
     if not meant then m.stillSince = now
     if not meant or now - m.stillSince < playerStallMs() then return
-    localFailed("This video stopped and didn't go on. The drive may have been pulled out.")
+    localFailed(t("player.local.stalled"))
 end sub
 
 sub localFailed(text as string)
     keepLocal()
     m.video.control = "stop"
     hideCue()
-    notice("Can't play this video", text, ["Back"])
+    notice(t("player.local.cantPlay"), text, ["back"])
 end sub
 
 ' A pick in Pley's menu (driveSubtitleChoices' value, or an audio track's
@@ -619,26 +664,26 @@ end sub
 sub openLocalMenu()
     hideSkip()
     m.menuKind = "menu"
-    m.menuTitle.text = "Playback"
+    m.menuTitle.text = t("player.menu.title")
     items = []
     m.menuActions = []
     subtitles = localSubtitles()
     if subtitles.labels.Count() > 1
-        items.Push({ title: "Subtitles: " + subtitles.labels[subtitles.current] })
+        items.Push({ title: t("player.menu.subtitlesNow", { track: subtitles.labels[subtitles.current] }) })
         m.menuActions.Push("subtitles")
     end if
     audio = localAudio()
     if audio.labels.Count() > 1
-        items.Push({ title: "Audio: " + audio.labels[audio.current] })
+        items.Push({ title: t("player.menu.audioNow", { track: audio.labels[audio.current] }) })
         m.menuActions.Push("audio")
     end if
     if m.localSubtitle >= 0
-        items.Push({ title: "Subtitle sync: " + syncLabel(m.syncMs) })
+        items.Push({ title: t("player.menu.syncNow", { offset: syncLabel(m.syncMs) }) })
         m.menuActions.Push("sync")
     end if
-    items.Push({ title: "Sleep timer: " + sleepLabel(m.sleep, sleepNow(), playingKind()) })
+    items.Push({ title: t("player.sleep.titleNow", { state: sleepLabel(m.sleep, sleepNow(), playingKind()) }) })
     m.menuActions.Push("sleep")
-    items.Push({ title: "Playback details" })
+    items.Push({ title: t("player.menu.details") })
     m.menuActions.Push("details")
     at = m.menuList.itemFocused
     m.menuList.content = nodesContent(items)
@@ -646,7 +691,7 @@ sub openLocalMenu()
     m.menuChoices.visible = false
     m.menuText.visible = false
     m.menuList.visible = true
-    m.menuHint.text = "Back closes this."
+    m.menuHint.text = t("player.menu.backCloses")
     m.menu.visible = true
     m.menuList.setFocus(true)
 end sub
@@ -682,7 +727,7 @@ sub openLocalTracks(kind as string)
     items = []
     m.menuValues = []
     if kind = "audio"
-        m.menuTitle.text = "Audio"
+        m.menuTitle.text = t("player.menu.audio")
         audio = localAudio()
         for i = 0 to audio.labels.Count() - 1
             items.Push({ title: audio.labels[i] })
@@ -692,7 +737,7 @@ sub openLocalTracks(kind as string)
         showMenuChoices(items, audio.current)
         return
     end if
-    m.menuTitle.text = "Subtitles"
+    m.menuTitle.text = t("player.menu.subtitles")
     subtitles = localSubtitles()
     for each label in subtitles.labels
         items.Push({ title: label })
@@ -704,15 +749,16 @@ end sub
 
 ' What plays: the file as it is, from the drive.
 sub showLocalDetails()
-    lines = ["Playing the file as it is", "From the USB drive, with no server", ""]
-    lines.Push("File: " + driveFileName(httpString(m.local.path)))
+    lines = [t("player.local.asItIs"), t("player.local.fromDrive"), ""]
+    lines.Push(detLine({ label: t("player.media.file"), value: driveFileName(httpString(m.local.path)) }))
     video = detCodec(m.video.videoFormat)
-    if video <> "" then lines.Push("Video: " + video)
+    if video <> "" then lines.Push(detLine({ label: t("titles.playback.video"), value: video }))
     audio = detCodec(m.video.audioFormat)
-    if audio <> "" then lines.Push("Audio: " + audio)
-    if m.localSubtitle >= 0 then lines.Push("Subtitles: " + m.localSidecars[m.localSubtitle].label + " · Drawn by Pley")
-    if m.durationMs > 0 then lines.Push("Position: " + fmtClock(m.positionMs) + " of " + fmtClock(m.durationMs))
-    m.menuText.text = lines.Join(Chr(10))
+    if audio <> "" then lines.Push(detLine({ label: t("titles.playback.audio"), value: audio }))
+    if m.localSubtitle >= 0 then lines.Push(t("player.local.subtitlesDrawn", { track: m.localSidecars[m.localSubtitle].label }))
+    if m.durationMs > 0 then lines.Push(t("player.local.position", { at: fmtClock(m.positionMs), duration: fmtClock(m.durationMs) }))
+    m.detailLines = lines
+    showDetailLines()
 end sub
 
 ' Another title: Automatic starts from the setting again.
@@ -758,6 +804,7 @@ sub open(itemId as dynamic, startMs as integer, item as dynamic, mode as string)
     m.skipDismissed = false
     m.textTracks = 0
     m.tracksFrom = -1
+    endQuiet()
     stopPictures()
     m.sync.visible = false
     closeMenu()
@@ -1069,11 +1116,11 @@ sub autoStep(decision as object)
     if decision.memory >= 0 then keepCeiling(decision.memory)
     if decision.kind = "next" then return
     if decision.kind = "bitrate"
-        if decision.down then uiToast("Quality lowered to " + aqBitrateLabel(decision.kbps, m.watch.lines))
+        if decision.down then uiToast(t("player.toasts.qualityLowered", { quality: aqBitrateLabel(decision.kbps, m.watch.lines) }))
         setBitrate(decision.kbps)
         return
     end if
-    if decision.down then m.autoNotice = "Quality lowered to " + aqLabel(decision.quality)
+    if decision.down then m.autoNotice = t("player.toasts.qualityLowered", { quality: aqLabel(decision.quality) })
     mode = m.mode
     quality = decision.quality
     if quality = "converted"
@@ -1161,7 +1208,7 @@ function subtitleLabel() as string
     for i = 0 to tracks.values.Count() - 1
         if tracks.values[i] = playing then return tracks.labels[i]
     end for
-    if playing < 0 then return "Off"
+    if playing < 0 then return t("player.tracks.off")
     return ""
 end function
 
@@ -1174,9 +1221,9 @@ end sub
 
 ' Whether the player's controls are up, as Android TV's: paused or Roku's
 ' bar showing, once the video played, with nothing over it (subtitle sync
-' has the top).
+' has the top). The user's remote's pause brings up none (m.remoteQuiet).
 function controlsShown() as boolean
-    if not m.played or m.ended or m.notice.visible or m.upNext.visible or m.sync.visible then return false
+    if not m.played or m.ended or m.remoteQuiet or m.notice.visible or m.upNext.visible or m.sync.visible then return false
     return m.video.state = "paused" or m.barShown
 end function
 
@@ -1262,7 +1309,7 @@ sub stepSync(byMs as integer)
 end sub
 
 sub onSyncButton(event as object)
-    if m.syncButtons.buttons[event.getData()] = "Reset"
+    if event.getData() = 1
         stepSync(-m.syncMs)
     else
         closeSync()
@@ -1396,9 +1443,9 @@ sub failed(answer as object)
         reconnect()
         return
     end if
-    buttons = ["Back"]
-    if playerMayTryAgain(answer.status) then buttons = ["Try again", "Back"]
-    notice("Can't play this item", answer.message, buttons)
+    actions = ["back"]
+    if playerMayTryAgain(answer.status) then actions = ["retry", "back"]
+    notice(t("player.errors.cantPlay"), answer.message, actions)
 end sub
 
 sub onState(event as object)
@@ -1418,6 +1465,8 @@ sub onState(event as object)
     if state = "playing"
         m.played = true
         m.everPlayed = true
+        ' Played again, by anyone: the remote's pause is over.
+        endQuiet()
         endReconnect()
         hideWaiting()
         if m.bannerDue
@@ -1650,7 +1699,7 @@ sub endedShort()
     end if
     if m.shortTries > 0
         endSession()
-        notice("Can't play this item", "This video ends before the point it was to play from.", ["Back"])
+        notice(t("player.errors.cantPlay"), t("player.errors.endsEarly"), ["back"])
         return
     end if
     m.shortTries = m.shortTries + 1
@@ -1664,6 +1713,7 @@ sub finish()
     m.attempt = m.attempt + 1
     m.tracksFrom = -1
     m.reportAtPlay = false
+    endQuiet()
     m.countdownTimer.control = "stop"
     m.sleepTimer.control = "stop"
     m.pausedTimer.control = "stop"
@@ -1702,7 +1752,7 @@ sub stopped(data as dynamic)
     m.video.control = "stop"
     ' Automatic has nothing left to watch: it would open the title again.
     newTitle()
-    notice("Playback stopped", playerStoppedMessage(data), ["Back"])
+    notice(t("player.errors.stopped"), playerStoppedMessage(data), ["back"])
     m.stoppedTimer.control = "start"
 end sub
 
@@ -1714,9 +1764,9 @@ sub broken()
     ' A drive's video has no server to convert it, or to ask about it.
     if m.local <> invalid
         if m.played
-            localFailed("This video stopped. The drive may have been pulled out.")
+            localFailed(t("player.local.stopped"))
         else
-            localFailed("This Roku can't play this file as it is, and a file on a drive has no server to convert it.")
+            localFailed(t("player.local.unplayable"))
         end if
         return
     end if
@@ -1729,16 +1779,16 @@ sub broken()
             return
         end if
         endSession()
-        text = "This video can't be played on this Roku."
+        text = t("player.errors.unplayable")
         if m.info <> invalid
             reason = httpSentence(m.info.reason)
             if reason <> "" then text = text + " " + reason
         end if
-        notice("Can't play this item", text, ["Back"])
+        notice(t("player.errors.cantPlay"), text, ["back"])
         return
     end if
     if m.sessionId = ""
-        notice("Can't play this item", "Playback stopped and couldn't get going again.", ["Try again", "Back"])
+        notice(t("player.errors.cantPlay"), t("player.errors.stalled"), ["retry", "back"])
         return
     end if
     ' What became of the session says what to do.
@@ -1768,7 +1818,7 @@ sub reconnect()
     now = m.clock.TotalMilliseconds()
     if m.reconnectFrom < 0 then m.reconnectFrom = now
     if not m.everPlayed or now - m.reconnectFrom >= playerReconnectMs()
-        notice("Can't reach your server", "Check that the server is on and that this Roku is on its network.", ["Try again", "Back"])
+        notice(t("player.errors.cantReach"), t("player.errors.cantReachText"), ["retry", "back"])
         return
     end if
     hideBanner()
@@ -1880,7 +1930,7 @@ sub onStallChecked(event as object)
         ' Automatic goes lower by itself; otherwise the person is told, once.
         if m.watch = invalid and not m.slowSaid
             m.slowSaid = true
-            uiToast("The server can't keep up with this video. Try a lower quality: Down, then Quality.", true)
+            uiToast(t("player.toasts.slowServer"), true)
         end if
         return
     end if
@@ -1893,14 +1943,16 @@ end sub
 sub restart()
     now = m.clock.TotalMilliseconds()
     if not playerMayRestart(m.restarts, now)
-        notice("Can't play this item", "Playback stopped and couldn't get going again.", ["Try again", "Back"])
+        notice(t("player.errors.cantPlay"), t("player.errors.stalled"), ["retry", "back"])
         return
     end if
     m.restarts.Push(now)
     open(m.itemId, m.positionMs, m.item, m.mode)
 end sub
 
-sub notice(title as string, text as string, buttons as object)
+' What went wrong, over the player, with buttons for actions: "retry"
+' (Try again) and "back".
+sub notice(title as string, text as string, actions as object)
     endReconnect()
     hideBanner()
     m.stallTimer.control = "stop"
@@ -1910,6 +1962,15 @@ sub notice(title as string, text as string, buttons as object)
     hideUpNext()
     typeSet(m.noticeTitle, title)
     typeSet(m.noticeText, text)
+    m.noticeActions = actions
+    buttons = []
+    for each action in actions
+        if action = "retry"
+            buttons.Push(t("common.actions.tryAgain"))
+        else
+            buttons.Push(t("common.actions.back"))
+        end if
+    end for
     m.noticeButtons.buttons = buttons
     m.notice.visible = true
     updateBanner()
@@ -1917,7 +1978,7 @@ sub notice(title as string, text as string, buttons as object)
 end sub
 
 sub onNoticeButton(event as object)
-    if m.noticeButtons.buttons[event.getData()] = "Try again"
+    if m.noticeActions[event.getData()] = "retry"
         m.restarts = []
         open(m.itemId, m.positionMs, m.item, m.mode)
     else
@@ -2043,6 +2104,22 @@ end sub
 ' scene), which closes the session.
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
+    ' The person's own key after the remote's pause gives the Video node
+    ' its controls back. Without them it left this press to the screen:
+    ' Play plays on, as it would there, and its other keys are its own
+    ' again from the next press.
+    if m.remoteQuiet
+        endQuiet()
+        if key = "play" and m.video.hasFocus()
+            m.video.control = "resume"
+            return true
+        end if
+        ' Still paused: Pley's controls come back with Roku's, the banner
+        ' and Skip above Roku's bar.
+        updateBanner()
+        updateSkip()
+        if m.video.hasFocus() and (key = "OK" or key = "left" or key = "right" or key = "fastforward" or key = "rewind" or key = "replay") then return true
+    end if
     ' The sleep timer's Keep watching: Back leaves it to count down, the
     ' video's own keys go on as ever.
     if m.sleepButtons.isInFocusChain()
@@ -2131,34 +2208,34 @@ sub openMenu()
     end if
     hideSkip()
     m.menuKind = "menu"
-    m.menuTitle.text = "Playback"
+    m.menuTitle.text = t("player.menu.title")
     items = []
     m.menuActions = []
     ' Every track of the file, pictures too, as on the other apps' panels:
     ' Roku's options list only text subtitles, and a conversion's one audio.
     tracks = mediaTracks(playingFile())
     if tracks.subtitles.labels.Count() > 0
-        items.Push({ title: "Subtitles: " + tracks.subtitles.labels[tracks.subtitles.current] })
+        items.Push({ title: t("player.menu.subtitlesNow", { track: tracks.subtitles.labels[tracks.subtitles.current] }) })
         m.menuActions.Push("subtitles")
     end if
     if tracks.audio.labels.Count() > 0
-        items.Push({ title: "Audio: " + tracks.audio.labels[tracks.audio.current] })
+        items.Push({ title: t("player.menu.audioNow", { track: tracks.audio.labels[tracks.audio.current] }) })
         m.menuActions.Push("audio")
     end if
-    items.Push({ title: "Quality: " + qualityShown() })
+    items.Push({ title: t("player.menu.qualityNow", { quality: qualityShown() }) })
     m.menuActions.Push("quality")
     if m.textTracks > 0 or m.pictureIndex >= 0
-        items.Push({ title: "Subtitle sync: " + syncLabel(m.syncMs) })
+        items.Push({ title: t("player.menu.syncNow", { offset: syncLabel(m.syncMs) }) })
         m.menuActions.Push("sync")
     end if
     chapters = detChapters(playingFile())
     if chapters.Count() > 1
-        items.Push({ title: "Chapters" })
+        items.Push({ title: t("player.menu.chapters") })
         m.menuActions.Push("chapters")
-        items.Push({ title: "Previous chapter" })
+        items.Push({ title: t("player.menu.previousChapter") })
         m.menuActions.Push("previousChapter")
         if detNextChapter(chapters, m.positionMs) >= 0
-            items.Push({ title: "Next chapter" })
+            items.Push({ title: t("player.menu.nextChapter") })
             m.menuActions.Push("nextChapter")
         end if
     end if
@@ -2166,11 +2243,11 @@ sub openMenu()
         items.Push({ title: playerNextLabel(m.queue) })
         m.menuActions.Push("next")
     end if
-    items.Push({ title: "Sleep timer: " + sleepLabel(m.sleep, sleepNow(), playingKind()) })
+    items.Push({ title: t("player.sleep.titleNow", { state: sleepLabel(m.sleep, sleepNow(), playingKind()) }) })
     m.menuActions.Push("sleep")
-    items.Push({ title: "Find subtitles…" })
+    items.Push({ title: t("player.menu.find") })
     m.menuActions.Push("find")
-    items.Push({ title: "Playback details" })
+    items.Push({ title: t("player.menu.details") })
     m.menuActions.Push("details")
     at = m.menuList.itemFocused
     m.menuList.content = nodesContent(items)
@@ -2178,7 +2255,7 @@ sub openMenu()
     m.menuChoices.visible = false
     m.menuText.visible = false
     m.menuList.visible = true
-    m.menuHint.text = "Back closes this."
+    m.menuHint.text = t("player.menu.backCloses")
     m.menu.visible = true
     updateReadout()
     m.menuList.setFocus(true)
@@ -2210,13 +2287,13 @@ function qualityShown() as string
         labels[quality.id] = quality.label
     end for
     if choice = "auto"
-        now = "Original"
+        now = labels["original"]
         if m.watch <> invalid and aqStepped(m.watch)
             now = aqBitrateLabel(m.watch.playingKbps, m.watch.lines)
         else if m.watch <> invalid and labels.DoesExist(m.watch.quality)
             now = labels[m.watch.quality]
         end if
-        return "Automatic · " + now
+        return t("player.quality.automaticAt", { quality: now })
     end if
     if labels.DoesExist(choice) then return labels[choice]
     return aqLabel(choice)
@@ -2266,10 +2343,10 @@ sub openTracks(kind as string)
     tracks = mediaTracks(playingFile())
     m.menuKind = kind
     if kind = "audio"
-        m.menuTitle.text = "Audio"
+        m.menuTitle.text = t("player.menu.audio")
         list = tracks.audio
     else
-        m.menuTitle.text = "Subtitles"
+        m.menuTitle.text = t("player.menu.subtitles")
         list = tracks.subtitles
     end if
     items = []
@@ -2311,7 +2388,7 @@ sub onTrackPicked(event as object)
     if not isCurrent(event) then return
     answer = event.getData()
     if answer.error = "signed_out" then return
-    if not answer.ok then uiToast("Couldn't save that choice for next time.", true)
+    if not answer.ok then uiToast(t("player.toasts.notSaved"), true)
     position = m.positionMs
     seconds = m.video.position
     if seconds <> invalid and seconds > 0 then position = Int(seconds * 1000)
@@ -2324,12 +2401,12 @@ end sub
 ' them, as on Android TV.
 sub openQualities()
     m.menuKind = "quality"
-    m.menuTitle.text = "Quality"
+    m.menuTitle.text = t("player.menu.quality")
     choice = aqChoice(playbackSection())
     items = []
     m.menuValues = []
     if m.fallback = "struggled" and choice <> "auto"
-        items.Push({ title: "Play original" })
+        items.Push({ title: t("player.quality.playOriginal") })
         m.menuValues.Push("playOriginal")
     end if
     current = items.Count()
@@ -2343,7 +2420,7 @@ end sub
 
 sub openChapters()
     m.menuKind = "chapters"
-    m.menuTitle.text = "Chapters"
+    m.menuTitle.text = t("player.menu.chapters")
     chapters = detChapters(playingFile())
     items = []
     m.menuValues = []
@@ -2369,7 +2446,7 @@ end sub
 ' Off, minutes, or the end of what plays; the one set checked.
 sub openSleep()
     m.menuKind = "sleep"
-    m.menuTitle.text = "Sleep timer"
+    m.menuTitle.text = t("player.sleep.title")
     items = []
     m.menuValues = []
     current = 0
@@ -2401,7 +2478,7 @@ sub onMenuChoiceFocused()
     lines = []
     note = playerFallbackNote(m.fallback)
     if note <> "" then lines.Push(note)
-    hint = "Try the original again"
+    hint = t("player.quality.tryOriginal")
     if m.menuValues[at] <> "playOriginal" then hint = aqHint(m.menuValues[at])
     if hint <> "" then lines.Push(hint)
     typeSet(m.menuHint, lines.Join(Chr(10)))
@@ -2523,7 +2600,7 @@ sub onSleepTick()
         hideSleepNotice()
         return
     end if
-    typeSet(m.sleepText, "Pausing in " + urlValue(state.secondsLeft) + " s")
+    typeSet(m.sleepText, t("player.sleep.pausingIn", { seconds: state.secondsLeft }))
     if not m.sleepNotice.visible
         m.sleepNotice.visible = true
         ' The button takes the focus while nothing else is up.
@@ -2548,11 +2625,11 @@ end sub
 ' as on the native Samsung app.
 sub openDetails()
     m.menuKind = "details"
-    m.menuTitle.text = "Playback details"
+    m.menuTitle.text = t("player.menu.details")
     m.detailTop = 0
     m.detailsWaiting = m.sessionId <> "" and httpString(m.info.method) <> "direct"
     if m.detailsWaiting
-        m.detailLines = ["Asking the server…"]
+        m.detailLines = [t("player.details.asking")]
         showDetailLines()
     else
         showDetails(invalid)
@@ -2602,10 +2679,10 @@ sub showDetails(live as dynamic)
     if details.why <> "" then lines.Push(details.why)
     lines.Push("")
     for each row in details.rows
-        lines.Push(row.label + ": " + row.value)
+        lines.Push(detLine(row))
     end for
-    if m.pictureIndex >= 0 then lines.Push("Subtitles: Drawn by Pley")
-    if m.watch <> invalid and aqLowered(m.watch) then lines.Push("Quality: " + qualityShown() + " · Lowered for your connection")
+    if m.pictureIndex >= 0 then lines.Push(t("player.details.picturesDrawn"))
+    if m.watch <> invalid and aqLowered(m.watch) then lines.Push(t("player.details.qualityLowered", { quality: qualityShown() }))
     m.detailsWaiting = false
     m.detailLines = lines
     showDetailLines()
@@ -2804,9 +2881,9 @@ end sub
 ' language, listed in the menu.
 sub findSubtitles()
     m.menuKind = "finding"
-    m.menuTitle.text = "Find subtitles"
+    m.menuTitle.text = t("player.find.title")
     m.found = []
-    showMenuText("Looking for subtitles…")
+    showMenuText(t("player.find.searching"))
     m.top.setFocus(true)
     fileId = 0
     if m.info <> invalid then fileId = m.info.file_id
@@ -2816,7 +2893,7 @@ end sub
 ' The languages to look in, the one looked in checked.
 sub openFindLanguages()
     m.menuKind = "findLanguage"
-    m.menuTitle.text = "Subtitle language"
+    m.menuTitle.text = t("player.find.language")
     choice = ssLanguageChoices(m.findLanguage)
     items = []
     for each label in choice.labels
@@ -2831,7 +2908,7 @@ sub showMenuText(text as string)
     m.menuList.visible = false
     m.menuChoices.visible = false
     m.menuText.visible = true
-    m.menuHint.text = "Back goes back."
+    m.menuHint.text = t("player.menu.backGoesBack")
 end sub
 
 sub onSubtitlesFound(event as object)
@@ -2869,7 +2946,7 @@ sub onMenuEntryFocused()
     else if m.found.Count() = 0
         typeSet(m.menuHint, ssNothingFound(m.findLanguage))
     else
-        m.menuHint.text = "The language the search looks in."
+        m.menuHint.text = t("player.find.languageHint")
     end if
 end sub
 
@@ -2877,7 +2954,7 @@ end sub
 sub addSubtitles(at as integer)
     if at < 0 or at >= m.found.Count() or m.info = invalid then return
     m.menuKind = "adding"
-    showMenuText("Adding " + m.found[at].label + "…")
+    showMenuText(t("player.find.adding", { name: m.found[at].label }))
     m.top.setFocus(true)
     body = { result: m.found[at].id }
     fileId = httpNumber(m.info.file_id, 0)
@@ -2895,7 +2972,7 @@ sub onSubtitlesAdded(event as object)
     track = invalid
     if answer.ok then track = ssAddedTrack(answer.data)
     if track = invalid
-        if answer.ok then answer.message = "The server didn't send the subtitles back."
+        if answer.ok then answer.message = t("player.find.noTrack")
         showMenuText(ssProblem(answer, false))
         return
     end if
@@ -2912,7 +2989,7 @@ sub onSubtitlesAdded(event as object)
     if file <> invalid then file.selected_subtitle = index
     stream = contentStream(m.info, m.item, m.global.session.server, m.positionMs)
     m.textTracks = stream.subtitleTracks.Count()
-    uiToast("Subtitles added: " + contentSubtitleName(track, httpString(track.language)))
+    uiToast(t("player.toasts.subtitlesAdded", { track: contentSubtitleName(track, httpString(track.language)) }))
     if tracksNeedNewSession(burned, index)
         position = m.positionMs
         seconds = m.video.position

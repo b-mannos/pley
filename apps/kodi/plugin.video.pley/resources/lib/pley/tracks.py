@@ -19,6 +19,7 @@ from __future__ import annotations
 import re
 import threading
 import time
+import unicodedata
 
 from . import remote
 
@@ -36,15 +37,11 @@ QUIET = 3
 SETTLE = 2
 
 # The languages offered for the defaults, as ISO 639-2/B codes (the TV
-# apps' and the Android app's 34).
+# apps' and the Android app's 34), in English's alphabetical order; each
+# named by the add-on's words "language_<code>".
 LANGUAGES = [
-    ("ara", "Arabic"), ("bul", "Bulgarian"), ("cat", "Catalan"), ("chi", "Chinese"), ("hrv", "Croatian"),
-    ("cze", "Czech"), ("dan", "Danish"), ("dut", "Dutch"), ("eng", "English"), ("fin", "Finnish"),
-    ("fre", "French"), ("ger", "German"), ("gre", "Greek"), ("heb", "Hebrew"), ("hin", "Hindi"),
-    ("hun", "Hungarian"), ("ind", "Indonesian"), ("ita", "Italian"), ("jpn", "Japanese"), ("kor", "Korean"),
-    ("nor", "Norwegian"), ("per", "Persian"), ("pol", "Polish"), ("por", "Portuguese"), ("rum", "Romanian"),
-    ("rus", "Russian"), ("srp", "Serbian"), ("slo", "Slovak"), ("spa", "Spanish"), ("swe", "Swedish"),
-    ("tha", "Thai"), ("tur", "Turkish"), ("ukr", "Ukrainian"), ("vie", "Vietnamese"),
+    "ara", "bul", "cat", "chi", "hrv", "cze", "dan", "dut", "eng", "fin", "fre", "ger", "gre", "heb", "hin", "hun", "ind",
+    "ita", "jpn", "kor", "nor", "per", "pol", "por", "rum", "rus", "srp", "slo", "spa", "swe", "tha", "tur", "ukr", "vie",
 ]
 # subtitle_mode, and the name of its words (the TV apps' SUBTITLE_MODES).
 SUBTITLE_MODES = [
@@ -243,6 +240,11 @@ def to_kodi(entries: list, index, found: list):
         return at
     place = _matched(at, _pairs(entries, "forced"), _pairs(found, "isforced"))
     return found[place].get("index", place) if place is not None else None
+
+
+def listed(found: list, place):
+    """What Kodi lists at its place `place` (None for nothing there)."""
+    return next((e for i, e in enumerate(found) if e.get("index", i) == place), None)
 
 
 def from_kodi(entries: list, position, found: list):
@@ -495,7 +497,8 @@ class Follower:
         held (turn). Only what Kodi lists can be picked: a converted stream
         carries only the audio the server put in, and subtitles drawn onto
         the video stay. Nothing until the account's choice is shown, which
-        would undo it. {act, report}, as remote.obey_track's."""
+        would undo it. {act, report}, as remote.obey_track's, with `track`,
+        Kodi's entry for the track switched to, which remote.notice names."""
         if not self.lock.acquire(timeout=1):
             return dict(remote.NONE)
         try:
@@ -531,12 +534,15 @@ class Follower:
                     return dict(remote.NONE)
                 self.rpc("Player.SetAudioStream", {"playerid": VIDEO_PLAYER, "stream": at})
                 playing = (index, playing[1])
+                action = dict(action, track=listed(audios, at))
             elif act == "subtitles" and index == -1:
                 self.rpc("Player.SetSubtitle", {"playerid": VIDEO_PLAYER, "subtitle": "off"})
                 playing = (playing[0], -1)
             elif act == "subtitles":
-                self.rpc("Player.SetSubtitle", {"playerid": VIDEO_PLAYER, "subtitle": to_kodi(lay["subtitles"], index, subtitles), "enable": True})
+                at = to_kodi(lay["subtitles"], index, subtitles)
+                self.rpc("Player.SetSubtitle", {"playerid": VIDEO_PLAYER, "subtitle": at, "enable": True})
                 playing = (playing[0], index)
+                action = dict(action, track=listed(subtitles, at))
             if act != "none":
                 self.told_until = self.clock() + QUIET
             self.now = playing
@@ -548,10 +554,15 @@ class Follower:
 # ----------------------------------------------------------- the defaults
 
 
-def language_name(code) -> str | None:
+def language_name(code, text) -> str | None:
     if not code:
         return None
-    return next((name for c, name in LANGUAGES if c == code), code)
+    return text("language_" + code) if code in LANGUAGES else code
+
+
+def sort_key(name: str) -> str:
+    """A name as an alphabetical list orders it: "Árabe" with the A's."""
+    return "".join(c for c in unicodedata.normalize("NFKD", name) if not unicodedata.combining(c)).casefold()
 
 
 def mode_word(mode) -> str:
@@ -563,13 +574,14 @@ def rows(me: dict, text) -> list:
     subtitle language when the mode shows full subtitles. `text(name)` is
     the add-on's words."""
     mode = me.get("subtitle_mode") or "forced"
+    audio = language_name(me.get("audio_language"), text) or text("files_default")
     shown = [
-        ("audio", "%s: %s" % (text("audio_language"), language_name(me.get("audio_language")) or text("files_default"))),
-        ("mode", "%s: %s" % (text("subtitles"), text(mode_word(mode)))),
+        ("audio", text("label_value") % (text("audio_language"), audio)),
+        ("mode", text("label_value") % (text("subtitles"), text(mode_word(mode)))),
     ]
     if mode in WITH_LANGUAGE:
-        name = language_name(me.get("subtitle_language")) or text("same_as_audio")
-        shown.append(("subtitle", "%s: %s" % (text("subtitle_language"), name)))
+        name = language_name(me.get("subtitle_language"), text) or text("same_as_audio")
+        shown.append(("subtitle", text("label_value") % (text("subtitle_language"), name)))
     return shown
 
 
@@ -581,7 +593,9 @@ def choices(what: str, me: dict, text) -> tuple:
         heading = text("subtitles")
     else:
         none = text("files_default") if what == "audio" else text("same_as_audio")
-        options = [(None, none)] + list(LANGUAGES)
+        # Alphabetical in the language shown, as the TV apps list them.
+        named = sorted(((code, language_name(code, text)) for code in LANGUAGES), key=lambda option: sort_key(option[1]))
+        options = [(None, none)] + named
         now = me.get("audio_language" if what == "audio" else "subtitle_language")
         heading = text("audio_language" if what == "audio" else "subtitle_language")
     at = next((i for i, (value, _) in enumerate(options) if value == now), 0)

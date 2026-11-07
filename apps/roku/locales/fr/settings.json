@@ -1,0 +1,66 @@
+{
+  "title": "Paramètres",
+  "categories": {
+    "profile": "Profil",
+    "playback": "Lecture",
+    "display": "Sous-titres et affichage",
+    "server": "Serveur",
+    "diagnostics": "Diagnostic",
+    "about": "À propos",
+    "signOut": "Se déconnecter"
+  },
+  "tmdb": "Ce produit utilise l’API de TMDB, mais n’est ni approuvé ni certifié par TMDB.",
+  "web": "Gérer votre compte sur le web",
+  "webHint": "Nom, photo, mot de passe, code PIN, connexion en deux étapes, appareils et applications",
+  "webBody": "Allez à cette adresse sur un téléphone ou un ordinateur du même réseau :",
+  "managed": "Profil géré",
+  "rows": {
+    "switchProfile": "Changer de profil",
+    "history": "Historique de visionnage",
+    "sortLibraries": "Trier les bibliothèques",
+    "sortLibrariesValue": "Votre ordre, sur tous vos appareils",
+    "autoplay": "Lire l’épisode suivant automatiquement",
+    "autoplayValue": "Après un compte à rebours de 10 secondes",
+    "details": "Détails de lecture",
+    "detailsValue": "Afficher sur la vidéo comment elle est lue (direct, remux ou transcodage)",
+    "captions": "Style des sous-titres",
+    "captionsValue": "Comme le disent les paramètres de ce Roku : Accessibilité, Style des sous-titres",
+    "serverValue": "Le serveur qu’utilise cette TV",
+    "switchServer": "Changer de serveur",
+    "diagnostics": "Ouvrir le diagnostic",
+    "diagnosticsValue": "Ce que cette TV décode et affiche, et pourquoi",
+    "version": "Version",
+    "licencesValue": "La licence de Pley, et les mentions de ce que l’application intègre",
+    "signOut": "Se déconnecter"
+  },
+  "language": {
+    "title": "Langue",
+    "automatic": "Automatique ({{language}})"
+  },
+  "quality": "Qualité",
+  "alwaysStartAs": "Toujours démarrer avec",
+  "usedLast": "Dernier profil utilisé",
+  "signOut": {
+    "title": "Se déconnecter ?",
+    "body": "Cette TV sera déconnectée de {{address}}.",
+    "confirm": "Se déconnecter",
+    "intro": "Déconnectez cette TV de {{address}}. Il vous faudra un nouveau code d’association pour vous reconnecter."
+  },
+  "loadingProfile": "Chargement de votre profil…",
+  "readOnly": "Ce serveur ne permet pas à l’application de les modifier : modifiez-les sur le web",
+  "diagnostics": "Diagnostic",
+  "licences": "Licences open source",
+  "diagnosticsPage": {
+    "thisTv": "Cette TV",
+    "app": "Application",
+    "model": "Modèle",
+    "os": "Roku OS",
+    "name": "Nom",
+    "plays": "Ce qu’il lit"
+  },
+  "licencesPage": {
+    "lucide": "Les icônes de Lucide",
+    "roboto": "La police Roboto"
+  },
+  "licence": "Pley pour Roku est un logiciel libre distribué sous la licence publique générale GNU Affero, version 3 (AGPL-3.0-only)."
+}

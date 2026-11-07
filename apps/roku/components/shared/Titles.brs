@@ -19,7 +19,7 @@ sub uiTileOptions(tile as dynamic, continueWatching as boolean)
     for each option in options
         labels.Push(option.label)
     end for
-    labels.Push("Cancel")
+    labels.Push(t("common.actions.cancel"))
     dialog = CreateObject("roSGNode", "StandardMessageDialog")
     dialog.title = tile.title
     dialog.buttons = labels
@@ -107,7 +107,7 @@ sub uiTitleOnDeck(event as object)
     episode = invalid
     if answer.data <> invalid then episode = httpObject(answer.data.item)
     if episode = invalid
-        uiToast("Nothing to play")
+        uiToast(t("titles.nothingToPlay"))
         return
     end if
     ' Left meanwhile: nothing starts behind the screen now on top.
@@ -152,10 +152,10 @@ sub uiPlaylistsListed(event as object)
     for each playlist in m.playlistChoices
         labels.Push(playlist.title)
     end for
-    labels.Push("New playlist…")
-    labels.Push("Cancel")
+    labels.Push(t("titles.playlist.newMenu"))
+    labels.Push(t("common.actions.cancel"))
     dialog = CreateObject("roSGNode", "StandardMessageDialog")
-    dialog.title = "Add to playlist"
+    dialog.title = t("titles.actions.addToPlaylist")
     dialog.buttons = labels
     dialog.observeField("buttonSelected", "uiPlaylistChosen")
     m.top.getScene().dialog = dialog
@@ -170,8 +170,8 @@ sub uiPlaylistChosen(event as object)
         uiRequest({ method: "POST", path: "/api/playlists/" + urlValue(playlist.id) + "/items", json: { item_ids: [m.playlistTile.itemId] }, playlist: playlist.title }, "uiPlaylistAdded")
     else if chosen = count
         dialog = CreateObject("roSGNode", "StandardKeyboardDialog")
-        dialog.title = "New playlist"
-        dialog.buttons = ["Make it", "Cancel"]
+        dialog.title = t("titles.playlist.new")
+        dialog.buttons = [t("titles.playlist.create"), t("common.actions.cancel")]
         dialog.observeField("buttonSelected", "uiPlaylistNamed")
         m.top.getScene().dialog = dialog
     end if
@@ -189,7 +189,7 @@ end sub
 sub uiPlaylistAdded(event as object)
     answer = event.getData()
     if answer.ok
-        uiToast("Added to " + event.getRoSGNode().spec.playlist)
+        uiToast(t("titles.playlist.addedTo", { title: event.getRoSGNode().spec.playlist }))
     else if not uiFailed(answer)
         uiToast(pagePlaylistRefusal(answer), true)
     end if

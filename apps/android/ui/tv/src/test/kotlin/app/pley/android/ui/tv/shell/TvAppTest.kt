@@ -35,11 +35,14 @@ import app.pley.android.ui.tv.onboarding.LocalOnboardingSource
 import app.pley.android.ui.tv.kit.focused
 import app.pley.android.ui.tv.kit.press
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -61,6 +64,10 @@ class TvAppTest {
 
     private var exits = 0
 
+    /** "Who's watching?" counts in the process the tests share: none shows before each. */
+    @Before
+    fun noProfilesShowing() = ProfileGate.reset()
+
     private class FakeSource(
         private val facts: StartFacts,
         libraries: List<Library>,
@@ -78,7 +85,11 @@ class TvAppTest {
         override val notices: Flow<List<TvNotice>> = queue
 
         override fun dismiss(notice: RequestNotice) = queue.update { it.filterNot { n -> n.notice.key == notice.key } }
+
+        override val castRefused = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
     }
+
+    private lateinit var source: FakeSource
 
     /** The way into requests the rail shows, and the news to pop up. */
     private val requests = MutableStateFlow(RequestsEntry.None)
@@ -104,7 +115,12 @@ class TvAppTest {
         compose.setContent {
             // Getting in reads a fake server: a household of four, a code to show, nobody on the network.
             CompositionLocalProvider(LocalOnboardingSource provides onboarding) {
-                TvApp(FakeSource(facts, threeLibraries, requests, notices), onExit = { exits++ }, reducedMotion = true, placeholder = placeholder)
+                TvApp(
+                    FakeSource(facts, threeLibraries, requests, notices).also { source = it },
+                    onExit = { exits++ },
+                    reducedMotion = true,
+                    placeholder = placeholder,
+                )
             }
         }
     }
@@ -155,16 +171,27 @@ class TvAppTest {
     fun alwaysStartAsOpensOnThePadOfAProfileWithAPin() {
         ProfileGate.passed = false
         onboarding.signIn("http://s", Me(1, "anna", "Anna", hasPin = true))
+        assertFalse(ProfileGate.showing)
         app(StartFacts("http://s", true, profiles = 2, alwaysStartAs = 1, hasPin = true))
         waitFor("Enter Anna's PIN")
+        // No cast plays over the pad, nor over the profiles.
+        assertTrue(ProfileGate.showing)
         back()
         compose.onNodeWithText("Who's watching?").assertExists()
+        assertTrue(ProfileGate.showing)
+    }
+
+    @Test
+    fun aCastThatCouldNotSwitchTheProfileSaysSo() {
+        app()
+        source.castRefused.tryEmit(Unit)
+        waitFor("Couldn't switch to the remote's profile")
     }
 
     @Test
     fun homeStartsFocused() {
         app()
-        compose.onNodeWithText("Resume").assertIsFocused()
+        compose.onNodeWithText("Play").assertIsFocused()
     }
 
     @Test
@@ -176,12 +203,12 @@ class TvAppTest {
     @Test
     fun leftFromContentEntersTheRailAtTheCurrentPage() {
         app()
-        compose.onNodeWithText("Resume").assertIsFocused()
+        compose.onNodeWithText("Play").assertIsFocused()
         compose.press(Key.DirectionLeft)
         railEntry("home").assertIsFocused()
         // Right goes back to where focus was.
         compose.press(Key.DirectionRight)
-        compose.onNodeWithText("Resume").assertIsFocused()
+        compose.onNodeWithText("Play").assertIsFocused()
     }
 
     @Test
@@ -257,13 +284,13 @@ class TvAppTest {
         // The skeleton has nothing to focus: Left goes to the rail.
         compose.press(Key.DirectionLeft)
         railEntry("home").assertIsFocused()
-        // Home comes in with Resume, its initial focus, which leaves focus where it was sent.
+        // Home comes in with the featured title's Play, its initial focus, which leaves focus where it was sent.
         homeData.value = ready
-        waitFor("Resume")
+        waitFor("Play")
         railEntry("home").assertIsFocused()
-        // Right goes to the page, starting on Resume.
+        // Right goes to the page, starting on Play.
         compose.press(Key.DirectionRight)
-        compose.onNodeWithText("Resume").assertIsFocused()
+        compose.onNodeWithText("Play").assertIsFocused()
     }
 
     @Test
@@ -335,13 +362,13 @@ class TvAppTest {
     @Test
     fun newsOfARequestPopsUpOverThePageAndBackGivesFocusBack() {
         app()
-        compose.onNodeWithText("Resume").assertIsFocused()
+        compose.onNodeWithText("Play").assertIsFocused()
         notices.value = listOf(arrivalIsReady)
         waitFor("“Arrival” is ready to watch.")
         compose.onNodeWithText("Open").assertIsFocused()
         back()
         compose.onNodeWithTag(TV_REQUEST_NOTICE).assertDoesNotExist()
-        compose.onNodeWithText("Resume").assertIsFocused()
+        compose.onNodeWithText("Play").assertIsFocused()
         assertEquals(0, exits)
     }
 

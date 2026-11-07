@@ -1,0 +1,66 @@
+{
+  "title": "Settings",
+  "categories": {
+    "profile": "Profile",
+    "playback": "Playback",
+    "display": "Subtitles and display",
+    "server": "Server",
+    "diagnostics": "Diagnostics",
+    "about": "About",
+    "signOut": "Sign out"
+  },
+  "tmdb": "This product uses the TMDB API but is not endorsed or certified by TMDB.",
+  "web": "Manage your account on the web",
+  "webHint": "Name, picture, password, PIN, two-step, devices and apps",
+  "webBody": "Go to this address on a phone or computer on the same network:",
+  "managed": "Managed profile",
+  "rows": {
+    "switchProfile": "Switch profile",
+    "history": "Watch history",
+    "sortLibraries": "Sort libraries",
+    "sortLibrariesValue": "Your order, on all your devices",
+    "autoplay": "Play the next episode by itself",
+    "autoplayValue": "After a 10 second countdown",
+    "details": "Playback details",
+    "detailsValue": "Show how a video plays (direct, remux or transcode) over it",
+    "captions": "Subtitle style",
+    "captionsValue": "As this Roku's settings say: Accessibility, Captions style",
+    "serverValue": "The server this TV uses",
+    "switchServer": "Switch server",
+    "diagnostics": "Open diagnostics",
+    "diagnosticsValue": "What this TV decodes and shows, and why",
+    "version": "Version",
+    "licencesValue": "Pley's licence, and the notices of what the app bundles",
+    "signOut": "Sign out"
+  },
+  "language": {
+    "title": "Language",
+    "automatic": "Automatic ({{language}})"
+  },
+  "quality": "Quality",
+  "alwaysStartAs": "Always start as",
+  "usedLast": "Profile used last",
+  "signOut": {
+    "title": "Sign out?",
+    "body": "You'll be signed out of {{address}}.",
+    "confirm": "Sign out",
+    "intro": "Sign this TV out of {{address}}. You'll need a new link code to sign in again."
+  },
+  "loadingProfile": "Loading your profile…",
+  "readOnly": "This server doesn't let the app change these: change them on the web",
+  "diagnostics": "Diagnostics",
+  "licences": "Open-source licences",
+  "diagnosticsPage": {
+    "thisTv": "This TV",
+    "app": "App",
+    "model": "Model",
+    "os": "Roku OS",
+    "name": "Name",
+    "plays": "What it plays"
+  },
+  "licencesPage": {
+    "lucide": "Lucide's icons",
+    "roboto": "The Roboto font"
+  },
+  "licence": "Pley for Roku is free software under the GNU Affero General Public License, version 3 (AGPL-3.0-only)."
+}
