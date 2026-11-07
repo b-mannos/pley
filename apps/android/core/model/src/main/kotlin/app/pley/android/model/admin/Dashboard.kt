@@ -12,7 +12,7 @@ import kotlinx.serialization.Serializable
  * what plays and what the server is busy with (GET /api/activity), the
  * server and its transcoder (GET /api/system, GET /api/transcoder), the
  * machine's load (GET /api/system/resources) and the space Pley uses
- * (GET /api/system/storage, GET /api/system/backups). Everyone's watch
+ * (GET /api/system/storage). Everyone's watch
  * history reads as the account page's does (app.pley.android.model.HistoryPage).
  */
 
@@ -120,8 +120,18 @@ data class DashboardSystem(
     val arch: String = "",
     val uptimeSecs: Long = 0,
     val dataDir: String = "",
+    /** The check of the database at start. */
+    val database: DatabaseHealth = DatabaseHealth(),
     val transcoder: DashboardTranscoderInfo = DashboardTranscoderInfo(),
     val counts: DashboardCounts = DashboardCounts(),
+)
+
+/** The check of the database at start; [ok] is `null` until it finished. */
+@Serializable
+data class DatabaseHealth(
+    val ok: Boolean? = null,
+    /** What SQLite found, when the database is damaged. */
+    val problem: String? = null,
 )
 
 /** The transcoder as the server found it (`SystemInfo.transcoder`). */

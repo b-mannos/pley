@@ -26,6 +26,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -75,11 +76,11 @@ import app.pley.android.ui.phone.theme.LocalPhoneMetrics
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 /** The filters chosen in a sheet. */
-private enum class LineupPick { Source, Group, State }
+private enum class LineupPick { Group, State }
 
 /**
  * Live TV's Channels, as the web's tab: the lineup's counts, a field to
- * find a channel, the source, group and state it lists, then the
+ * find a channel, the group and state it lists, then the
  * channels, read a page at a time as the list scrolls. Each channel's eye
  * hides or shows it; chosen ones (or every one listed) are hidden or
  * shown together; a channel opens its editor (name, number, guide
@@ -92,7 +93,6 @@ internal fun LineupScreen() {
     val list by model.list.collectAsStateWithLifecycle()
     val choice by model.choice.collectAsStateWithLifecycle()
     val editing by model.editing.collectAsStateWithLifecycle()
-    val sources by model.sources.state.collectAsStateWithLifecycle()
     val groups by model.groups.state.collectAsStateWithLifecycle()
     val busy by model.busy.collectAsStateWithLifecycle()
     val query by model.query.collectAsStateWithLifecycle()
@@ -109,8 +109,7 @@ internal fun LineupScreen() {
     // Another filter lists from the top.
     LaunchedEffect(list.filter) { rows.scrollToItem(0) }
     AdminEvents(model, liveTvSaid())
-    val sourceList = sources.valueOrNull.orEmpty()
-    val groupNames = groups.valueOrNull.orEmpty().map { it.name }.filter { it.isNotEmpty() }
+    val groupNames = remember(groups) { groups.valueOrNull.orEmpty().map { it.name }.filter { it.isNotEmpty() } }
     LiveListPage(
         title = stringResource(R.string.admin_livetv_tab_channels),
         load = summary,
@@ -133,14 +132,6 @@ internal fun LineupScreen() {
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     val filter = list.filter
-                    if (sourceList.size > 1) {
-                        PleyChip(
-                            sourceList.firstOrNull { it.id == filter.sourceId }?.name ?: stringResource(R.string.admin_livetv_lineup_every_source),
-                            selected = filter.sourceId != null,
-                            onClick = { picking = LineupPick.Source },
-                            dropdown = true,
-                        )
-                    }
                     if (groupNames.size > 1) {
                         PleyChip(
                             filter.group ?: stringResource(R.string.admin_livetv_lineup_every_group),
@@ -189,13 +180,6 @@ internal fun LineupScreen() {
         }
     }
     when (picking) {
-        LineupPick.Source -> ChoiceSheet(
-            title = stringResource(R.string.admin_livetv_lineup_source),
-            choices = listOf(Choice<Long?>(null, stringResource(R.string.admin_livetv_lineup_every_source))) + sourceList.map { Choice<Long?>(it.id, it.name) },
-            selected = list.filter.sourceId,
-            onPick = model::setSource,
-            onDismiss = { picking = null },
-        )
         LineupPick.Group -> ChoiceSheet(
             title = stringResource(R.string.admin_livetv_lineup_group),
             choices = listOf(Choice<String?>(null, stringResource(R.string.admin_livetv_lineup_every_group))) + groupNames.map { Choice<String?>(it, it) },

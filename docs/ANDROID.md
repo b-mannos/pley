@@ -780,10 +780,14 @@ again every 10 s while they show.
 
 ### Managing the server
 
-On phones and tablets, an administrator manages the server as Settings in
-the web app does: Me → **Manage server** lists the same parts, in the same
-order, and each does what its web page does. The app asks for the `server`
-scope as it signs in, where the server offers it
+On phones and tablets, an administrator manages the server's libraries,
+accounts and Live TV channels, and sees its dashboard, as Settings in the
+web app does: Me → **Manage server** lists those parts, in the web's
+order, and each does what its web page does. The server's settings, its
+network, the transcoder, requests and Live TV's sources hold its keys and
+passwords, and stay in the web app: the server doesn't let apps read or
+change them, and the page says where they are. The app asks for the
+`server` scope as it signs in, where the server offers it
 ([API.md](API.md#scopes)); an administrator signed in before then is
 offered to sign in again, and anyone else sees nothing of it. TVs don't
 manage the server: they sign in with a code, and the server never gives
@@ -793,14 +797,16 @@ the scope to a code.
   with a message; the server's and the machine's CPU and memory over the
   last minutes; recently played, by everyone, with removing a play; the
   transcoder's jobs; scans, intro detection and seek previews under way;
-  the server, its storage, cleaning up and backups.
+  the server, its storage and the database's health, and cleaning up.
 - **Libraries**: the libraries in everyone's order, dragged to reorder,
   scanned one or all with their progress; a library's page with its kind,
   name and folders, picked on the server or typed, then scanning, a full
   rescan and deleting it.
-- **Live TV**: its settings, the sources (tested before they are saved,
-  refreshed, deleted), the groups and the lineup, paged and searched, and
-  the tuners in use.
+- **Live TV**: the tuners in use, stopping one; the groups, hidden and
+  shown a group or a region at a time; and the lineup, paged, searched
+  and filtered by group and state, with hiding, renaming, renumbering and
+  a channel's guide id. Without the list of sources, the lineup has no
+  filter by source.
 - **Users** and **Invitations**: the accounts and profiles; an account's
   page with everything an administrator changes on the web (name,
   password, administrator, disabled, household, requests, libraries and
@@ -808,19 +814,10 @@ the scope to a code.
   accounts and profiles; invitation links, made, copied, shared and
   deleted. The administrator's own password, PIN, two-step sign-in and
   devices stay in Account in the web app, as the server requires.
-- **Requests**: taking requests, limits, Radarr and Sonarr with their
-  address, key and choices.
-- **Server**: name, language, metadata and its keys (tested once saved),
-  subtitles, library scanning and when library work runs (with the
-  watching-hours chart), requiring two-step sign-in, apps by other
-  publishers, and database backups.
-- **Transcoder** and **Network**: every choice of their web pages, those
-  that can't work on the server greyed out with the reason; where Pley
-  listens, with a warning before a change that would cut this phone off.
 
 A value is sent as it is chosen, as the phone's own Settings save theirs;
-what is made or set together (a library, an account, a source, where the
-server listens) has one button. What can't be undone asks first. The
+what is made or set together (a library, an account, an invitation) has
+one button. What can't be undone asks first. The
 server's refusals show in its own words, and the page then shows what the
 server has. Lists that change (what plays, scans, tuners, the machine's
 load) are read again every few seconds while they show.
@@ -1235,8 +1232,9 @@ base64 -w0 pley-release.keystore   # the ANDROID_KEYSTORE_BASE64 secret
 ## Known limits
 
 - Downloads are on phones and tablets only; TVs stream everything.
-- Managing the server is on phones and tablets only. Links in its pages'
-  notes (FFmpeg builds, providers' sites) are plain text.
+- Managing the server is on phones and tablets only, and leaves the
+  server's settings, network, transcoder, requests and Live TV's sources
+  to the web app.
 - No Watch Next row on phones or Fire TV.
 - Live TV has no picture in picture, and the TV's display mode isn't
   matched for live channels.

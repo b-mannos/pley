@@ -2,7 +2,6 @@
 <resources>
     <string name="admin_livetv_intro">Tus canales de IPTV y su guía, vistos a través de este servidor.</string>
     <string name="admin_livetv_open">Abrir TV en vivo</string>
-    <string name="admin_livetv_channels">Canales</string>
     <string name="admin_livetv_no_guide">Sin guía</string>
     <string name="admin_livetv_show_name">Mostrar %1$s</string>
     <string name="admin_livetv_hide_name">Ocultar %1$s</string>
@@ -16,8 +15,6 @@
     <string name="admin_livetv_tab_groups_value">Ocultar o mostrar grupos y regiones enteros</string>
     <string name="admin_livetv_tab_channels">Canales</string>
     <string name="admin_livetv_tab_channels_value">Ocultar, renombrar y renumerar canales</string>
-    <string name="admin_livetv_tab_options">Opciones</string>
-    <string name="admin_livetv_tab_options_value">Quién puede ver, cómo se reproducen los canales, la guía</string>
 
     <string name="admin_livetv_watching_title">Viendo ahora</string>
     <string name="admin_livetv_watching_nobody">Nadie está viendo nada. Cada canal que se ve ocupa una de las conexiones de su fuente.</string>
@@ -37,151 +34,9 @@
     <string name="admin_livetv_since_just_now">justo ahora</string>
     <string name="admin_livetv_since_minutes">desde hace %1$d min</string>
     <string name="admin_livetv_since_hours_minutes">desde hace %1$d h %2$d min</string>
-
-    <string name="admin_livetv_sources_title">Fuentes</string>
-    <string name="admin_livetv_sources_hint">De dónde vienen los canales. Los canales y las guías se actualizan solos.</string>
-    <string name="admin_livetv_sources_add">Añadir fuente</string>
     <string name="admin_livetv_sources_none_title">Aún no hay ninguna fuente de IPTV</string>
-    <string name="admin_livetv_sources_none_body">Añade la lista M3U o la cuenta Xtream Codes de tu proveedor. Sus canales y su guía aparecen en TV en vivo, para todos a los que dejes ver.</string>
-    <string name="admin_livetv_sources_add_first">Añadir una fuente</string>
-    <string name="admin_livetv_sources_off">Desactivada</string>
-    <string name="admin_livetv_sources_reading">Actualizando</string>
-    <string name="admin_livetv_sources_read_ago">actualizada %1$s</string>
-    <plurals name="admin_livetv_sources_hidden">
-        <item quantity="one">%1$d oculto</item>
-        <item quantity="many">%1$d ocultos</item>
-        <item quantity="other">%1$d ocultos</item>
-    </plurals>
-    <string name="admin_livetv_sources_in_guide">En la guía</string>
-    <plurals name="admin_livetv_sources_guide_channels">
-        <item quantity="one">%1$,d canal</item>
-        <item quantity="many">%1$,d canales</item>
-        <item quantity="other">%1$,d canales</item>
-    </plurals>
-    <string name="admin_livetv_sources_no_guide_yet">aún sin guía</string>
-    <string name="admin_livetv_sources_connections">Conexiones</string>
-    <plurals name="admin_livetv_sources_in_use_count">
-        <item quantity="one">%1$d en uso</item>
-        <item quantity="many">%1$d en uso</item>
-        <item quantity="other">%1$d en uso</item>
-    </plurals>
-    <string name="admin_livetv_sources_of_max">%1$d de %2$d</string>
-    <string name="admin_livetv_sources_no_limit">sin límite</string>
-    <string name="admin_livetv_sources_all_in_use">todas en uso</string>
-    <string name="admin_livetv_sources_in_use">en uso</string>
-    <string name="admin_livetv_sources_read">Actualizada</string>
-    <string name="admin_livetv_sources_guide_ago">guía %1$s</string>
-    <string name="admin_livetv_sources_renew">renuévala</string>
-    <plurals name="admin_livetv_sources_days_left">
-        <item quantity="one">queda %1$,d día</item>
-        <item quantity="many">quedan %1$,d días</item>
-        <item quantity="other">quedan %1$,d días</item>
-    </plurals>
-    <string name="admin_livetv_sources_guide_error">Guía: %1$s</string>
-    <string name="admin_livetv_account_trial">%1$s (prueba)</string>
-    <string name="admin_livetv_account_expires">vence el %1$s</string>
-    <string name="admin_livetv_account_expired">venció el %1$s</string>
-    <string name="admin_livetv_account_no_expiry">no vence</string>
-    <plurals name="admin_livetv_account_connections">
-        <item quantity="one">%1$d conexión</item>
-        <item quantity="many">%1$d conexiones</item>
-        <item quantity="other">%1$d conexiones</item>
-    </plurals>
-
-    <string name="admin_livetv_source_gone">Esta fuente ya no está en el servidor</string>
-    <string name="admin_livetv_source_enabled">Usar esta fuente</string>
-    <string name="admin_livetv_source_read_now">Actualizar ahora</string>
-    <string name="admin_livetv_source_remove">Eliminar</string>
-    <string name="admin_livetv_source_remove_title">¿Eliminar %1$s?</string>
-    <string name="admin_livetv_source_remove_body">Sus canales, su guía y los favoritos que todos tengan de ellos también se eliminan. Quien esté viendo uno dejará de verlo.</string>
-    <string name="admin_livetv_source_removed">Fuente eliminada: %1$s</string>
-    <string name="admin_livetv_source_saved">Fuente guardada</string>
-    <string name="admin_livetv_source_added">Fuente añadida: se están cargando sus canales</string>
-    <string name="admin_livetv_source_add_title">Añadir una fuente de IPTV</string>
-    <string name="admin_livetv_source_details">Detalles</string>
-    <string name="admin_livetv_source_test">Probar</string>
-    <string name="admin_livetv_source_add">Añadir fuente</string>
-    <string name="admin_livetv_source_kind">Tipo de fuente</string>
-    <string name="admin_livetv_source_m3u">Lista de reproducción M3U</string>
-    <string name="admin_livetv_source_m3u_text">La dirección de una lista: lo que dan la mayoría de los proveedores, y también los sintonizadores HDHomeRun.</string>
-    <string name="admin_livetv_source_xtream_text">Un servidor con nombre de usuario y contraseña: los canales, los grupos y la guía vienen incluidos.</string>
-    <string name="admin_livetv_source_name">Nombre</string>
-    <string name="admin_livetv_source_name_hint">Cómo se llama en las listas. Déjalo vacío para usar la dirección del proveedor.</string>
-    <string name="admin_livetv_source_server">Servidor</string>
-    <string name="admin_livetv_source_server_hint">Con su puerto: http://provider.example:8080</string>
-    <string name="admin_livetv_source_user_name">Nombre de usuario</string>
-    <string name="admin_livetv_source_password">Contraseña</string>
-    <string name="admin_livetv_source_password_saved">Guardada. Escribe una nueva para cambiarla.</string>
-    <string name="admin_livetv_source_playlist">Dirección de la lista de reproducción</string>
-    <string name="admin_livetv_source_playlist_hint">Su dirección http:// o https:// (un .m3u o .m3u8, o get.php).</string>
-    <string name="admin_livetv_source_guide">Guía (XMLTV)</string>
-    <string name="admin_livetv_source_guide_hint_xtream">Déjalo vacío para usar la guía del proveedor.</string>
-    <string name="admin_livetv_source_guide_hint_m3u">Déjalo vacío para usar la que indique la lista, si indica alguna.</string>
-    <string name="admin_livetv_source_connections">Conexiones</string>
-    <string name="admin_livetv_source_connections_hint">0: sin límite</string>
-    <string name="admin_livetv_source_connections_note">Conexiones es cuántos canales deja reproducir a la vez el proveedor con la cuenta. Todos los que ven el mismo canal comparten una; un canal que nadie ve libera su conexión a los pocos segundos.</string>
-    <string name="admin_livetv_source_advanced">Avanzado</string>
-    <string name="admin_livetv_source_user_agent">Agente de usuario</string>
-    <string name="admin_livetv_source_user_agent_hint">Algunos proveedores solo emiten para la app que indican (VLC, por ejemplo). Vacío: el de Pley.</string>
-    <plurals name="admin_livetv_source_found">
-        <item quantity="one">Se encontró %1$s en %2$s</item>
-        <item quantity="many">Se encontraron %1$s en %2$s</item>
-        <item quantity="other">Se encontraron %1$s en %2$s</item>
-    </plurals>
-    <plurals name="admin_livetv_source_found_channels">
-        <item quantity="one">%1$,d canal</item>
-        <item quantity="many">%1$,d canales</item>
-        <item quantity="other">%1$,d canales</item>
-    </plurals>
-    <plurals name="admin_livetv_source_found_groups">
-        <item quantity="one">%1$,d grupo</item>
-        <item quantity="many">%1$,d grupos</item>
-        <item quantity="other">%1$,d grupos</item>
-    </plurals>
-    <string name="admin_livetv_source_guide_found">Guía: %1$s</string>
-    <string name="admin_livetv_source_no_guide">Sin guía: añade la dirección de una para ver qué hay en emisión.</string>
-
-    <string name="admin_livetv_options_who">Quién puede ver</string>
-    <string name="admin_livetv_options_who_hint">TV en vivo aparece en las apps de las cuentas a las que está abierta.</string>
-    <string name="admin_livetv_options_open_to">Abierta a</string>
-    <string name="admin_livetv_options_everyone">Todos</string>
-    <string name="admin_livetv_options_home_users">Usuarios de Hogar</string>
-    <string name="admin_livetv_options_admins_only">Solo administradores</string>
-    <string name="admin_livetv_options_home_note">El hogar: las cuentas de Hogar, no los amigos a los que diste acceso.</string>
-    <string name="admin_livetv_options_age_limited">Los perfiles con límite de edad ven TV en vivo</string>
-    <string name="admin_livetv_options_age_limited_hint">Los canales no tienen clasificación por edades, así que el límite no puede aplicarse a ellos.</string>
-    <string name="admin_livetv_options_people">Personas</string>
-    <string name="admin_livetv_options_people_hint">Una persona puede ver diga lo que diga “Abierta a”, o nunca. Los administradores siempre pueden.</string>
-    <string name="admin_livetv_options_not_in_home">no está en Hogar</string>
-    <string name="admin_livetv_options_person_access">TV en vivo para %1$s</string>
-    <string name="admin_livetv_options_as_open_to">Según “Abierta a”</string>
-    <string name="admin_livetv_options_always">Siempre</string>
-    <string name="admin_livetv_options_never">Nunca</string>
-    <string name="admin_livetv_options_playing">Reproducción</string>
-    <string name="admin_livetv_options_playing_hint">Todos los que ven un canal reciben la misma transmisión, creada una sola vez por el transcodificador.</string>
-    <string name="admin_livetv_options_deinterlace">Desentrelazar</string>
-    <string name="admin_livetv_options_deinterlace_hint">Los canales entrelazados (1080i, 576i) se ven fluidos y progresivos: es una transcodificación, en la tarjeta gráfica si el transcodificador tiene una.</string>
-    <string name="admin_livetv_options_transcoded">Canales transcodificados</string>
-    <string name="admin_livetv_options_as_sent">Como lo envía el canal</string>
-    <string name="admin_livetv_options_h264_note">Los canales H.264 se envían tal cual, sea cual sea su tamaño.</string>
-    <string name="admin_livetv_options_channels_and_guide">Canales y guía</string>
-    <string name="admin_livetv_options_read_every">Actualizar cada</string>
-    <plurals name="admin_livetv_options_every_hours">
-        <item quantity="one">%1$d hora</item>
-        <item quantity="many">%1$d horas</item>
-        <item quantity="other">%1$d horas</item>
-    </plurals>
-    <string name="admin_livetv_options_every_day">día</string>
-    <string name="admin_livetv_options_every_two_days">2 días</string>
-    <string name="admin_livetv_options_every_week">semana</string>
-    <string name="admin_livetv_options_hide_offline">Excluir los canales que no funcionan</string>
-    <string name="admin_livetv_options_hide_offline_hint">Un canal para el que el proveedor no envía nada, y las filas separadoras como “##### UK #####”. Los canales sin conexión se vuelven a probar de vez en cuando, mientras nadie ve nada.</string>
-    <string name="admin_livetv_options_guide_days">Guía por adelantado</string>
-    <plurals name="admin_livetv_options_days">
-        <item quantity="one">%1$d día</item>
-        <item quantity="many">%1$d días</item>
-        <item quantity="other">%1$d días</item>
-    </plurals>
+    <string name="admin_livetv_sources_none_body">Añade la lista M3U o la cuenta Xtream Codes de tu proveedor en la aplicación web de Pley, en Ajustes → TV en vivo. Sus canales aparecen luego aquí.</string>
+    <string name="admin_livetv_sources_web">Las fuentes, y quién puede ver, se configuran en la aplicación web de Pley.</string>
 
     <string name="admin_livetv_groups_none_title">Aún no hay grupos</string>
     <string name="admin_livetv_groups_none_body">Los grupos aparecen aquí cuando se haya cargado una fuente.</string>
@@ -256,8 +111,6 @@
     </plurals>
     <string name="admin_livetv_lineup_hint">Nadie puede ver los canales ocultos; los nombres y números que pongas aquí se mantienen cuando se actualiza la fuente. Los grupos enteros se ocultan en Grupos.</string>
     <string name="admin_livetv_lineup_find">Buscar un canal</string>
-    <string name="admin_livetv_lineup_source">Fuente</string>
-    <string name="admin_livetv_lineup_every_source">Todas las fuentes</string>
     <string name="admin_livetv_lineup_group">Grupo</string>
     <string name="admin_livetv_lineup_every_group">Todos los grupos</string>
     <string name="admin_livetv_lineup_which">Filtro</string>

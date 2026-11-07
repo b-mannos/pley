@@ -28,7 +28,8 @@ import app.pley.android.ui.phone.shell.LocalPhoneShell
 
 /**
  * Manage server (docs/ANDROID.md, "Managing the server"): the parts of
- * Settings in the web app, in its order, each opening its page. An
+ * Settings in the web app a phone has, in its order, each opening its page,
+ * and a line saying where the others are. An
  * administrator signed in before the app could manage the server is asked
  * to sign in again; anyone else is told only administrators can.
  */
@@ -45,7 +46,8 @@ internal fun ManageServerScreen() {
             AdminAccess.Manages -> AdminColumn(list) {
                 for ((n, group) in GROUPS.withIndex()) {
                     item(key = n) {
-                        SettingsGroup(null, Modifier.adminWidth) {
+                        val footer = if (n == GROUPS.lastIndex) stringResource(R.string.admin_web_only) else null
+                        SettingsGroup(null, Modifier.adminWidth, footer = footer) {
                             for ((i, section) in group.withIndex()) {
                                 if (i > 0) RowDivider()
                                 SettingsRow(
@@ -75,12 +77,11 @@ internal fun ManageServerScreen() {
     }
 }
 
-/** The parts, grouped as people look for them: what goes on, what is shared and with whom, how the server runs. */
+/** The parts, grouped as people look for them: what goes on, what is shared, and with whom. */
 private val GROUPS = listOf(
     listOf(AdminSection.Dashboard),
     listOf(AdminSection.Libraries, AdminSection.LiveTv),
-    listOf(AdminSection.Users, AdminSection.Invitations, AdminSection.Requests),
-    listOf(AdminSection.Server, AdminSection.Transcoder, AdminSection.Network),
+    listOf(AdminSection.Users, AdminSection.Invitations),
 )
 
 /** A part's name, as the web's Settings names it. */
@@ -90,10 +91,6 @@ internal fun titleOf(section: AdminSection): Int = when (section) {
     AdminSection.LiveTv -> R.string.admin_section_livetv
     AdminSection.Users -> R.string.admin_section_users
     AdminSection.Invitations -> R.string.admin_section_invitations
-    AdminSection.Requests -> R.string.admin_section_requests
-    AdminSection.Server -> R.string.admin_section_server
-    AdminSection.Transcoder -> R.string.admin_section_transcoder
-    AdminSection.Network -> R.string.admin_section_network
 }
 
 private fun valueOf(section: AdminSection): Int = when (section) {
@@ -102,10 +99,6 @@ private fun valueOf(section: AdminSection): Int = when (section) {
     AdminSection.LiveTv -> R.string.admin_section_livetv_value
     AdminSection.Users -> R.string.admin_section_users_value
     AdminSection.Invitations -> R.string.admin_section_invitations_value
-    AdminSection.Requests -> R.string.admin_section_requests_value
-    AdminSection.Server -> R.string.admin_section_server_value
-    AdminSection.Transcoder -> R.string.admin_section_transcoder_value
-    AdminSection.Network -> R.string.admin_section_network_value
 }
 
 /** A part's icon, as the web's Settings shows it. */
@@ -115,10 +108,6 @@ internal fun iconOf(section: AdminSection): PleyIcon = when (section) {
     AdminSection.LiveTv -> PleyIcons.Tv
     AdminSection.Users -> PleyIcons.Users
     AdminSection.Invitations -> PleyIcons.MailPlus
-    AdminSection.Requests -> PleyIcons.Compass
-    AdminSection.Server -> PleyIcons.Server
-    AdminSection.Transcoder -> PleyIcons.Cpu
-    AdminSection.Network -> PleyIcons.Wifi
 }
 
 internal fun sectionTag(section: AdminSection): String = "pley.admin.section.${section.name.lowercase()}"

@@ -97,7 +97,7 @@ import app.pley.android.ui.phone.theme.LocalPhoneMetrics
  * The dashboard (the web's Settings → Dashboard), one page: what plays now
  * (with Stop), the machine's load, everyone's plays, the transcoder's jobs,
  * the libraries' scans and work, the server and its transcoder, and the
- * storage with its backups. What changes is read again on the web's timers
+ * storage. What changes is read again on the web's timers
  * while the page is on screen, and not at all while it isn't. [id]: none,
  * the dashboard has no page of its own for a thing.
  */
@@ -117,7 +117,6 @@ internal fun DashboardScreen(id: String?) {
                 val count = done.args[0] as Int
                 resources.getQuantityString(R.plurals.admin_dashboard_removed, count, number(count.toLong(), words.locale), formatBytes(done.args[1] as Long, words))
             }
-            DashboardViewModel.BACKED_UP -> resources.getString(R.string.admin_dashboard_backed_up, formatBytes(done.args[0] as Long, words))
             else -> null
         }
     }
@@ -132,7 +131,6 @@ internal fun DashboardScreen(id: String?) {
     val usage by model.resources.collectAsStateWithLifecycle()
     val system by model.system.state.collectAsStateWithLifecycle()
     val storage by model.storage.state.collectAsStateWithLifecycle()
-    val backups by model.backups.state.collectAsStateWithLifecycle()
     val historyLoad by model.history.state.collectAsStateWithLifecycle()
     val plays by model.plays.collectAsStateWithLifecycle()
     val loadingMore by model.loadingMore.collectAsStateWithLifecycle()
@@ -169,7 +167,7 @@ internal fun DashboardScreen(id: String?) {
             transcoderLive(transcoder)
             libraryWork(activity.valueOrNull)
             systemInfo(system, onRetry = model.system::reload)
-            storage(storage, backups, busy = busy > 0, onClean = { cleaning = true }, onBackUp = model::backUp)
+            storage(storage, system.valueOrNull?.database, busy = busy > 0, onClean = { cleaning = true })
         }
     }
 

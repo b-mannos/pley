@@ -13,8 +13,6 @@ import app.pley.android.model.admin.DashboardResources
 import app.pley.android.model.admin.DashboardSession
 import app.pley.android.model.admin.DashboardSystem
 import app.pley.android.model.admin.DashboardTranscoderStatus
-import app.pley.android.model.admin.DatabaseBackup
-import app.pley.android.model.admin.DatabaseBackups
 import app.pley.android.model.admin.StorageCleanReport
 import app.pley.android.model.admin.StorageUsage
 import app.pley.android.network.AdminApi
@@ -60,10 +58,10 @@ data class DashboardHistory(val plays: List<DashboardPlay>, val total: Int) {
  * The dashboard (the web's Settings → Dashboard): what plays and the
  * libraries' work, the machine's load and the transcoder's jobs, read
  * again on the web's timers while the page shows ([keepFresh]); the
- * server, its storage and backups, and everyone's plays, read when it
- * opens. An administrator stops someone's playback (with a message for
- * their screen), removes a play, cleans up storage and backs the database
- * up.
+ * server, its storage and everyone's plays, read when it opens. An
+ * administrator stops someone's playback (with a message for their
+ * screen), removes a play and cleans up storage. Backups stay in the web
+ * app, whose routes for them apps can't reach.
  */
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class DashboardViewModel(
@@ -77,7 +75,6 @@ class DashboardViewModel(
 
     val system = resource { get(DashboardSystem.serializer(), SYSTEM) }
     val storage = resource { get(StorageUsage.serializer(), STORAGE) }
-    val backups = resource { get(DatabaseBackups.serializer(), BACKUPS) }
     val history = resource { get(HistoryPage.serializer(), HISTORY, historyQuery(0)) }
 
     private val activityNow = MutableStateFlow<AdminLoad<DashboardActivity>>(AdminLoad.Loading)
@@ -217,12 +214,6 @@ class DashboardViewModel(
         )
     }
 
-    /** Backs the database up now; [results] says its size. */
-    fun backUp() = change(after = backups::reload) {
-        val backup = send("POST", DatabaseBackup.serializer(), BACKUPS)
-        reports.send(AdminDone(BACKED_UP, listOf(backup.bytes)))
-    }
-
     companion object {
         /** A session stopped. */
         const val STOPPED = "stopped"
@@ -232,9 +223,6 @@ class DashboardViewModel(
 
         /** Storage cleaned up, with nothing to remove. */
         const val NOTHING_TO_CLEAN = "nothing_to_clean"
-
-        /** The database backed up: the backup's bytes (a Long). */
-        const val BACKED_UP = "backed_up"
 
         /** The web's timers. */
         const val ACTIVITY_MS = 5_000L
@@ -252,7 +240,6 @@ class DashboardViewModel(
         private val RESOURCES = listOf("api", "system", "resources")
         private val STORAGE = listOf("api", "system", "storage")
         private val CLEAN = listOf("api", "system", "storage", "clean")
-        private val BACKUPS = listOf("api", "system", "backups")
         private val TRANSCODER = listOf("api", "transcoder")
         private val HISTORY = listOf("api", "history")
 

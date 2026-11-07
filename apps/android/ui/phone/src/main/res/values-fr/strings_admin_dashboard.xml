@@ -185,8 +185,4 @@
     </plurals>
     <string name="admin_dashboard_cache">Cache</string>
     <string name="admin_dashboard_safe_to_delete">peut être supprimé sans risque</string>
-    <string name="admin_dashboard_backups">Sauvegardes de la base de données</string>
-    <string name="admin_dashboard_back_up_now">Sauvegarder maintenant</string>
-    <string name="admin_dashboard_backed_up">Sauvegarde effectuée (%1$s)</string>
-    <string name="admin_dashboard_no_backups">Aucune sauvegarde pour l’instant.</string>
 </resources>

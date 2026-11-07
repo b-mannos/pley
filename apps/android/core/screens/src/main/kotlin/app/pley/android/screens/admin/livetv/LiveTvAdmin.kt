@@ -1,26 +1,19 @@
 package app.pley.android.screens.admin.livetv
 
 import app.pley.android.model.admin.LineupGroup
-import app.pley.android.model.admin.LiveSourceAccount
 import app.pley.android.screens.PleyKey
-import java.net.URI
-import kotlin.math.ceil
 
 /**
- * The pages of Live TV's administration, as the web's tabs and dialogs
- * (apps/web/src/pages/settings/LiveTvSettings.tsx): its first page (the
- * sources and what is being watched), the options, the groups, the
- * channels, and a source's page. [id] is what [PleyKey.Manage.id] carries.
+ * The pages of Live TV's administration, as the web's tabs
+ * (apps/web/src/pages/settings/LiveTvSettings.tsx): its first page (what
+ * is being watched), the groups and the channels. Its options and sources
+ * stay in the web app. [id] is what [PleyKey.Manage.id] carries.
  */
 sealed interface LiveTvAdminPage {
     val id: String?
 
     data object Front : LiveTvAdminPage {
         override val id: String? = null
-    }
-
-    data object Options : LiveTvAdminPage {
-        override val id: String = "options"
     }
 
     data object Groups : LiveTvAdminPage {
@@ -31,34 +24,15 @@ sealed interface LiveTvAdminPage {
         override val id: String = "channels"
     }
 
-    /** A source's page; [sourceId] `null`: adding one. */
-    data class Source(val sourceId: Long?) : LiveTvAdminPage {
-        override val id: String = "source:" + (sourceId?.toString() ?: PleyKey.Manage.NEW)
-    }
-
     companion object {
         /** The page [id] names; the first page for what names none. */
         fun of(id: String?): LiveTvAdminPage = when {
             id == null -> Front
-            id == Options.id -> Options
             id == Groups.id -> Groups
             id == Channels.id -> Channels
-            id == "source:" + PleyKey.Manage.NEW -> Source(null)
-            id.startsWith("source:") -> id.removePrefix("source:").toLongOrNull()?.let(::Source) ?: Front
             else -> Front
         }
     }
-}
-
-/** The name a source gets when none is typed: its address's host, as the web's. */
-fun defaultSourceName(url: String): String =
-    runCatching { URI(url.trim()).host }.getOrNull().orEmpty()
-
-/** Days left before an account runs out, when that's soon (two weeks); `null` otherwise. */
-fun expiresSoon(account: LiveSourceAccount?, nowSeconds: Long = System.currentTimeMillis() / 1000): Int? {
-    val expires = account?.expiresAt ?: return null
-    val days = ceil((expires - nowSeconds) / 86_400.0).toInt()
-    return days.takeIf { it <= 14 }
 }
 
 /** A run of the groups list: a region's groups together, or a group of no region (or a region of one) alone. */
@@ -120,18 +94,3 @@ fun encoderName(encoder: String): String? = when (encoder) {
     "h264_videotoolbox" -> "VideoToolbox"
     else -> encoder
 }
-
-/** How often channels and guides are read again, in hours, as the web offers it; [current] too when it is another. */
-fun refreshChoices(current: Int): List<Int> = withCurrent(listOf(3, 6, 12, 24, 48, 168), current)
-
-/** How many days of guide are kept ahead, as the web offers it; [current] too when it is another. */
-fun guideDayChoices(current: Int): List<Int> = withCurrent(listOf(1, 2, 3, 5, 7, 10, 14), current)
-
-/** The most lines a transcoded channel has (`null`: as sent), as the web offers it; [current] too when it is another. */
-fun heightChoices(current: Int?): List<Int?> {
-    val heights = listOf<Int?>(null, 1080, 720, 480)
-    return if (current in heights) heights else (heights + current).sortedByDescending { it ?: Int.MAX_VALUE }
-}
-
-private fun withCurrent(choices: List<Int>, current: Int): List<Int> =
-    if (current in choices) choices else (choices + current).sorted()

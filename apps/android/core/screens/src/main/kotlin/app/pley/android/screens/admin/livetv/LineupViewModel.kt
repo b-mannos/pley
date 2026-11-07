@@ -55,7 +55,6 @@ const val LINEUP_PAGE = 100
 
 /** GET /api/live/lineup/page's query for page [page] of what [filter] keeps. */
 fun lineupQuery(filter: LineupFilter, page: Int, limit: Int = LINEUP_PAGE): List<Pair<String, String?>> = listOf(
-    "source_id" to filter.sourceId?.toString(),
     "group" to filter.group,
     "state" to filter.state.wire,
     "q" to filter.q?.trim()?.ifEmpty { null },
@@ -65,7 +64,7 @@ fun lineupQuery(filter: LineupFilter, page: Int, limit: Int = LINEUP_PAGE): List
 
 /**
  * Live TV's Channels, as the web's tab: the lineup, hidden channels too,
- * filtered on the server (source, group, state, a name or a number's
+ * filtered on the server (group, state, a name or a number's
  * beginning) and read a page at a time as it scrolls ([visible]), so a
  * lineup of tens of thousands opens at once. Channels are hidden and
  * shown one at a time, chosen, or every one the filter keeps; a channel's
@@ -76,8 +75,7 @@ class LineupViewModel(admin: ServerAdmin, val origin: String) : AdminViewModel(a
     /** The whole lineup's counts, whatever the filter: what the page's line says. */
     val summary = resource { page(LineupFilter(), 0, limit = 1) }
 
-    /** The sources and groups the filter offers. */
-    val sources = resource { liveSources() }
+    /** The groups the filter offers. */
     val groups = resource { get(ListSerializer(LineupGroup.serializer()), listOf("api", "live", "lineup", "groups")) }
 
     private val listNow = MutableStateFlow(LineupList())
@@ -115,8 +113,6 @@ class LineupViewModel(admin: ServerAdmin, val origin: String) : AdminViewModel(a
     fun find(query: String) {
         typed.value = query
     }
-
-    fun setSource(id: Long?) = filter(listNow.value.filter.copy(sourceId = id))
 
     fun setGroup(name: String?) = filter(listNow.value.filter.copy(group = name))
 

@@ -24,7 +24,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -36,12 +35,10 @@ import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcon
 import app.pley.android.designsystem.text.shownLocale
 import app.pley.android.model.LivePlan
-import app.pley.android.model.admin.LiveSourceAccount
 import app.pley.android.screens.admin.AdminDone
 import app.pley.android.screens.admin.AdminLoad
 import app.pley.android.screens.admin.livetv.LineupGroupsViewModel
 import app.pley.android.screens.admin.livetv.LineupViewModel
-import app.pley.android.screens.admin.livetv.LiveSourceViewModel
 import app.pley.android.screens.admin.livetv.LiveTvAdminViewModel
 import app.pley.android.screens.admin.livetv.codecName
 import app.pley.android.screens.admin.livetv.encoderName
@@ -52,15 +49,13 @@ import app.pley.android.ui.phone.kit.ErrorState
 import app.pley.android.ui.phone.kit.PleyTopAppBar
 import app.pley.android.ui.phone.shell.LocalPhoneNavigator
 import app.pley.android.ui.phone.theme.LocalPhoneMetrics
-import java.text.DateFormat
 import java.text.NumberFormat
-import java.util.Date
 
 /*
  * The pieces Live TV's pages share: reading again while a page shows, the
  * rows that say something rather than open it, and the lines the web's
- * livetv/common.ts writes (an Xtream account, what the transcoder makes of
- * a channel, a rate, how long a channel has been pulled).
+ * livetv/common.ts writes (what the transcoder makes of a channel, a rate,
+ * how long a channel has been pulled).
  */
 
 /** Runs [block] while the page is on screen, and stops it when it isn't, as the web reads only what it shows. */
@@ -166,21 +161,6 @@ internal fun PageLine(text: String, modifier: Modifier = Modifier) {
     )
 }
 
-/** "Active · expires 12 Mar 2027 · 2 connections": an Xtream account as the provider says it. */
-@Composable
-internal fun accountLine(account: LiveSourceAccount, nowSeconds: Long = System.currentTimeMillis() / 1000): String {
-    val status = if (account.trial) stringResource(R.string.admin_livetv_account_trial, account.status) else account.status
-    val expires = account.expiresAt
-    val expiry = if (expires != null) {
-        val date = DateFormat.getDateInstance(DateFormat.MEDIUM, shownLocale()).format(Date(expires * 1000))
-        stringResource(if (expires < nowSeconds) R.string.admin_livetv_account_expired else R.string.admin_livetv_account_expires, date)
-    } else {
-        stringResource(R.string.admin_livetv_account_no_expiry)
-    }
-    val connections = account.maxConnections?.let { pluralStringResource(R.plurals.admin_livetv_account_connections, it, it) }
-    return listOfNotNull(status, expiry, connections).joinToString(" · ")
-}
-
 /** What the transcoder makes of a channel: "1080i MPEG-2 → H.264 on NVIDIA, deinterlaced · MP2 → AAC". */
 @Composable
 internal fun planLine(plan: LivePlan): String {
@@ -233,9 +213,6 @@ internal fun liveTvSaid(): (AdminDone) -> String? {
         val arg = done.args.firstOrNull()
         when (done.what) {
             LiveTvAdminViewModel.STOPPED -> resources.getString(R.string.admin_livetv_tuner_stopped, arg)
-            LiveSourceViewModel.ADDED -> resources.getString(R.string.admin_livetv_source_added)
-            LiveSourceViewModel.SAVED -> resources.getString(R.string.admin_livetv_source_saved)
-            LiveSourceViewModel.REMOVED -> resources.getString(R.string.admin_livetv_source_removed, arg)
             LineupGroupsViewModel.REGION_HIDDEN -> resources.getString(R.string.admin_livetv_groups_region_hidden, arg)
             LineupGroupsViewModel.REGION_SHOWN -> resources.getString(R.string.admin_livetv_groups_region_shown, arg)
             LineupGroupsViewModel.GROUP_HIDDEN -> resources.getString(R.string.admin_livetv_groups_group_hidden, arg)

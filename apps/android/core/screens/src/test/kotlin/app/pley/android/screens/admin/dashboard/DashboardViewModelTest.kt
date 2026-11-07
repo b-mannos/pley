@@ -41,9 +41,8 @@ class DashboardViewModelTest {
     @get:Rule val main = MainDispatcherRule()
 
     private fun server() = FakeServerAdmin().apply {
-        answer("GET /api/system", """{ "name": "Home", "version": "0.1.6", "os": "linux", "arch": "x86_64", "uptime_secs": 60, "data_dir": "/data" }""")
+        answer("GET /api/system", """{ "name": "Home", "version": "0.1.6", "os": "linux", "arch": "x86_64", "uptime_secs": 60, "data_dir": "/data", "database": { "ok": true, "checked_at": 1 } }""")
         answer("GET /api/system/storage", """{ "blobs": 1, "blob_bytes": 10, "media_folders": 0, "media_bytes": 0, "cache_bytes": 0 }""")
-        answer("GET /api/system/backups", """{ "health": { "ok": true, "checked_at": 1 }, "backups": [] }""")
         answer("GET /api/history", history(total = 3, 1, 2))
         answer("GET /api/activity", activity("s1", "s2"))
         answer("GET /api/transcoder", """{ "available": true, "max_jobs": 4, "running_processes": 0, "hw_processes": 0, "max_hw_jobs": 0, "work_dir_bytes": 0, "counters": {}, "jobs": [] }""")
@@ -54,12 +53,12 @@ class DashboardViewModelTest {
         DashboardViewModel(server, flowOf("http://nas:7539"), nowSeconds = { 1_700_000_000 }, compute = main.dispatcher)
 
     @Test
-    fun itReadsTheServerItsStorageBackupsAndEveryonesPlaysWhenItOpens() = runTest {
+    fun itReadsTheServerItsStorageAndEveryonesPlaysWhenItOpens() = runTest {
         val server = server()
         val page = model(server)
         assertEquals("Home", page.system.state.value.valueOrNull?.name)
         assertEquals(10L, page.storage.state.value.valueOrNull?.blobBytes)
-        assertEquals(true, page.backups.state.value.valueOrNull?.health?.ok)
+        assertEquals(true, page.system.state.value.valueOrNull?.database?.ok)
         assertEquals(listOf(1L, 2L), page.history.state.value.valueOrNull?.entries?.map { it.id })
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { page.plays.collect {} }
         val plays = page.plays.value!!
@@ -200,18 +199,6 @@ class DashboardViewModelTest {
         server.answer("POST /api/system/storage/clean", """{ "blobs_removed": 0, "media_folders_removed": 0, "bytes_freed": 0 }""")
         page.cleanUp().join()
         assertEquals(AdminDone(DashboardViewModel.NOTHING_TO_CLEAN), results.last())
-    }
-
-    @Test
-    fun backingUpSaysItsSizeAndReadsTheBackupsAgain() = runTest {
-        val server = server()
-        server.answer("POST /api/system/backups", """{ "name": "pley-1.db", "path": "/data/backups/pley-1.db", "bytes": 2048, "created_at": 1 }""")
-        val page = model(server)
-        val results = mutableListOf<AdminDone>()
-        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { page.results.collect { results += it } }
-        page.backUp().join()
-        assertEquals(listOf(AdminDone(DashboardViewModel.BACKED_UP, listOf<Any>(2048L))), results)
-        assertEquals(2, server.callsTo("GET /api/system/backups").size)
     }
 
     @Test

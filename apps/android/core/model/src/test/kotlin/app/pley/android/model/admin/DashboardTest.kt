@@ -126,7 +126,7 @@ class DashboardTest {
     }
 
     @Test
-    fun resourcesStorageAndBackupsRead() {
+    fun resourcesStorageAndTheDatabasesHealthRead() {
         val resources = PleyJson.decodeFromString(
             DashboardResources.serializer(),
             """{ "available": true, "interval_ms": 2000, "cpus": 8, "memory_total": 17179869184,
@@ -148,15 +148,13 @@ class DashboardTest {
         )
         assertEquals(StorageCleanReport(2, 1, 3000), report)
 
-        val backups = PleyJson.decodeFromString(
-            DatabaseBackups.serializer(),
-            """{ "health": { "ok": false, "problem": "page 4 is damaged", "checked_at": 1700000000 },
-                 "backups": [{ "name": "pley-2026-11-06.db", "path": "/data/backups/pley-2026-11-06.db", "bytes": 1024, "created_at": 1700000000 }] }""",
+        val damaged = PleyJson.decodeFromString(
+            DashboardSystem.serializer(),
+            """{ "name": "Home", "database": { "ok": false, "problem": "page 4 is damaged", "checked_at": 1700000000 } }""",
         )
-        assertEquals(false, backups.health.ok)
-        assertEquals("page 4 is damaged", backups.health.problem)
-        assertEquals("pley-2026-11-06.db", backups.backups.single().name)
+        assertEquals(false, damaged.database.ok)
+        assertEquals("page 4 is damaged", damaged.database.problem)
         // Not checked yet.
-        assertNull(PleyJson.decodeFromString(DatabaseBackups.serializer(), """{ "health": { "ok": null, "checked_at": null }, "backups": [] }""").health.ok)
+        assertNull(PleyJson.decodeFromString(DashboardSystem.serializer(), """{ "database": { "ok": null, "checked_at": null } }""").database.ok)
     }
 }

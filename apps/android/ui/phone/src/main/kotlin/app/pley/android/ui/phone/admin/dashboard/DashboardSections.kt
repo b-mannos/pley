@@ -5,14 +5,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -43,21 +41,18 @@ import app.pley.android.model.admin.DashboardSystem
 import app.pley.android.model.admin.DashboardTranscoderInfo
 import app.pley.android.model.admin.DashboardTranscoderJob
 import app.pley.android.model.admin.DashboardTranscoderStatus
-import app.pley.android.model.admin.DatabaseBackups
+import app.pley.android.model.admin.DatabaseHealth
 import app.pley.android.model.admin.StorageUsage
 import app.pley.android.model.format.formatBytes
-import app.pley.android.model.format.formatRelative
 import app.pley.android.model.format.formatTimestamp
 import app.pley.android.model.format.formatUptime
 import app.pley.android.screens.admin.AdminLoad
-import app.pley.android.screens.admin.valueOrNull
 import app.pley.android.screens.admin.dashboard.oneDecimal
 import app.pley.android.screens.admin.dashboard.versionLabel
 import app.pley.android.ui.phone.R
 import app.pley.android.ui.phone.admin.adminWidth
 import app.pley.android.ui.phone.kit.ErrorState
 import app.pley.android.ui.phone.kit.PleyTextButton
-import app.pley.android.ui.phone.kit.TonalButton
 
 /*
  * The dashboard's sections below what plays and everyone's plays: the
@@ -400,20 +395,21 @@ private fun TranscoderCard(tc: DashboardTranscoderInfo) {
     }
 }
 
-/** The space Pley's stores take, the database's health and its backups, as the web's StorageSection. */
+/**
+ * The space Pley's stores take and the database's health, as the web's
+ * StorageSection; its backups stay in the web app.
+ */
 internal fun LazyListScope.storage(
     usage: AdminLoad<StorageUsage>,
-    backups: AdminLoad<DatabaseBackups>,
+    health: DatabaseHealth?,
     busy: Boolean,
     onClean: () -> Unit,
-    onBackUp: () -> Unit,
 ) {
     item(key = "storage", contentType = "heading") {
         SectionHeading(stringResource(R.string.admin_dashboard_storage), PleyIcons.HardDrive) {
             PleyTextButton(stringResource(R.string.admin_dashboard_clean_up), onClick = onClean, enabled = !busy)
         }
     }
-    val health = backups.valueOrNull?.health
     if (health?.ok == false) {
         item(key = "storage.damaged", contentType = "card") {
             Row(
@@ -445,7 +441,6 @@ internal fun LazyListScope.storage(
             is AdminLoad.Ready -> UsageCard(usage.value)
         }
     }
-    item(key = "storage.backups", contentType = "card") { BackupsCard(backups, busy, onBackUp) }
 }
 
 @Composable
@@ -463,46 +458,6 @@ private fun UsageCard(usage: StorageUsage) {
             pluralStringResource(R.plurals.admin_dashboard_previews_of, usage.mediaFolders, number(usage.mediaFolders.toLong(), words.locale)),
         )
         InfoLine(stringResource(R.string.admin_dashboard_cache), formatBytes(usage.cacheBytes, words), stringResource(R.string.admin_dashboard_safe_to_delete))
-    }
-}
-
-@Composable
-private fun BackupsCard(load: AdminLoad<DatabaseBackups>, busy: Boolean, onBackUp: () -> Unit) {
-    val words = formatWords()
-    DashboardCard(Modifier.padding(top = 8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(PleyIcons.DatabaseBackup, contentDescription = null, size = 18.dp, tint = PleyColors.Accent)
-            Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.admin_dashboard_backups), style = MaterialTheme.typography.titleSmall, color = PleyColors.Fg, modifier = Modifier.weight(1f))
-            TonalButton(stringResource(R.string.admin_dashboard_back_up_now), onClick = onBackUp, enabled = !busy)
-        }
-        val list = load.valueOrNull?.backups
-        Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-            when {
-                list == null && load is AdminLoad.Failed -> Text(errorSentence(load.error).asString(), style = MaterialTheme.typography.bodyMedium, color = PleyColors.DangerText)
-                list == null -> Loading()
-                list.isEmpty() -> Text(stringResource(R.string.admin_dashboard_no_backups), style = MaterialTheme.typography.bodyMedium, color = PleyColors.Subtle)
-                else -> list.forEachIndexed { n, backup ->
-                    if (n > 0) HorizontalDivider(thickness = 1.dp, color = PleyColors.Surface4)
-                    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            backup.name,
-                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                            color = PleyColors.Fg,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Text(
-                            formatBytes(backup.bytes, words) + " · " + formatRelative(backup.createdAt, System.currentTimeMillis() / 1000, words),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = PleyColors.Muted,
-                        )
-                    }
-                }
-            }
-        }
     }
 }
 

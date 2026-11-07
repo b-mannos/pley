@@ -11,10 +11,6 @@ import app.pley.android.ui.phone.admin.dashboard.DashboardScreen
 import app.pley.android.ui.phone.admin.invitations.InvitationsScreen
 import app.pley.android.ui.phone.admin.libraries.LibrariesScreen
 import app.pley.android.ui.phone.admin.livetv.LiveTvAdminScreen
-import app.pley.android.ui.phone.admin.network.NetworkScreen
-import app.pley.android.ui.phone.admin.requests.RequestsAdminScreen
-import app.pley.android.ui.phone.admin.server.ServerScreen
-import app.pley.android.ui.phone.admin.transcoder.TranscoderScreen
 import app.pley.android.ui.phone.admin.users.UsersScreen
 import app.pley.android.ui.phone.shell.Placeholder
 
@@ -36,10 +32,6 @@ private fun SectionScreen(key: PleyKey.Manage) {
         AdminSection.LiveTv -> LiveTvAdminScreen(key.id)
         AdminSection.Users -> UsersScreen(key.id)
         AdminSection.Invitations -> InvitationsScreen(key.id)
-        AdminSection.Requests -> RequestsAdminScreen(key.id)
-        AdminSection.Server -> ServerScreen(key.id)
-        AdminSection.Transcoder -> TranscoderScreen(key.id)
-        AdminSection.Network -> NetworkScreen(key.id)
     }
 }
 
