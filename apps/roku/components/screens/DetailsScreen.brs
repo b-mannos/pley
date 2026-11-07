@@ -2,7 +2,6 @@ sub init()
     m.backdrop = m.top.findNode("backdrop")
     m.shade = m.top.findNode("shade")
     m.page = m.top.findNode("page")
-    m.poster = m.top.findNode("poster")
     m.column = m.top.findNode("column")
     m.text = m.top.findNode("text")
     m.heading = m.top.findNode("heading")
@@ -94,7 +93,10 @@ sub init()
     ' one.
     m.area = "hero"
     m.infoShown = invalid
-    m.buttons.observeField("buttonSelected", "onButton")
+    ' The buttons' chips as last drawn (FormatJson), so they are made
+    ' again only when they change.
+    m.chipsDrawn = ""
+    m.buttons.observeField("chosen", "onButton")
     m.messageButton.observeField("buttonSelected", "onMessageButton")
     m.menu.observeField("itemSelected", "onMenu")
     m.choices.observeField("itemSelected", "onChoice")
@@ -242,27 +244,17 @@ sub showDetail()
     typeSet(m.left, m.detail.left)
     typeSet(m.genres, m.detail.genres)
     typeSet(m.credits, m.detail.credits)
-    fitSummary()
     typeSet(m.note, m.detail.note)
+    fitSummary()
     layoutText()
-    agent = m.top.getScene().getHttpAgent()
     if m.backdrop.uri <> m.detail.backdrop
-        m.backdrop.setHttpAgent(agent)
+        m.backdrop.setHttpAgent(m.top.getScene().getHttpAgent())
         m.backdrop.uri = m.detail.backdrop
-    end if
-    if m.poster.uri <> m.detail.poster
-        m.poster.setHttpAgent(agent)
-        m.poster.uri = m.detail.poster
     end if
     ' A show's or a season's buttons wait for its next episode, which comes
     ' first.
     hasButtons = m.detail.buttons.Count() > 0 and ((m.detail.kind <> "show" and m.detail.kind <> "season") or m.onDeckKnown)
-    if hasButtons
-        focused = m.buttons.buttonFocused
-        if not m.buttons.visible then focused = m.detail.focus
-        if FormatJson(m.buttons.buttons) <> FormatJson(m.detail.buttons) then m.buttons.buttons = m.detail.buttons
-        if focused > 0 and focused < m.detail.buttons.Count() then m.buttons.focusButton = focused
-    end if
+    if hasButtons then drawButtons()
     m.buttons.visible = hasButtons
     m.column.visible = true
     placeLower()
@@ -278,41 +270,79 @@ sub showDetail()
     if m.top.isInFocusChain() and m.area = "hero" and not m.panel.visible then focusArea("hero")
 end sub
 
-' The column ends above the top of what is under it: past six buttons each
-' takes a line from the summary (four at most), and so do the context
-' line, the time left and the credits; the tagline gives its room up once
-' the summary would keep fewer than two lines. That is for a heading of
-' two lines: one of a line gives one back. More's Details has the whole
-' summary.
-sub fitSummary()
-    room = 4
-    count = m.detail.buttons.Count()
-    if count > 6 then room = room - (count - 6)
-    for each part in [m.detail.context, m.detail.left, m.detail.credits]
-        if part <> "" then room = room - 1
+' The buttons as Android TV draws them (contentDetailLooks), made again
+' only when they change. The focus starts on the one the details say, and
+' stays where it was as they change (a title marked watched).
+sub drawButtons()
+    looks = contentDetailLooks(m.detail.actions)
+    chips = []
+    for i = 0 to m.detail.buttons.Count() - 1
+        chips.Push({ label: m.detail.buttons[i], width: 0, icon: looks[i].icon, round: looks[i].round, disabled: looks[i].disabled })
     end for
-    if m.heading.boundingRect().height < 100 then room = room + 1
-    tagline = m.detail.tagline
-    if tagline <> "" and room < 2
-        tagline = ""
-        room = room + 1
+    focused = m.buttons.focusIndex
+    if not m.buttons.visible then focused = m.detail.focus
+    drawn = FormatJson(chips)
+    if drawn <> m.chipsDrawn
+        m.chipsDrawn = drawn
+        m.buttons.chips = chips
     end if
-    if room < 1 then room = 1
-    if room > 4 then room = 4
-    typeSet(m.tagline, tagline)
-    m.summary.maxLines = room
-    typeSet(m.summary, m.detail.summary)
+    if focused < 0 or focused >= chips.Count() then focused = m.detail.focus
+    if looks[focused].disabled then focused = m.detail.focus
+    m.buttons.focusIndex = focused
 end sub
 
-' The labels with text, one under the other.
+' The column ends above the top of what is under it (y = 940), with the
+' row of buttons and the words under the focused one: the summary keeps
+' three lines at most, as on Android TV, and gives lines up while the
+' text would reach lower; the tagline gives its room up once the summary
+' would keep fewer than two. More's Details has the whole summary.
+sub fitSummary()
+    typeSet(m.tagline, m.detail.tagline)
+    m.summary.maxLines = 3
+    typeSet(m.summary, m.detail.summary)
+    while m.summary.maxLines > 1 and textHeight() > textRoom()
+        if m.summary.maxLines = 2 and m.tagline.text <> ""
+            m.tagline.text = ""
+        else
+            m.summary.maxLines = m.summary.maxLines - 1
+        end if
+    end while
+end sub
+
+' How tall the text may be: from the column's top (y = 96) to the gap over
+' the buttons (44), the buttons (80) and the words under one (44), above
+' the tabs' top (940) with some room.
+function textRoom() as integer
+    return 940 - 24 - 44 - 80 - 44 - 96
+end function
+
+' How tall the parts with something to say are together, with their gaps.
+function textHeight() as float
+    height = m.heading.boundingRect().height
+    for each part in textParts()
+        height = height + part.gap + part.node.boundingRect().height
+    end for
+    return height
+end function
+
+' The parts with something to say under the title, each with its gap over
+' it: the title's context and line, how its request stands, the time
+' left, genres, credits, tagline, summary and note.
+function textParts() as object
+    parts = []
+    for each part in [{ node: m.context, gap: 8 }, { node: m.line, gap: 16 }, { node: m.stage, gap: 20 }, { node: m.stageLine, gap: 8 }, { node: m.left, gap: 16 }, { node: m.genres, gap: 8 }, { node: m.credits, gap: 8 }, { node: m.tagline, gap: 28 }, { node: m.summary, gap: 20 }, { node: m.note, gap: 28 }]
+        if part.node.text <> "" then parts.Push(part)
+    end for
+    return parts
+end function
+
+' The parts with something to say, one under the other.
 sub layoutText()
     shown = [m.heading]
     spacings = []
-    for each part in [{ label: m.context, gap: 8 }, { label: m.line, gap: 16 }, { label: m.left, gap: 8 }, { label: m.genres, gap: 8 }, { label: m.credits, gap: 8 }, { label: m.tagline, gap: 28 }, { label: m.summary, gap: 20 }, { label: m.note, gap: 28 }]
-        if part.label.text <> ""
-            spacings.Push(part.gap)
-            shown.Push(part.label)
-        end if
+    for each part in textParts()
+        spacings.Push(part.gap)
+        shown.Push(part.node)
     end for
     m.text.removeChildrenIndex(m.text.getChildCount(), 0)
     m.text.appendChildren(shown)
@@ -806,23 +836,28 @@ end sub
 sub showItemRequest()
     if m.item = invalid then return
     shown = reqItemRequest(m.itemRequest, reqSummaryOf(m.top.requestSummary), CreateObject("roDateTime").AsSeconds(), fmtZoneSeconds())
+    ' Under the title's line, its stage and what to know of it, where there
+    ' is a request (none: no text, and layoutText leaves them out).
     stage = shown.stage
     if stage = invalid
-        m.stage.visible = false
-        m.stageLine.visible = false
+        m.stage.text = ""
+        m.stageLine.text = ""
     else
         m.stage.color = reqToneColor(stage.tone)
         m.stage.progress = stage.progress
         typeSet(m.stage, stage.text)
         typeSet(m.stageLine, stage.line)
-        m.stage.visible = true
-        m.stageLine.visible = stage.line <> ""
     end if
     ' Request more seasons is a button while more may be asked for.
     asked = m.askMore <> invalid
     m.askMore = invalid
     if shown.askMore and shown.kind = "show" and shown.tmdbId > 0 then m.askMore = reqAskMoreTile(shown.kind, shown.tmdbId, httpSentence(m.item.title))
-    if asked <> (m.askMore <> invalid) then showDetail()
+    if asked <> (m.askMore <> invalid)
+        showDetail()
+    else if m.detail <> invalid
+        fitSummary()
+        layoutText()
+    end if
 end sub
 
 ' The summary changed: the requests asked for, if they weren't yet;

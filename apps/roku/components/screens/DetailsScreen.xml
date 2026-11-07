@@ -1,19 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- A movie, an episode, a show or a season, as Android TV's title page:
-     its backdrop and poster, what it is, and its buttons (Resume and From
-     start, or Play; a show's or a season's next episode, Request more
-     seasons; Mark as watched, Audio and subtitles, My List, Trailer, Add
-     to playlist, More…). Audio and subtitles and More open a panel over
-     the right of the page: the version and tracks to play; the rating, Go
-     to show and season, Media info, Details (the whole summary and the
-     title's facts). The text is laid out top to bottom, leaving out what a
-     title doesn't have. Under it, a show's or a season's tabs (more than
-     one season) and the season's episodes, then rows of extras, cast and
-     crew, More Like This and the collections it is part of: their top
-     shows under the buttons. Once the focus is down there, an info block
-     at the top says what the title is, or the episode in focus, and the
-     part with the focus comes up under it. Under the poster, how a request
-     for the title stands. -->
+     over its backdrop, which fills the screen, what it is, how a request
+     for it stands, then its buttons in one row, as Home's hero has them:
+     Resume or Play (a show's or a season's next episode) on a pill, then
+     round ones whose words show under them while focused (From start,
+     Request more seasons, the watched mark, Audio and subtitles, My List,
+     Trailer, Add to playlist, More). Audio and subtitles and More open a
+     panel over the right of the page: the version and tracks to play; the
+     rating, Go to show and season, Media info, Details (the whole summary
+     and the title's facts). The text is laid out top to bottom, leaving
+     out what a title doesn't have. Under it, a show's or a season's tabs
+     (more than one season) and the season's episodes, then rows of
+     extras, cast and crew, More Like This and the collections it is part
+     of: their top shows under the buttons. Once the focus is down there,
+     an info block at the top says what the title is, or the episode in
+     focus, and the part with the focus comes up under it. -->
 <component name="DetailsScreen" extends="Group">
     <interface>
         <field id="route" type="string" />
@@ -48,10 +49,10 @@
     <script type="text/brightscript" uri="pkg:/components/lib/Details.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Media.brs" />
     <children>
-        <Poster id="backdrop" width="1920" height="1080" loadWidth="640" loadHeight="360" loadDisplayMode="scaleToZoom" />
+        <Poster id="backdrop" width="1920" height="1080" loadWidth="960" loadHeight="540" loadDisplayMode="scaleToZoom" />
         <!-- Android TV's two gradients over the backdrop (stretched pictures):
-             the page's colour from the left, and from below, which comes up
-             over the backdrop as the page slides up. -->
+             the page's colour from the left, under the text, and from below,
+             which comes up over the backdrop as the page slides up. -->
         <Poster uri="pkg:/images/scrim-left.png" width="1600" height="1080" blendColor="0x16191EFF" />
         <Group id="shade" translation="[0, 520]">
             <Poster uri="pkg:/images/scrim-bottom.png" width="1920" height="480" blendColor="0x16191EFF" />
@@ -59,51 +60,55 @@
         </Group>
         <!-- What the title is and its buttons, while they have the focus. -->
         <Group id="page" visible="false">
-            <MaskGroup translation="[1404, 120]" maskUri="pkg:/images/poster-mask.png" maskSize="[420, 630]">
-                <Poster id="poster" width="420" height="630" loadWidth="420" loadHeight="630" loadDisplayMode="scaleToZoom" />
-            </MaskGroup>
-            <!-- The title's request, where there is one (GET
-                 /api/items/{id}/request). -->
-            <StagePill id="stage" translation="[1404, 774]" stacked="true" maxWidth="420" visible="false" />
-            <Label id="stageLine" translation="[1404, 852]" width="420" wrap="true" maxLines="3" color="0xA1A9B6FF" visible="false">
-                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
-            </Label>
+            <!-- Android TV's text column, 928 wide, in the safe area. -->
             <LayoutGroup id="column" translation="[96, 96]" layoutDirection="vert" itemSpacings="[44]">
-                <!-- Only the labels with text stay in it (layoutText). -->
+                <!-- Only the parts with something to say stay in it
+                     (layoutText). -->
                 <LayoutGroup id="text" layoutDirection="vert">
-                    <Label id="heading" width="1100" wrap="true" maxLines="2" color="0xEBEBEBFF">
-                        <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="56" />
+                    <!-- As big as Home's hero's title (Android TV's). -->
+                    <Label id="heading" width="928" wrap="true" maxLines="2" color="0xEBEBEBFF">
+                        <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="76" />
                     </Label>
                     <!-- An episode's "S1 · E3 · Pilot", a season's title, under
                          the show's name, as Home's hero says it. -->
-                    <Label id="context" width="1100" maxLines="1" color="0xEBEBEBFF">
+                    <Label id="context" width="928" maxLines="1" color="0xEBEBEBFF">
                         <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="32" />
                     </Label>
-                    <Label id="line" width="1100" color="0xA1A9B6FF">
-                        <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+                    <Label id="line" width="928" maxLines="1" color="0xA1A9B6FF">
+                        <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="28" />
+                    </Label>
+                    <!-- The title's request, where there is one (GET
+                         /api/items/{id}/request): its stage, its download's
+                         bar beside it, as Android TV has it under the line;
+                         then what to know of it. -->
+                    <StagePill id="stage" maxWidth="928" />
+                    <Label id="stageLine" width="928" wrap="true" maxLines="2" color="0xA1A9B6FF">
+                        <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
                     </Label>
                     <!-- "1 h 33 min left" for a title resumed. -->
-                    <Label id="left" width="1100" maxLines="1" color="0x38BDF8FF">
-                        <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="30" />
+                    <Label id="left" width="928" maxLines="1" color="0xEBEBEBFF">
+                        <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
                     </Label>
-                    <Label id="genres" width="1100" color="0x8B95A5FF">
+                    <Label id="genres" width="928" maxLines="1" color="0x8B95A5FF">
                         <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
                     </Label>
                     <!-- "Directed by … · Starring …". -->
-                    <Label id="credits" width="1100" maxLines="1" color="0xA1A9B6FF">
+                    <Label id="credits" width="928" maxLines="1" color="0xA1A9B6FF">
                         <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
                     </Label>
-                    <Label id="tagline" width="1100" maxLines="1" color="0xEBEBEBFF">
+                    <Label id="tagline" width="928" maxLines="1" color="0xEBEBEBFF">
                         <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="30" />
                     </Label>
-                    <Label id="summary" width="1080" wrap="true" maxLines="4" lineSpacing="6" color="0xEBEBEBFF">
+                    <Label id="summary" width="928" wrap="true" maxLines="3" lineSpacing="8" color="0xD5D8DEFF">
                         <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="30" />
                     </Label>
-                    <Label id="note" width="1100" wrap="true" color="0xA1A9B6FF">
+                    <Label id="note" width="928" wrap="true" color="0xA1A9B6FF">
                         <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
                     </Label>
                 </LayoutGroup>
-                <Buttons id="buttons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" minWidth="560" visible="false" />
+                <!-- Resume or Play on a pill, then the round buttons; Left and
+                     Right between them, as Home's hero's. -->
+                <ChipRow id="buttons" height="80" minWidth="256" pad="80" onArt="true" visible="false" />
             </LayoutGroup>
         </Group>
         <!-- Under the buttons, their top in view at y = 940: the season
@@ -158,7 +163,7 @@
             <Buttons id="messageButton" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" minWidth="320" visible="false" />
         </LayoutGroup>
         <!-- A menu (Audio and subtitles, More), or the choices of one of its
-             entries. It leaves the buttons in view, and is wider than
+             entries, over the right of the page. It is wider than
              Settings' for a version's long line. -->
         <Group id="panel" visible="false">
             <Rectangle translation="[720, 0]" width="1200" height="1080" color="0x1E222AFF" />

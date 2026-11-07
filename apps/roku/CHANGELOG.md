@@ -62,6 +62,11 @@ describes how they are made.
 
 ### Changed
 
+- A title's page looks like Android TV's: its backdrop fills the screen,
+  with no poster, the title is as big as Home's, and its buttons are one
+  row, Resume or Play on a pill, then round icon buttons whose names show
+  under them as they have the focus (Left and Right between them). A
+  request's stage shows under the line of what the title is.
 - The app has the Android TV app's look: its text is in Roboto at Android
   TV's sizes, Home's menu is a rail of icons, the profile's avatar at its
   top, that opens with its names as the focus comes to it, and the hero's

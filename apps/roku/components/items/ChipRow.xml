@@ -1,21 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- A row of chips, Android TV's pills, left and right between them, OK
      choosing one: a library's tabs, and its sort and filters, Home's hero
-     buttons. The current one (a tab shown) stands out; the focused one is
-     the accent pill at 1.05 while the row has the focus, coming in over
-     150 ms eased out and going over 120 ms eased in. A chip may start with
-     an icon, end with a number (the requests' tabs), or be a round button,
-     an icon alone whose words show under it while it has the focus. -->
+     buttons, a title's buttons. The current one (a tab shown) stands out;
+     the focused one is the accent pill at 1.05 while the row has the
+     focus, coming in over 150 ms eased out and going over 120 ms eased
+     in. A chip may start with an icon, end with a number (the requests'
+     tabs), or be a round button, an icon alone whose words show under it
+     while it has the focus. -->
 <component name="ChipRow" extends="Group">
     <interface>
-        <!-- [{ label, width, count, accent, danger, selected, icon, round }]:
-             a chip's width in pixels; 0, as wide as its words. count
-             (optional): its number's words, "" for none; accent or
-             danger: the number in that colour, as the menu's. selected
-             (optional): it stands out as the current one does (a filter
-             in force). icon (optional): its name in images/icons, before
-             the words; round: the icon alone, in a square as tall as the
-             row, the words under it. -->
+        <!-- [{ label, width, count, accent, danger, selected, icon, round,
+             disabled }]: a chip's width in pixels; 0, as wide as its
+             words. count (optional): its number's words, "" for none;
+             accent or danger: the number in that colour, as the menu's.
+             selected (optional): it stands out as the current one does (a
+             filter in force). icon (optional): its name in images/icons,
+             before the words; round: the icon alone, in a square as tall
+             as the row, the words under it. disabled (optional): drawn at
+             40 %, as Android TV's buttons that can't be pressed, and Left
+             and Right pass over it. -->
         <field id="chips" type="array" onChange="onChips" />
         <!-- The room either side of a chip's words, both sides together,
              for chips of width 0. -->

@@ -244,8 +244,8 @@ sub test_content_details_offer_resume_and_start()
     tkEqual(detail.more, [{ label: "Rate", action: "rate" }, { label: "Media info", action: "info" }])
     partOf = contentDetail(contentTestDetail(), contentTestServer(), invalid, { partOf: ["Arrival Collection"] })
     tkEqual(partOf.genres, "Drama · Science Fiction · Mystery · Thriller · Part of Arrival Collection")
-    tkEqual(detail.backdrop, "http://nas:7539/api/items/12/images/backdrop?v=1729600000&w=640", "faint behind text: small")
-    tkEqual(detail.poster, "http://nas:7539/api/items/12/images/poster?v=1729600000&w=420")
+    tkEqual(detail.backdrop, "http://nas:7539/api/items/12/images/backdrop?v=1729600000&w=960", "over the whole screen, as Home's hero's")
+    tkFalse(detail.DoesExist("poster"), "no poster, as on Android TV")
 
     fresh = contentTestDetail()
     fresh.user_state.position_ms = 0
@@ -322,6 +322,23 @@ sub test_content_show_details_offer_its_next_episode()
     tkEqual(contentDetail(show, contentTestServer(), onDeck).buttons[1], "Mark as unwatched", "every episode watched")
     show.leaf_count = 0
     tkEqual(contentDetail(show, contentTestServer()).buttons[0], "Unavailable", "no episodes")
+end sub
+
+sub test_content_details_buttons_look_like_android_tvs()
+    looks = contentDetailLooks(["resume", "start", "askMore", "watched", "tracks", "listAdd", "trailer", "playlist", "more"])
+    tkEqual(looks[0], { icon: "play-fill", round: false, disabled: false }, "Resume, a pill with Play's icon")
+    icons = []
+    for each look in looks
+        if look.round then icons.Push(look.icon)
+    end for
+    tkEqual(icons, ["rotate-ccw", "plus", "circle-check", "captions", "bookmark-plus", "film", "list-plus", "ellipsis"], "the others round, with Android TV's icons")
+    marked = contentDetailLooks(["playNext", "nextFromStart", "unwatched", "listRemove", "more"])
+    tkEqual(marked[0].icon, "play-fill", "a show's next episode")
+    tkEqual(marked[1].icon, "rotate-ccw")
+    tkEqual(marked[2].icon, "eye-off", "Mark as unwatched")
+    tkEqual(marked[3].icon, "bookmark-check", "in My List")
+    tkEqual(contentDetailLooks(["unavailable", "watched", "more"])[0], { icon: "", round: false, disabled: true }, "Unavailable: words alone, faint, passed over")
+    tkEqual(contentDetailLooks(["more"])[0], { icon: "ellipsis", round: true, disabled: false }, "nothing to play: no pill")
 end sub
 
 sub test_content_season_details_name_the_show()

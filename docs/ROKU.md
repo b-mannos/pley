@@ -195,30 +195,40 @@ Roku's own player bar, keyboards, PIN pad and dialogs keep Roku's look.
 
 ### A title's page
 
-A movie's, a show's, a season's or an episode's page says what Android
-TV's does, in its order: the title (an episode's or a season's show, with
-"S1 · E3 · Pilot" or "Season 1" under it), then a line of what it is: a
+A movie's, a show's, a season's or an episode's page looks like Android
+TV's: its backdrop fills the screen under the page's colour from the
+left and from below, as Home's hero's does, with no poster, and the text
+is in Android TV's column, 928 pixels wide from the safe area's edge. It
+says what Android TV's does, in its order: the title, as big as Home's
+hero's (an episode's or a season's show, with "S1 · E3 · Pilot" or
+"Season 1" under it), then a line of what it is: a
 movie's year, an episode's air day, a show's seasons and years ("3
 seasons · 2019-2024"), a season's episodes, the version's
 edition, the runtime, the content rating, the stars and the quality of
-the version Play plays ("4K · DV P8.1 · Atmos"). A title resumed says
+the version Play plays ("4K · DV P8.1 · Atmos"). Under it, a title that
+was asked for shows its request's stage, with its download's bar beside
+it. A title resumed says
 how much is left ("1 h 33 min left"); the genres are followed by the
 collections it is part of ("Drama · Part of Dune").
 
-Its buttons are in a column at the left: Resume and From start (or Play;
-a show's or a season's next episode, "Resume S1 · E3" or "Play S1 ·
-E3"), Request more
-seasons for a show with seasons left to ask for, Mark as watched, Audio
-and subtitles, My List, Trailer (where its extras have one: it plays from
-its start), Add to playlist and More…. With nothing to play the first
-says Unavailable, and the focus starts on the next. Audio and subtitles
-and More open a panel at the right; Back closes it. Over the summary, as
-on Android TV,
+Its buttons are one row, drawn as Home's hero's: Resume (or Play; a
+show's or a season's next episode, "Resume S1 · E3" or "Play S1 · E3")
+on a pill with Play's icon, then round buttons with Android TV's icons,
+whose names show under them while they have the focus: From start,
+Request more seasons for a show with seasons left to ask for, the
+watched mark, Audio and subtitles, My List, Trailer (where its extras
+have one: it plays from its start), Add to playlist and More. Left and
+Right go between them. With nothing to play the pill says Unavailable,
+faint, and the focus starts on the next and never goes to it. Holding
+OK on the pill doesn't open the title's actions as Android TV's long
+press does: the Options key does, from anywhere on the buttons. Audio
+and subtitles and More open a panel at the right; Back closes it. Over
+the summary, as on Android TV,
 a line says who made it and who is in it ("Directed by Grace Hopper ·
-Starring Ada Lovelace, Alan Turing"; a show's "Created by"). The column
-keeps above the rows: past six buttons the summary gives up lines, as it
-does for the lines over it, and the tagline goes when the summary would
-keep fewer than two.
+Starring Ada Lovelace, Alan Turing"; a show's "Created by"). The text
+keeps above the buttons and the rows: the summary has three lines at
+most, as on Android TV, and gives lines up while the text would reach
+lower, and the tagline goes when the summary would keep fewer than two.
 
 Under the buttons, their top in view, a show's or a season's page has
 its seasons' tabs (when there are two or more), then a row of the
@@ -947,8 +957,8 @@ words for one approved as it was asked.
   for the words ("Results for “dune”") of every title TMDB has for them,
   with its badge, a page at a time as See all's are; Back goes back to
   Search. A library title that was asked for shows its request's stage
-  under the poster, and a show with seasons left to ask for has Request
-  more seasons among its buttons.
+  on its page, under the line of what it is, and a show with seasons left
+  to ask for has Request more seasons among its buttons.
 - **Ready to watch:** a requested title that arrives is told of in a
   card at the bottom right: its poster, "“The Last Lighthouse” is ready
   to watch." (a show's seasons once each batch is ready; "3 of your
