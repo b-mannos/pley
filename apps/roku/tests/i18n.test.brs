@@ -23,6 +23,17 @@ sub test_i18n_the_one_picked_on_the_roku_comes_after_the_accounts()
     end for
 end sub
 
+' A server that names any language keeps the account's, one this Roku
+' doesn't have ("de") too; one that names none is from before languages.
+sub test_i18n_a_server_keeps_the_accounts_language_as_the_other_tvs_say()
+    cases = i18nTestFixture().keepsLanguage
+    tkTrue(cases.Count() > 2, "the fixture's cases")
+    for each c in cases
+        facts = { serverHeard: true, serverLanguage: httpString(c.server.language), refused: false }
+        tkEqual(not i18nKeepsNone(facts), c.out, FormatJson(c))
+    end for
+end sub
+
 sub test_i18n_tags_match_by_their_language()
     tkEqual(i18nSupported("fr_CA"), "fr", "Roku's own locale")
     tkEqual(i18nSupported("fr-CA"), "fr")
