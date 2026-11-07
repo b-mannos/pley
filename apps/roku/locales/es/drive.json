@@ -15,5 +15,9 @@
   "empty": {
     "title": "No hay nada que reproducir aquí",
     "body": "Esta carpeta no contiene videos ni carpetas."
+  },
+  "subtitles": {
+    "tooLarge": "Este archivo de subtítulos es demasiado grande para leerlo.",
+    "unreadable": "Este archivo de subtítulos no se puede leer."
   }
 }

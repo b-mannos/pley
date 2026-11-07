@@ -15,5 +15,9 @@
   "empty": {
     "title": "Rien à lire ici",
     "body": "Ce dossier ne contient ni vidéo ni dossier."
+  },
+  "subtitles": {
+    "tooLarge": "Ce fichier de sous-titres est trop volumineux pour être lu.",
+    "unreadable": "Ce fichier de sous-titres ne peut pas être lu."
   }
 }

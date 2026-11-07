@@ -149,12 +149,12 @@ sub driveCuesOf(request as object, path as string)
     size = -1
     if GetInterface(info, "ifAssociativeArray") <> invalid and LCase(httpString(info.type)) = "file" then size = httpNumber(info.size, -1)
     if size > driveSubtitleMaxBytes()
-        request.result = { ok: false, error: "large", data: invalid, message: "This subtitle file is too large to read." }
+        request.result = { ok: false, error: "large", data: invalid, message: t("drive.subtitles.tooLarge") }
         return
     end if
     bytes = CreateObject("roByteArray")
     if size < 0 or not bytes.ReadFile(path)
-        request.result = { ok: false, error: "unreadable", data: invalid, message: "This subtitle file can't be read." }
+        request.result = { ok: false, error: "unreadable", data: invalid, message: t("drive.subtitles.unreadable") }
         return
     end if
     request.result = { ok: true, status: 200, data: { cues: driveCues(driveDecode(bytes)) }, error: "" }

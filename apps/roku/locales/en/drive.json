@@ -15,5 +15,9 @@
   "empty": {
     "title": "Nothing to play here",
     "body": "This folder has no videos or folders in it."
+  },
+  "subtitles": {
+    "tooLarge": "This subtitle file is too large to read.",
+    "unreadable": "This subtitle file can't be read."
   }
 }
