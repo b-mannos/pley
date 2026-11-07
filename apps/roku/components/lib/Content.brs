@@ -135,8 +135,12 @@ function contentCaption(item as object, tile as object) as string
         return parts.Join(" · ")
     end if
     if left <> "" then return left
+    ' Most of a library's tiles are movies: their year, without the lists
+    ' the other kinds need (a page maps hundreds of tiles at a time).
     year = ""
-    if httpNumber(item.year, 0) > 0 then year = urlValue(Int(httpNumber(item.year, 0)))
+    yearNumber = httpNumber(item.year, 0)
+    if yearNumber > 0 then year = Int(yearNumber).ToStr()
+    if kind = "movie" then return year
     episodes = Int(httpNumber(item.leaf_count, -1))
     if kind = "show"
         seasons = Int(httpNumber(item.child_count, 0))
@@ -155,8 +159,6 @@ function contentCaption(item as object, tile as object) as string
         parts = [httpSentence(item.parent_title), year]
     else if kind = "track"
         parts = [httpSentence(item.grandparent_title), httpSentence(item.parent_title)]
-    else if kind = "movie"
-        parts = [year]
     end if
     shown = []
     for each part in parts
