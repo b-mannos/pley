@@ -168,6 +168,11 @@ class DashboardViewModelTest {
         page.loadMore()
         assertEquals(listOf(1L, 2L, 3L), page.history.state.value.valueOrNull?.entries?.map { it.id })
         assertFalse(page.loadingMore.value)
+        // Everyone's, ten at a time, after those shown.
+        assertEquals(
+            listOf(listOf("all" to "1", "offset" to "0", "limit" to "10"), listOf("all" to "1", "offset" to "2", "limit" to "10")),
+            server.callsTo("GET /api/history").map { it.query },
+        )
 
         server.answer("DELETE /api/history/2", null)
         page.removePlay(2)
@@ -215,6 +220,18 @@ class DashboardViewModelTest {
         assertEquals(2, server.callsTo("GET /api/system").size)
         assertEquals(2, server.callsTo("GET /api/system/storage").size)
         assertEquals(2, server.callsTo("GET /api/history").size)
+    }
+
+    @Test
+    fun theResourcesAskOnlyForTheSamplesSinceTheLast() = runTest {
+        val server = server()
+        val page = model(server)
+        page.readResources()
+        page.readResources()
+        val asked = server.callsTo("GET /api/system/resources").map { it.query }
+        assertEquals(emptyList<Pair<String, String>>(), asked[0])
+        assertEquals(1, asked[1].size)
+        assertEquals("since", asked[1].single().first)
     }
 
     @Test

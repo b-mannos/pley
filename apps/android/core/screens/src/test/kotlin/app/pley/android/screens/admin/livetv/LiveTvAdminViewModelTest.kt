@@ -138,6 +138,10 @@ class LiveTvAdminViewModelTest {
         assertEquals(2, server.callsTo("GET /api/live/lineup/page").size)
         page.visible(90, 102)
         assertEquals(3, server.callsTo("GET /api/live/lineup/page").size)
+        assertEquals(
+            listOf("state" to "all", "offset" to "100", "limit" to "100"),
+            server.callsTo("GET /api/live/lineup/page").last().query,
+        )
         assertEquals(1L, page.list.value.at(100)?.id)
         page.visible(240, 249)
         assertEquals(setOf(0, 1, 2), page.list.value.pages.keys)
@@ -147,6 +151,10 @@ class LiveTvAdminViewModelTest {
         page.setState(app.pley.android.model.admin.LineupState.Hidden)
         assertEquals(app.pley.android.model.admin.LineupState.Hidden, page.list.value.filter.state)
         assertEquals(setOf(0), page.list.value.pages.keys)
+        assertEquals(
+            listOf("state" to "hidden", "offset" to "0", "limit" to "100"),
+            server.callsTo("GET /api/live/lineup/page").last().query,
+        )
         assertEquals(LineupChoice(), page.choice.value)
     }
 
