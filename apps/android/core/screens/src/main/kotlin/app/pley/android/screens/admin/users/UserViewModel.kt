@@ -1,6 +1,7 @@
 package app.pley.android.screens.admin.users
 
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import app.pley.android.data.ServerAdmin
@@ -16,7 +17,6 @@ import app.pley.android.screens.admin.AdminDone
 import app.pley.android.screens.admin.AdminLoad
 import app.pley.android.screens.admin.AdminViewModel
 import app.pley.android.screens.screensGraph
-import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow

@@ -35,6 +35,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -119,7 +120,9 @@ internal fun DashboardScreen(id: String?) {
         }
     }
     AdminEvents(model, said)
-    LaunchedEffect(model) { model.results.collect { done -> said(done)?.let { shell.toasts.show(it) } } }
+    // The words of the language shown now, not of when the page opened.
+    val saying by rememberUpdatedState(said)
+    LaunchedEffect(model) { model.results.collect { done -> saying(done)?.let { shell.toasts.show(it) } } }
     // Read on the web's timers while the page is started, and not at all while it isn't.
     WhileShown(model) { model.keepFresh() }
 

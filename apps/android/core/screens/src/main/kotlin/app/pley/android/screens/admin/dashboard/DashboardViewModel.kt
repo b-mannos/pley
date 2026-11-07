@@ -73,9 +73,15 @@ class DashboardViewModel(
     /** The server's address, which its pictures' paths are made absolute on. */
     val origin: StateFlow<String> = origin.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
 
+    /** How many plays the history shows: what reading it again asks for, Show more's pages included. */
+    private var playsShown = HISTORY_PAGE
+
+    /** The page has shown before: showing again, what it read once is read again. */
+    private var shown = false
+
     val system = resource { get(DashboardSystem.serializer(), SYSTEM) }
     val storage = resource { get(StorageUsage.serializer(), STORAGE) }
-    val history = resource { get(HistoryPage.serializer(), HISTORY, historyQuery(0)) }
+    val history = resource { get(HistoryPage.serializer(), HISTORY, historyQuery(0, playsShown)) }
 
     private val activityNow = MutableStateFlow<AdminLoad<DashboardActivity>>(AdminLoad.Loading)
     private val transcoderNow = MutableStateFlow<AdminLoad<DashboardTranscoderStatus>>(AdminLoad.Loading)
@@ -100,7 +106,7 @@ class DashboardViewModel(
     /** The plays being removed, whose buttons wait. */
     val removing: StateFlow<Set<Long>> = removingNow.asStateFlow()
 
-    /** What cleaning up and backing up did, which the server's answer says: for a toast ([CLEANED], [NOTHING_TO_CLEAN], [BACKED_UP]). */
+    /** What cleaning up did, which the server's answer says: for a toast ([CLEANED], [NOTHING_TO_CLEAN]). */
     val results: Flow<AdminDone> = reports.receiveAsFlow()
 
     /** Everyone's plays as rows; made again when the language shown changes, whose words they are in. */
@@ -117,9 +123,17 @@ class DashboardViewModel(
      * Reads what changes while the page shows on the web's timers, each
      * at once and then after its wait, until the caller is cancelled: the
      * screen runs it while it is started, so nothing is read while it
-     * isn't on screen. A read that fails keeps what was shown.
+     * isn't on screen. A read that fails keeps what was shown. Showing
+     * again (back from a title it opened, or from another app), it reads
+     * the server, its storage and the plays again too, as the web does.
      */
     suspend fun keepFresh(): Nothing = coroutineScope {
+        if (shown) {
+            system.reload()
+            storage.reload()
+            history.reload()
+        }
+        shown = true
         launch { every(ACTIVITY_MS) { readActivity() } }
         launch { every(TRANSCODER_MS) { readTranscoder() } }
         launch { every(RESOURCES_MS) { readResources() } }
@@ -177,8 +191,10 @@ class DashboardViewModel(
         viewModelScope.launch {
             try {
                 val next = admin.api().get(HistoryPage.serializer(), HISTORY, historyQuery(page.entries.size))
-                val shown = history.state.value.valueOrNull ?: page
-                history.set(HistoryPage(next.total, (shown.entries + next.entries).distinctBy { it.id }))
+                val held = history.state.value.valueOrNull ?: page
+                val more = HistoryPage(next.total, (held.entries + next.entries).distinctBy { it.id })
+                playsShown = maxOf(HISTORY_PAGE, more.entries.size)
+                history.set(more)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -243,7 +259,7 @@ class DashboardViewModel(
         private val TRANSCODER = listOf("api", "transcoder")
         private val HISTORY = listOf("api", "history")
 
-        private fun historyQuery(offset: Int) = listOf("all" to "1", "offset" to offset.toString(), "limit" to HISTORY_PAGE.toString())
+        private fun historyQuery(offset: Int, limit: Int = HISTORY_PAGE) = listOf("all" to "1", "offset" to offset.toString(), "limit" to limit.toString())
 
         val factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {

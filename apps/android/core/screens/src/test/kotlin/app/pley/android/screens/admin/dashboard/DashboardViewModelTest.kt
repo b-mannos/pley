@@ -202,6 +202,22 @@ class DashboardViewModelTest {
     }
 
     @Test
+    fun showingAgainReadsTheServerItsStorageAndThePlaysAgain() = runTest {
+        val server = server()
+        val page = model(server)
+        val first = backgroundScope.launch { page.keepFresh() }
+        runCurrent()
+        first.cancel()
+        assertEquals(1, server.callsTo("GET /api/system").size)
+        val again = backgroundScope.launch { page.keepFresh() }
+        runCurrent()
+        again.cancel()
+        assertEquals(2, server.callsTo("GET /api/system").size)
+        assertEquals(2, server.callsTo("GET /api/system/storage").size)
+        assertEquals(2, server.callsTo("GET /api/history").size)
+    }
+
+    @Test
     fun aTranscodeIsSummedUpAsTheWebDoes() {
         val words = FormatWords.English
         val size = { n: Int, total: Int -> "size $n of $total" }

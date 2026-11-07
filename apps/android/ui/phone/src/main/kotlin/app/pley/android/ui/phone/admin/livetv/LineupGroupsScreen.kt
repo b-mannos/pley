@@ -22,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -77,8 +78,8 @@ internal fun LineupGroupsScreen() {
         tag = LIVETV_GROUPS_PAGE,
         header = { all ->
             if (all.isNotEmpty()) {
-                val hiddenGroups = all.count { it.hidden == it.count }
-                val toWatch = all.sumOf { it.count - it.hidden }
+                // Counted once a read, not at each letter typed: a provider's groups run to thousands.
+                val (hiddenGroups, toWatch) = remember(all) { all.count { it.hidden == it.count } to all.sumOf { it.count - it.hidden } }
                 val line = pluralStringResource(R.plurals.admin_livetv_groups_shown, all.size - hiddenGroups, all.size - hiddenGroups) +
                     (if (hiddenGroups > 0) pluralStringResource(R.plurals.admin_livetv_groups_also_hidden, hiddenGroups, hiddenGroups) else "") +
                     " · " + pluralStringResource(R.plurals.admin_livetv_groups_to_watch, toWatch, toWatch) +
