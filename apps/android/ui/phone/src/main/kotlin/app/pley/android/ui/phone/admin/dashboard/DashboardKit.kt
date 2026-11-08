@@ -38,6 +38,7 @@ import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcon
+import app.pley.android.designsystem.text.formatWords
 import app.pley.android.model.JobState
 import app.pley.android.model.PlaybackMethod
 import app.pley.android.ui.phone.R
@@ -74,7 +75,7 @@ internal fun SectionHeading(
         )
         if (count != null) {
             Spacer(Modifier.width(8.dp))
-            Text(count.toString(), style = MaterialTheme.typography.bodyMedium, color = PleyColors.Subtle)
+            Text(number(count.toLong(), formatWords().locale), style = MaterialTheme.typography.bodyMedium, color = PleyColors.Subtle)
         }
         Spacer(Modifier.weight(1f))
         if (action != null) action()

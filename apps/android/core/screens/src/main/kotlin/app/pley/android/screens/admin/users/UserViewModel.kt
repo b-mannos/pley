@@ -17,8 +17,8 @@ import app.pley.android.model.admin.UserApp
 import app.pley.android.model.admin.UserDevice
 import app.pley.android.network.ApiException
 import app.pley.android.screens.admin.AdminDone
-import app.pley.android.screens.admin.AdminLoad
 import app.pley.android.screens.admin.AdminViewModel
+import app.pley.android.screens.admin.valueOrNull
 import app.pley.android.screens.screensGraph
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -50,7 +50,10 @@ data class UserPage(val user: UserAccount, val otherAdmins: Int) {
  * The server refuses changes to the administrator's own password, PIN,
  * two-step sign-in, sign-ins, disabling and deleting, and to an app their
  * own name, devices and apps too, which stay in the web app's Account;
- * the page doesn't offer them on one's own account ([self]).
+ * the page doesn't offer them on one's own account ([self]). From an app
+ * it also makes no administrator, nor changes another one's password, PIN
+ * or two-step sign-in: the web app does, as either would take whoever
+ * holds the phone into it as an administrator.
  */
 class UserViewModel(
     admin: ServerAdmin,
@@ -87,7 +90,9 @@ class UserViewModel(
     /** [user]'s picture, on the signed-in server. */
     fun avatar(user: UserAccount): String? = avatarOf(user, session.value?.issuer)
 
-    private val user: UserAccount? get() = (page.state.value as? AdminLoad.Ready)?.value?.user
+    // The last account read, a reload that failed included: the page still
+    // shows it, and acts on it.
+    private val user: UserAccount? get() = page.state.value.valueOrNull?.user
 
     /** The display name; empty: none, the username shows. */
     fun rename(name: String) = patch(
@@ -98,16 +103,16 @@ class UserViewModel(
     fun setPassword(password: String) = patch(buildJsonObject { put("password", password) }, said = SAVED)
 
     /**
-     * Administrator or not. One no longer an administrator is given what
-     * the page then shows for requests, not what was kept from before it
-     * was one, as the web does.
+     * No longer an administrator (the web app makes one). The account is
+     * given what the page then shows for requests, not what was kept from
+     * before it was one, as the web does.
      */
-    fun setAdmin(on: Boolean) {
+    fun removeAdmin() {
         val user = user ?: return
         patch(
             buildJsonObject {
-                put("is_admin", on)
-                if (!on && user.requestAccess != null) put("request_access", requestsByDefault(user.managed, user.maxAge).wire)
+                put("is_admin", false)
+                if (user.requestAccess != null) put("request_access", requestsByDefault(user.managed, user.maxAge).wire)
             },
         )
     }
@@ -175,7 +180,7 @@ class UserViewModel(
      */
     fun turnOffTwoStep() {
         val user = user ?: return
-        val required = (server.state.value as? AdminLoad.Ready)?.value?.twoStepRequired == true
+        val required = server.state.value.valueOrNull?.twoStepRequired == true
         change(
             said = AdminDone(if (required) TWO_STEP_SIGNED_OUT else TWO_STEP_OFF, listOf(user.name)),
             after = { page.reload(); devices.reload(); apps.reload() },
@@ -220,8 +225,10 @@ class UserViewModel(
             },
         ) {
             val answer = send("PATCH", UserAccount.serializer(), listOf("api", "users", id), body)
-            val now = (page.state.value as? AdminLoad.Ready)?.value
-            page.set(now?.copy(user = answer) ?: UserPage(answer, 0))
+            // What the page had, failed reload or not: without it, how many
+            // administrators are left isn't known, so it is read again.
+            val now = page.state.value.valueOrNull
+            if (now != null) page.set(now.copy(user = answer)) else page.reload()
             took = true
         }
     }

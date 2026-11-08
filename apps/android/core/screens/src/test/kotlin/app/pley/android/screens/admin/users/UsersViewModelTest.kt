@@ -207,17 +207,24 @@ class UsersViewModelTest {
             patches(3, cid)
             patches(4, dee)
         }
-        UserViewModel(server, session, 3).setAdmin(false)
+        UserViewModel(server, session, 3).removeAdmin()
         assertEquals("""{"is_admin":false,"request_access":"ask"}""", body(server, "PATCH /api/users/3").toString())
         // With an age limit, as the server makes such an account: it may not ask.
-        UserViewModel(server, session, 4).setAdmin(false)
+        UserViewModel(server, session, 4).removeAdmin()
         assertEquals("""{"is_admin":false,"request_access":"off"}""", body(server, "PATCH /api/users/4").toString())
+    }
 
-        val eve = user(5, "Eve")
-        server.answer("GET /api/users", listOf(user(1, "Ann", admin = true), eve).joinToString(",", "[", "]"))
-        server.patches(5, eve)
-        UserViewModel(server, session, 5).setAdmin(true)
-        assertEquals("""{"is_admin":true}""", body(server, "PATCH /api/users/5").toString())
+    @Test
+    fun anAccountShownAfterAFailedReadIsStillChanged() = runTest {
+        val bea = user(2, "Bea")
+        val server = server(user(1, "Ann", admin = true), bea).apply { patches(2, bea) }
+        val page = UserViewModel(server, session, 2)
+        server.fail("GET /api/users", ApiException(503, "unavailable", "the server is busy"))
+        page.page.reload()
+        assertTrue(page.page.state.value is AdminLoad.Failed)
+        page.setHome(false)
+        assertEquals("""{"home":false}""", body(server, "PATCH /api/users/2").toString())
+        assertTrue("the answer is shown", page.page.state.value is AdminLoad.Ready)
     }
 
     @Test
@@ -244,7 +251,7 @@ class UsersViewModelTest {
         val page = UserViewModel(server, session, 1)
         val errors = mutableListOf<Throwable>()
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { page.errors.collect { errors += it } }
-        page.setAdmin(false)
+        page.removeAdmin()
         assertEquals(listOf<Throwable>(refused), errors)
         assertEquals(2, server.callsTo("GET /api/users").size)
         assertTrue(page.page.state.value.valueOrNull!!.user.isAdmin)
@@ -306,7 +313,7 @@ class UsersViewModelTest {
         assertEquals(NewUserProblem.PickLibrary, page.create())
         assertTrue(server.callsTo("POST /api/users").isEmpty())
 
-        page.edit { it.copy(access = AccessChoice(allLibraries = false, libraryIds = listOf(2), maxAge = 13), isAdmin = false) }
+        page.edit { it.copy(access = AccessChoice(allLibraries = false, libraryIds = listOf(2), maxAge = 13)) }
         assertNull(page.create())
         val sent = body(server, "POST /api/users")!!.jsonObject
         assertEquals("\"longname1\"", sent["username"].toString())
@@ -344,13 +351,13 @@ class UsersViewModelTest {
     }
 
     @Test
-    fun aManagedProfileHasNoPasswordNorAdministratorAndItsKindForgetsTheRequestsChosen() = runTest {
+    fun aManagedProfileHasNoPasswordAndItsKindForgetsTheRequestsChosen() = runTest {
         val server = FakeServerAdmin().apply {
             answer("GET /api/libraries", "[]")
             answer("POST /api/users", """{"id":9,"username":"kid","name":"Kiddo","managed":true}""")
         }
         val page = NewUserViewModel(server)
-        page.edit { it.copy(username = " kid ", displayName = " Kiddo ", password = "left over", isAdmin = true, requestChoice = RequestAccess.Auto) }
+        page.edit { it.copy(username = " kid ", displayName = " Kiddo ", password = "left over", requestChoice = RequestAccess.Auto) }
         assertEquals(RequestAccess.Auto, page.form.value.requests)
         page.edit { it.copy(kind = AccountKind.Managed) }
         assertNull(page.form.value.requestChoice)
@@ -360,24 +367,9 @@ class UsersViewModelTest {
         assertEquals("\"kid\"", sent["username"].toString())
         assertEquals("\"Kiddo\"", sent["display_name"].toString())
         assertNull(sent["password"])
-        assertEquals("false", sent["is_admin"].toString())
+        assertNull("the web app makes administrators", sent["is_admin"])
         assertEquals("true", sent["managed"].toString())
         assertEquals("\"off\"", sent["request_access"].toString())
-    }
-
-    @Test
-    fun anAdministratorsRequestsAreLeftToTheServer() = runTest {
-        val server = FakeServerAdmin().apply {
-            answer("GET /api/libraries", "[]")
-            answer("POST /api/users", """{"id":9,"username":"max","name":"max","is_admin":true}""")
-        }
-        val page = NewUserViewModel(server)
-        page.edit { it.copy(username = "max", password = "a good password", isAdmin = true) }
-        assertEquals(RequestAccess.Auto, page.form.value.requests)
-        page.create()
-        val sent = body(server, "POST /api/users")!!.jsonObject
-        assertEquals("true", sent["is_admin"].toString())
-        assertNull(sent["request_access"])
     }
 
     @Test

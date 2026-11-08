@@ -720,6 +720,88 @@ async fn pleys_own_app_allowed_server_manages_it_on_an_administrators_account() 
     drop(dora);
 }
 
+#[tokio::test]
+async fn an_app_makes_no_administrator_nor_changes_ones_sign_in() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let (_, bob_id) = app.user(&admin, "bob", json!({})).await;
+    let (_, dora_id) = app.user(&admin, "dora", json!({"is_admin": true})).await;
+    let (token, _) = app.app_token(1, "library play server").await;
+
+    // Either would take whoever holds the token to the web app as an
+    // administrator, where the server's keys and passwords are.
+    let eve = json!({"username": "eve", "password": "test-pass-1", "is_admin": true});
+    let dora = format!("/api/users/{dora_id}");
+    let refused = [
+        app.app_call(Method::POST, "/api/users", &token, Some(eve)).await,
+        app.app_call(Method::PATCH, &format!("/api/users/{bob_id}"), &token, Some(json!({"is_admin": true}))).await,
+        app.app_call(Method::PATCH, &dora, &token, Some(json!({"password": "another-pass-2"}))).await,
+        app.app_call(Method::PATCH, &dora, &token, Some(json!({"pin": "1234"}))).await,
+        app.app_call(Method::PATCH, &dora, &token, Some(json!({"pin": null}))).await,
+        app.app_call(Method::DELETE, &format!("{dora}/two-step"), &token, None).await,
+    ];
+    for reply in refused {
+        assert_eq!(reply.status, StatusCode::FORBIDDEN, "{:?}", reply.body);
+    }
+    let users = app.get("/api/users", &admin).await.body;
+    let role =
+        |name: &str| users.as_array().unwrap().iter().find(|u| u["username"] == name).map(|u| u["is_admin"].clone());
+    assert_eq!(
+        (role("eve"), role("bob"), role("dora")),
+        (None, Some(json!(false)), Some(json!(true))),
+        "nothing changed"
+    );
+
+    // Others' sign-ins stay the app's to change, and so does a role taken away.
+    let bob = format!("/api/users/{bob_id}");
+    for body in [json!({"password": "another-pass-2"}), json!({"pin": "1234"}), json!({"pin": null})] {
+        let reply = app.app_call(Method::PATCH, &bob, &token, Some(body)).await;
+        assert_eq!(reply.status, StatusCode::OK, "{:?}", reply.body);
+    }
+    let demoted = app.app_call(Method::PATCH, &dora, &token, Some(json!({"is_admin": false}))).await;
+    assert_eq!(demoted.status, StatusCode::OK, "{:?}", demoted.body);
+    let pin = app.app_call(Method::PATCH, &dora, &token, Some(json!({"pin": "1234"}))).await;
+    assert_eq!(pin.status, StatusCode::OK, "no longer an administrator: {:?}", pin.body);
+}
+
+#[tokio::test]
+async fn an_app_switched_to_an_administrators_profile_administers_nothing() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let (_, bob_id) = app.user(&admin, "bob", json!({})).await;
+    let scope = "library play approvals activity server";
+    // Bob's phone, which a cast from the administrator switched to their
+    // profile: it acts as them, allowed by Bob.
+    let issued = app
+        .state
+        .auth
+        .issue(pley::auth::grants::NewGrant {
+            user_id: 1,
+            approved_by: bob_id,
+            client_id: common::ANDROID_APP.into(),
+            client_name: Some("pley".into()),
+            scopes: pley::auth::scopes::Scopes::parse(scope).unwrap(),
+            refresh: true,
+            first_party: true,
+            session_hash: None,
+            user_agent: None,
+            ip: None,
+        })
+        .await
+        .unwrap();
+    let switched = issued.access_token;
+    assert_eq!(app.get("/api/auth/me", &switched).await.body["account_admin"], json!(false));
+    for uri in ["/api/users", "/api/system"] {
+        assert_eq!(app.get(uri, &switched).await.status, StatusCode::FORBIDDEN, "{uri}");
+    }
+    assert_eq!(app.get("/api/libraries", &switched).await.status, StatusCode::OK, "it still plays as them");
+
+    // The administrator's own phone does.
+    let (own, _) = app.app_token(1, scope).await;
+    assert_eq!(app.get("/api/auth/me", &own).await.body["account_admin"], json!(true));
+    assert_eq!(app.get("/api/users", &own).await.status, StatusCode::OK);
+}
+
 /// Tokens of an app by another publisher acting as `user_id`, allowed `scope`.
 async fn third_party_token(app: &TestApp, user_id: i64, scope: &str) -> String {
     let issued = app

@@ -1111,9 +1111,10 @@ async fn has_pin(state: &AppState, id: i64) -> ApiResult<bool> {
 /// has it): a caster freer than `owner` takes a PIN, and one that has to
 /// set up two-step sign-in, which the server requires, can't be switched
 /// to. An administrator's profile goes only to an app's device
-/// (`device_id`), whose tokens never have administrator rights: a browser's
-/// or the desktop app's sign-in would stay one with them. The PIN itself is
-/// checked next.
+/// (`device_id`), whose tokens never have administrator rights, nor, as
+/// someone else allowed the app, that role's rights over others
+/// ([`AuthUser::role_holds`]): a browser's or the desktop app's sign-in
+/// would stay one with them. The PIN itself is checked next.
 async fn check_cast_switch(state: &AppState, owner: i64, caster: i64, device_id: &str) -> ApiResult<()> {
     let (Some(device), Some(to)) =
         (switch_target(state, owner, owner).await?, switch_target(state, owner, caster).await?)

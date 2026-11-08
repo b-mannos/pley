@@ -311,7 +311,11 @@ private fun SessionCard(session: DashboardSession, origin: String, onOpen: () ->
                         Bar(tc.segmentsReady.toFloat() / tc.segmentsTotal, Modifier.weight(1f), height = 2.dp, color = PleyColors.Info)
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            stringResource(R.string.admin_dashboard_segments, tc.segmentsReady, tc.segmentsTotal),
+                            stringResource(
+                                R.string.admin_dashboard_segments,
+                                number(tc.segmentsReady.toLong(), words.locale),
+                                number(tc.segmentsTotal.toLong(), words.locale),
+                            ),
                             style = MaterialTheme.typography.labelSmall,
                             color = PleyColors.Subtle,
                         )

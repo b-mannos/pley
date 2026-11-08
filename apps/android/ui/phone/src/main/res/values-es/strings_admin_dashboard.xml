@@ -34,7 +34,7 @@
     <string name="admin_dashboard_stop_label">Detener %1$s para %2$s</string>
     <string name="admin_dashboard_stop_label_on">Detener %1$s para %2$s en %3$s</string>
     <string name="admin_dashboard_preparing">Preparando…</string>
-    <string name="admin_dashboard_segments">%1$d/%2$d seg.</string>
+    <string name="admin_dashboard_segments">%1$s/%2$s seg.</string>
     <string name="admin_dashboard_size">tamaño %1$d de %2$d</string>
     <string name="admin_dashboard_transcoder">Transcodificador</string>
     <string name="admin_dashboard_available">Disponible</string>

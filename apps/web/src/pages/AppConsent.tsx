@@ -171,13 +171,16 @@ export function AppConsent({
   const over = isApiError(error, 404);
   const canSwitch = (profiles.data?.length ?? 0) > 1;
   // The administrator rights an app can get: managing requests, and for one
-  // of Pley's own seeing and stopping everyone's streams.
+  // of Pley's own seeing and stopping everyone's streams, which managing the
+  // server includes.
   const approves = user.is_admin && request.scopes.includes("approvals");
   // Managing the server: Pley's own apps only (the server refuses it to others).
   const manages = user.is_admin && client.first_party && request.scopes.includes("server");
   const oversees = user.is_admin && client.first_party && request.scopes.includes("activity");
   const rights = new Intl.ListFormat(currentLocale(), { type: "conjunction" }).format(
-    [approves ? t("consent.rights.approvals") : null, oversees ? t("consent.rights.activity") : null].filter((right) => right !== null),
+    [approves ? t("consent.rights.approvals") : null, oversees || manages ? t("consent.rights.activity") : null].filter(
+      (right) => right !== null,
+    ),
   );
 
   return (
@@ -248,7 +251,11 @@ export function AppConsent({
           <p className="mt-3 text-muted">{rights || manages ? t("consent.cantChange") : t("consent.cantChangeNoAdmin")}</p>
           {user.is_admin ? (
             <p className="mt-1 text-muted">
-              {manages ? t("consent.managesServer") : rights ? t("consent.rightsOnly", { rights }) : t("consent.adminStays")}
+              {manages
+                ? `${t("consent.managesServer")} ${t("consent.managesServerToo", { rights })}`
+                : rights
+                  ? t("consent.rightsOnly", { rights })
+                  : t("consent.adminStays")}
             </p>
           ) : null}
         </div>

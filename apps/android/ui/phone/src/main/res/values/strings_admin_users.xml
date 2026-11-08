@@ -63,6 +63,8 @@
     <string name="admin_users_no_password_hint">This account has no password: set one so it can sign in.</string>
     <string name="admin_users_admin_hint">Can manage libraries, users and server settings.</string>
     <string name="admin_users_managed_not_admin">Managed profiles can\'t be administrators.</string>
+    <string name="admin_users_admin_in_web">Only Pley\'s web app makes an account an administrator.</string>
+    <string name="admin_users_admin_sign_in">An administrator\'s password, PIN and two-step sign-in change in Pley\'s web app.</string>
     <string name="admin_users_home">Member of this home</string>
     <string name="admin_users_home_hint">Shown in the profile switcher, so household members can switch to each other.</string>
     <string name="admin_users_disabled">Disabled</string>

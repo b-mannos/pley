@@ -52,7 +52,7 @@ class UsersAndInvitationsTest {
     @Test
     fun aNewAccountLeavesOutWhatIsNotGiven() {
         val body = PleyJson.encodeToJsonElement(NewUserAccount.serializer(), NewUserAccount(username = "kid", managed = true)).jsonObject
-        assertEquals(setOf("username", "is_admin", "managed", "home", "all_libraries", "library_ids"), body.keys)
+        assertEquals(setOf("username", "managed", "home", "all_libraries", "library_ids"), body.keys)
     }
 
     @Test

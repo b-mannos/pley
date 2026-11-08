@@ -35,7 +35,7 @@
     <string name="admin_dashboard_stop_label_on">Stop %1$s for %2$s on %3$s</string>
     <string name="admin_dashboard_preparing">Preparing…</string>
     <!-- Counts beside their totals, which the web writes without plurals. -->
-    <string name="admin_dashboard_segments" tools:ignore="PluralsCandidate">%1$d/%2$d seg</string>
+    <string name="admin_dashboard_segments" tools:ignore="PluralsCandidate">%1$s/%2$s seg</string>
     <string name="admin_dashboard_size">size %1$d of %2$d</string>
     <string name="admin_dashboard_transcoder">Transcoder</string>
     <string name="admin_dashboard_available">Available</string>

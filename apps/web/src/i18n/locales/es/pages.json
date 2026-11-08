@@ -283,7 +283,8 @@
       "activity": "ver y detener las reproducciones de todos"
     },
     "adminStays": "Tus derechos de administrador se quedan en la aplicación web de Pley.",
-    "managesServer": "Gestiona las bibliotecas, las cuentas y los canales de este servidor como lo haces en la aplicación web de Pley. Los ajustes y las claves del servidor, y tu contraseña, tu PIN, tu inicio de sesión en dos pasos y tus dispositivos, se quedan allí.",
+    "managesServer": "Gestiona las bibliotecas, las cuentas y los canales de este servidor como lo haces en la aplicación web de Pley. Nombrar administradores, los ajustes y las claves del servidor, y tu contraseña, tu PIN, tu inicio de sesión en dos pasos y tus dispositivos se quedan allí.",
+    "managesServerToo": "También obtiene {{rights}}.",
     "overTv": "Esta solicitud ha terminado: vuelve a empezar en tu TV",
     "overApp": "Esta solicitud ha terminado: vuelve a empezar desde la aplicación",
     "deny": "No permitir",

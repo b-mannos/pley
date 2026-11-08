@@ -281,7 +281,8 @@
       "activity": "seeing and stopping everyone's streams"
     },
     "adminStays": "Your administrator rights stay in Pley's web app.",
-    "managesServer": "It manages this server's libraries, accounts and channels as you do in Pley's web app. The server's settings and keys, and your own password, PIN, two-step sign-in and devices, stay there.",
+    "managesServer": "It manages this server's libraries, accounts and channels as you do in Pley's web app. Making administrators, the server's settings and keys, and your own password, PIN, two-step sign-in and devices stay there.",
+    "managesServerToo": "It also gets {{rights}}.",
     "overTv": "This request is over: start again on your TV",
     "overApp": "This request is over: start again from the app",
     "deny": "Don't allow",

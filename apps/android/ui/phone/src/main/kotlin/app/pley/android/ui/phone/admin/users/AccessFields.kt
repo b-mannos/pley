@@ -38,7 +38,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -53,6 +52,7 @@ import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcon
 import app.pley.android.designsystem.icon.PleyIcons
+import app.pley.android.designsystem.text.shownLocale
 import app.pley.android.model.Library
 import app.pley.android.model.LibraryKind
 import app.pley.android.model.admin.LabelUse
@@ -125,7 +125,9 @@ internal data class AccessSources(
  * passed on whole, the limit kept as near as it can be ([withMode]), as
  * the web's AccessFields does. [libraries]: the server's, `null` while
  * unknown. [pickLibrary]: what the sheet says when "Only some" has none
- * chosen.
+ * chosen. Without [limits] (an administrator, whom no limit or exception
+ * holds back, and whose answer the server sends without them), Libraries
+ * alone.
  */
 @Composable
 internal fun AccessGroup(
@@ -139,17 +141,18 @@ internal fun AccessGroup(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     birthday: Boolean = false,
+    limits: Boolean = true,
 ) {
     var sheet by remember { mutableStateOf<AccessSheet?>(null) }
     val systems = sources.systems
     val mode = limitMode(systems, access)
     val ratingFor = ratingForWords()
     val country = ratingSystem(systems, access.maxAgeSystem)
-    val locale = LocalConfiguration.current.locales[0]
+    val locale = shownLocale()
     val born = access.birthMonth?.let(::parseBirthMonth)
     val change = { next: AccessChoice -> if (next != access) onAgeLimit(next) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(28.dp)) {
-        SettingsGroup(null, footer = limitHint(access, systems, ratingFor)) {
+        SettingsGroup(null, footer = if (limits) limitHint(access, systems, ratingFor) else null) {
             SettingsRow(
                 stringResource(R.string.admin_users_access_libraries),
                 value = librariesLabel(access.allLibraries, access.libraryIds, libraries),
@@ -157,6 +160,7 @@ internal fun AccessGroup(
                 enabled = enabled,
                 onClick = { sheet = AccessSheet.Libraries },
             )
+            if (!limits) return@SettingsGroup
             RowDivider()
             SettingsRow(
                 stringResource(R.string.admin_users_access_age_limit),
@@ -213,6 +217,7 @@ internal fun AccessGroup(
                 )
             }
         }
+        if (!limits) return@Column
         if (access.maxAge != null && sources.tmdbKey == false) UnratedWarning()
         SettingsGroup(stringResource(R.string.admin_users_exceptions), footer = stringResource(R.string.admin_users_exceptions_hint)) {
             // Only an age limit hides what these would show; kept as they are while there's none.
@@ -367,7 +372,7 @@ private fun limitHint(access: AccessChoice, systems: RatingSystems?, ratingFor: 
     val born = birthMonth?.let(::parseBirthMonth)
     val end = birthMonth?.let(::birthdayLimitEnd)
     if (maxAge == null || born == null || end == null) return limit
-    val locale = LocalConfiguration.current.locales[0]
+    val locale = shownLocale()
     val ends = DateTimeFormatter.ofPattern("LLLL yyyy", locale).format(end)
     return limit + " " + stringResource(R.string.admin_users_limit_hint_birthday, monthName(born.monthValue, locale), ends)
 }

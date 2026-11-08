@@ -18,7 +18,12 @@ describes how they are made.
   The server's settings, network, transcoder, requests' services, backups
   and Live TV's sources, which hold its keys and passwords, stay in the web
   app, as do the account's own name, password, PIN, two-step sign-in,
-  devices and apps.
+  devices and apps. Making an administrator, and changing another
+  administrator's password, PIN or two-step sign-in, stay there too.
+- An administrator's rights in an app (managing the server, approving
+  requests, seeing everyone's streams) hold only for an app that
+  administrator allowed: someone else's phone or TV that a cast switched to
+  their profile plays as it, and nothing more.
 - In Settings → Users and Invitations, the age limit is set "By rating"
   (one of 29 countries' ratings, the metadata region's first) or "By
   age", each showing only its own fields, and lists show it that way

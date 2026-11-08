@@ -283,7 +283,8 @@
       "activity": "la vue et l’arrêt des lectures de tout le monde"
     },
     "adminStays": "Vos droits d’administrateur restent dans l’application web de Pley.",
-    "managesServer": "Elle gère les bibliothèques, les comptes et les chaînes de ce serveur comme vous le faites dans l’application web de Pley. Les paramètres et les clés du serveur, ainsi que votre mot de passe, votre code PIN, votre connexion en deux étapes et vos appareils, restent là-bas.",
+    "managesServer": "Elle gère les bibliothèques, les comptes et les chaînes de ce serveur comme vous le faites dans l’application web de Pley. La nomination d’administrateurs, les paramètres et les clés du serveur, ainsi que votre mot de passe, votre code PIN, votre connexion en deux étapes et vos appareils, restent là-bas.",
+    "managesServerToo": "Elle obtient aussi {{rights}}.",
     "overTv": "Cette demande est terminée : recommencez sur votre TV",
     "overApp": "Cette demande est terminée : recommencez depuis l’application",
     "deny": "Ne pas autoriser",

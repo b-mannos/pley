@@ -125,6 +125,7 @@ Each endpoint table has a **Who** column:
 | `public` | anyone, without a token |
 | `user` | any signed-in user; an app's token is refused (`403 insufficient_scope`) |
 | `any app` | any signed-in user, and every app's token |
+| `user`, and `server` | any signed-in user; of apps' tokens, only one allowed `server` |
 | `library`, `play`, `playlists`, `profiles`, `requests`, `approvals`, `activity` | any signed-in user, and an app's token with that [scope](#scopes) (`HEAD` as `GET`); with `play` or `activity`, `activity` or `server`, a token with either |
 | `admin` | administrators only (`403` for others); of apps' tokens, only Pley's own allowed [`server`](#scopes) on an administrator's account, on the routes that scope opens |
 | `page` | Pley's consent page only ([its endpoints](#the-consent-pages-endpoints)) |
@@ -570,7 +571,9 @@ lists carry (Kodi).
   account_admin?: boolean }`. `scope` is what the app was allowed
   (`"library play"`); `is_admin`, `all_libraries` and `max_age` are the
   app's rights (`is_admin` is always false); `account_admin`, for Pley's own
-  apps only, whether the account is an administrator.
+  apps only, whether the account is an administrator who allowed the app
+  (false once a cast switched someone else's app to an administrator's
+  profile).
 - `PUT /api/auth/password` signs the user out everywhere but this device,
   signs out every app using the account or allowed by it, and ends the
   account's compatibility tokens.
@@ -1286,7 +1289,10 @@ What apps see:
   administrator's account it sees every library without an age limit, as
   the account does, and administers nothing: history, sessions and
   collections answer it as they would anyone else. Three exceptions, on an
-  administrator's account and for Pley's own apps alone: one allowed
+  administrator's account, for Pley's own apps alone, and only for an app
+  that administrator allowed (not one someone else allowed that a cast
+  switched to the profile since, which plays as it and nothing more): one
+  allowed
   `server` manages the server (below), one allowed `approvals` manages
   requests (approves and declines them, marks them as added by hand, sees and
   deletes everyone's, and hears the managers' request events; see
@@ -1323,9 +1329,16 @@ What apps see:
   password. It may not change the account's own name, password, PIN or
   two-step sign-in, see or sign out its devices and apps, disable it or
   delete it, and its administration ends at once when the account stops
-  being an administrator. `GET /api/auth/me` tells Pley's own apps whether
-  the account is an administrator (`account_admin`), so one signed in
-  before it could ask for `server` can offer to sign in again.
+  being an administrator. What makes an administrator, or gets into one's
+  account, stays with the web app too (`403`): it makes no account an
+  administrator (`is_admin: true` on `POST /api/users` or
+  `PATCH /api/users/{id}`), and changes no other administrator's
+  password or PIN, nor turns their two-step sign-in off. Either would let
+  whoever holds the app's token into the web app as an administrator. It
+  may take an administrator's role away. `GET /api/auth/me` tells Pley's
+  own apps whether the account is an administrator who allowed the app
+  (`account_admin`), so one signed in before it could ask for `server` can
+  offer to sign in again.
 - Libraries' `paths` are empty, but for one that manages the server, and
   files' `path` is the file name only.
 - `/api/users/{id}/avatar` shows only the app's own profile, its
@@ -1594,7 +1607,7 @@ Invitations have fixed limits only.
 | Method | Path | Who | What |
 |---|---|---|---|
 | GET | `/api/labels` | `admin` | `{ label, items, rules }[]`: every label on a title or in a profile's or invitation's rules, by name, with how many titles carry it and how many rules name it |
-| GET | `/api/ratings/systems` | `user` | `{ region, systems: { country, name, ratings: { name, age, kind: "film" \| "tv" \| null }[] }[]}`: the metadata region (`"GB"`) and each country's ratings, youngest first, as ages are read from them. A name is the board's own, or its shortest when that's a sentence; `kind` null is for films and TV alike. |
+| GET | `/api/ratings/systems` | `user`, and `server` | `{ region, systems: { country, name, ratings: { name, age, kind: "film" \| "tv" \| null }[] }[]}`: the metadata region (`"GB"`) and each country's ratings, youngest first, as ages are read from them. A name is the board's own, or its shortest when that's a sentence; `kind` null is for films and TV alike. |
 
 ## Libraries
 
@@ -3488,7 +3501,7 @@ MediaRequest, retry_at: Timestamp | null }`, and a `409 declined` is
 
 | Method | Path | Who | What |
 |---|---|---|---|
-| GET | `/api/activity` | `activity` | `{ scans: ScanStatus[], sessions: SessionInfo[], analysis: AnalysisStatus \| null, seasons_pending: number, previews_pending: number, previews_running: number, library_work: LibraryWorkStatus \| null }` |
+| GET | `/api/activity` | `activity` or `server` | `{ scans: ScanStatus[], sessions: SessionInfo[], analysis: AnalysisStatus \| null, seasons_pending: number, previews_pending: number, previews_running: number, library_work: LibraryWorkStatus \| null }` |
 | GET | `/api/sessions` | `play` | `PlayingSession[]`: the caller's own sessions whose players are there, oldest first ([Remote control](#remote-control)) |
 | DELETE | `/api/sessions/{id}` | `play` or `activity` | optional body `{ message?: string }` (at most 200 characters, else `400`) → `204`: stops a playback session at once |
 | POST | `/api/sessions/{id}/command` | `play` | `{ command: Control, position_ms?: number, offset_ms?: number, stream_index?: number }` → `202`: sends one of the caller's own players a command ([Remote control](#remote-control)) |

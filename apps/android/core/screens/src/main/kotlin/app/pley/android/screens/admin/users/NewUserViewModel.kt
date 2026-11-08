@@ -23,13 +23,15 @@ import kotlinx.serialization.builtins.ListSerializer
 /** A regular account signs in with a password; a managed profile is switched to from a home member's. */
 enum class AccountKind { Regular, Managed }
 
-/** What a new account is made with, as the web's Add user dialog asks it. */
+/**
+ * What a new account is made with, as the web's Add user dialog asks it,
+ * but for its role: the web app makes administrators.
+ */
 data class NewUserForm(
     val kind: AccountKind = AccountKind.Regular,
     val username: String = "",
     val displayName: String = "",
     val password: String = "",
-    val isAdmin: Boolean = false,
     val home: Boolean = true,
     val access: AccessChoice = AccessChoice(),
     val pin: String = "",
@@ -38,14 +40,8 @@ data class NewUserForm(
 ) {
     val managed: Boolean get() = kind == AccountKind.Managed
 
-    /** Administrators' requests are approved as they make them. */
-    val asAdmin: Boolean get() = isAdmin && !managed
-
     /** Requests as the page shows them. */
-    val requests: RequestAccess get() = when {
-        asAdmin -> RequestAccess.Auto
-        else -> requestChoice ?: requestsByDefault(managed, access.maxAge)
-    }
+    val requests: RequestAccess get() = requestChoice ?: requestsByDefault(managed, access.maxAge)
 }
 
 /** What keeps a [NewUserForm] from being sent, as the web says it before asking the server. */
@@ -105,7 +101,6 @@ class NewUserViewModel(admin: ServerAdmin) : AdminViewModel(admin) {
             username = form.username.trim(),
             password = form.password.takeIf { !form.managed },
             displayName = name.ifEmpty { null },
-            isAdmin = form.asAdmin,
             managed = form.managed,
             home = form.home,
             allLibraries = form.access.allLibraries,
@@ -117,7 +112,7 @@ class NewUserViewModel(admin: ServerAdmin) : AdminViewModel(admin) {
             showLabels = form.access.showLabels.ifEmpty { null },
             hideLabels = form.access.hideLabels.ifEmpty { null },
             pin = form.pin.ifEmpty { null },
-            requestAccess = form.requests.takeIf { !form.asAdmin },
+            requestAccess = form.requests,
         )
         // The page says so as it goes back ([created]), as a confirmation could arrive after it left.
         change {

@@ -107,28 +107,39 @@ impl AuthUser {
         self.app.as_ref().is_none_or(|app| crate::oauth::clients::builtin(&app.client_id).is_some())
     }
 
+    /// Whether the account's administrator role holds for this request:
+    /// Pley's own sign-in or a compatibility token on an administrator's
+    /// account, or an app that administrator allowed. An app someone else
+    /// allowed that switched to the profile since (a cast to their phone or
+    /// TV) acts as it, but never with its role's rights over others: the
+    /// scopes it holds were never that administrator's to give.
+    pub fn role_holds(&self) -> bool {
+        self.account_admin && self.app.as_ref().is_none_or(|app| app.approved_by == self.id)
+    }
+
     /// Whether this request manages requests (approves and declines them,
     /// sees and deletes everyone's): an administrator's own sign-in, or one
-    /// of pley's own apps on an administrator's account allowed `approvals`
-    /// (no other app can be).
+    /// of pley's own apps on an administrator's account, allowed by them,
+    /// with `approvals` (no other app can be).
     pub fn manages_requests(&self) -> bool {
         match &self.app {
             None => self.is_admin,
-            Some(app) => self.account_admin && app.scopes.contains(Scope::Approvals) && self.first_party(),
+            Some(app) => self.role_holds() && app.scopes.contains(Scope::Approvals) && self.first_party(),
         }
     }
 
     /// Whether this request sees and stops everyone's playback, as the
     /// dashboard does: an administrator's own sign-in (and a compatibility
     /// token that sees everyone's, by its own rules), or one of pley's own
-    /// apps on an administrator's account allowed `activity` or `server` (no
-    /// other app can be: it sees and stops only its profile's own). Remote
-    /// control and casting stay the user's own whatever this says.
+    /// apps on an administrator's account, allowed by them, with `activity`
+    /// or `server` (no other app can be: it sees and stops only its
+    /// profile's own). Remote control and casting stay the user's own
+    /// whatever this says.
     pub fn oversees_playback(&self) -> bool {
         match &self.app {
             None => self.is_admin,
             Some(app) => {
-                self.account_admin
+                self.role_holds()
                     && (app.scopes.contains(Scope::Activity) || app.scopes.contains(Scope::Server))
                     && self.first_party()
             }
@@ -136,18 +147,18 @@ impl AuthUser {
     }
 
     /// Whether this request manages the server: an administrator's own
-    /// sign-in, or one of pley's own apps on an administrator's account
-    /// allowed `server` (no other app can be, and never a compatibility
-    /// token). The administrators' routes `server` opens ([`AdminUser`],
-    /// APP_ROUTES) answer such an app as an administrator; elsewhere it
-    /// stays a viewer, apart from what this opens by name.
+    /// sign-in, or one of pley's own apps on an administrator's account,
+    /// allowed by them, with `server` (no other app can be, and never a
+    /// compatibility token). The administrators' routes `server` opens
+    /// ([`AdminUser`], APP_ROUTES) answer such an app as an administrator;
+    /// elsewhere it stays a viewer, apart from what this opens by name.
     pub fn administers(&self) -> bool {
         if self.compatibility.is_some() {
             return false;
         }
         match &self.app {
             None => self.is_admin,
-            Some(app) => self.account_admin && app.scopes.contains(Scope::Server) && self.first_party(),
+            Some(app) => self.role_holds() && app.scopes.contains(Scope::Server) && self.first_party(),
         }
     }
 
@@ -1812,6 +1823,13 @@ mod tests {
         assert_eq!((app.grant_id, app.approved_by), (admin.grant_id, 2));
         assert_eq!(app.scopes.to_string(), "library play");
         assert_eq!(&*app.client_id, "https://pley-media-server.github.io/pley/oauth/android.json");
+
+        assert!(user.role_holds(), "the administrator allowed it");
+        // The kid's app, switched to the administrator's profile since.
+        let switched = app_of(&auth, 2, 1).await;
+        let switched = auth.validate_app(&switched.access_token).await.unwrap();
+        assert!(switched.all_libraries && switched.max_age.is_none(), "it sees as the profile does");
+        assert!(!switched.role_holds(), "but has none of its role's rights over others");
 
         let kid = app_of(&auth, 1, 1).await;
         let kid = auth.validate_app(&kid.access_token).await.unwrap();

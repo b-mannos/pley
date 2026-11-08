@@ -81,7 +81,10 @@ private sealed interface UserDialog {
  * One account (the web's user dialog), each change sent as it is made.
  * One's own account can't change its password, PIN or two-step sign-in
  * here (Account does, asking for the password), nor be disabled, signed
- * out everywhere or deleted: those aren't offered, as on the web.
+ * out everywhere or deleted: those aren't offered, as on the web. Nor are
+ * making an administrator, and another administrator's password, PIN and
+ * two-step sign-in, which the server leaves to the web app; nor an
+ * administrator's age limit and exceptions, which don't apply to one.
  */
 @Composable
 internal fun UserAccountPage(id: Long) {
@@ -157,9 +160,10 @@ internal fun UserAccountPage(id: Long) {
                 modifier = Modifier.adminWidth,
                 enabled = idle,
                 birthday = true,
+                limits = !user.asAdmin,
             )
         }
-        if (!self) {
+        if (!self && !user.asAdmin) {
             item(key = "pin") {
                 SettingsGroup(
                     null,
@@ -174,7 +178,7 @@ internal fun UserAccountPage(id: Long) {
                 }
             }
         }
-        if (user.twoStep && !self) {
+        if (user.twoStep && !self && !user.asAdmin) {
             item(key = "two-step") {
                 SettingsGroup(
                     stringResource(R.string.admin_users_two_step_title),
@@ -337,10 +341,15 @@ private fun Header(user: UserAccount, picture: String?) {
     }
 }
 
-/** The display name, and a new password (not one's own: Account changes it). */
+/** The display name, and a new password (not one's own, nor an administrator's: the web app changes them). */
 @Composable
 private fun ProfileGroup(user: UserAccount, self: Boolean, idle: Boolean, onRename: () -> Unit, onPassword: () -> Unit) {
-    SettingsGroup(null, Modifier.adminWidth, footer = if (self) stringResource(R.string.admin_users_own_password) else null) {
+    val footer = when {
+        self -> stringResource(R.string.admin_users_own_password)
+        user.asAdmin -> stringResource(R.string.admin_users_admin_sign_in)
+        else -> null
+    }
+    SettingsGroup(null, Modifier.adminWidth, footer = footer) {
         SettingsRow(
             stringResource(R.string.admin_users_display_name),
             value = user.displayName?.takeIf { it.isNotBlank() },
@@ -348,7 +357,7 @@ private fun ProfileGroup(user: UserAccount, self: Boolean, idle: Boolean, onRena
             enabled = !self && idle,
             onClick = onRename,
         )
-        if (!self) {
+        if (!self && !user.asAdmin) {
             RowDivider()
             SettingsRow(
                 stringResource(if (user.managed) R.string.admin_users_password else R.string.admin_users_new_password),
@@ -368,8 +377,8 @@ private fun ProfileGroup(user: UserAccount, self: Boolean, idle: Boolean, onRena
 
 /**
  * Administrator, home member, disabled. Off limits where the server
- * would refuse: a managed profile as administrator, one's own role or
- * account, the last administrator's.
+ * would refuse: making an administrator (the web app does), one's own
+ * role or account, the last administrator's.
  */
 @Composable
 private fun RolesGroup(page: UserPage, self: Boolean, idle: Boolean, model: UserViewModel) {
@@ -378,9 +387,16 @@ private fun RolesGroup(page: UserPage, self: Boolean, idle: Boolean, model: User
         SwitchRow(
             stringResource(R.string.admin_users_administrator),
             checked = user.asAdmin,
-            onChange = model::setAdmin,
-            subtitle = stringResource(if (user.managed) R.string.admin_users_managed_not_admin else R.string.admin_users_admin_hint),
-            enabled = idle && !user.managed && !(self && user.isAdmin) && !(page.lastAdmin && user.isAdmin),
+            onChange = { on -> if (!on) model.removeAdmin() },
+            subtitle = stringResource(
+                when {
+                    user.managed -> R.string.admin_users_managed_not_admin
+                    user.asAdmin -> R.string.admin_users_admin_hint
+                    else -> R.string.admin_users_admin_in_web
+                },
+            ),
+            // Only taken away: the web app makes administrators.
+            enabled = idle && user.asAdmin && !self && !page.lastAdmin,
             modifier = Modifier.testTag(USER_ADMIN),
         )
         RowDivider(inset = false)

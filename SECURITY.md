@@ -218,10 +218,15 @@ Apps sign in on Pley's own page with OAuth 2.1.
   with the web app, and no answer an app can reach carries a key, a
   password or a provider's address (tests/app_tokens.rs checks every one).
   Such a token can't change the account's own name, password, PIN or
-  two-step sign-in, nor see or sign out its devices and apps, and `server`
-  is never allowed with a TV's code, which anyone in front of a screen
-  could pass to an administrator. Each is checked against the account at
-  every request, so a role taken away takes them at once. Other apps, and
+  two-step sign-in, nor see or sign out its devices and apps. Nor can it
+  make an administrator, or change another administrator's password, PIN
+  or two-step sign-in, either of which would take whoever holds it into the
+  web app as an administrator. `server` is never allowed with a TV's code,
+  which anyone in front of a screen could pass to an administrator. Each
+  is checked against the account at every request, so a role taken away
+  takes them at once, and holds only for an app that administrator
+  allowed: someone else's phone or TV that a cast switched to an
+  administrator's profile plays as it, with none of the three. Other apps, and
   apps on other accounts, see and stop only their profile's own streams.
   Every route apps may use is listed with the scope it needs, anything
   else is refused, and the compatibility APIs refuse their tokens.

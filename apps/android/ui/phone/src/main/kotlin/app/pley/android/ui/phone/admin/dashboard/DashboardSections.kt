@@ -179,7 +179,7 @@ private fun JobCard(job: DashboardTranscoderJob) {
             InfoLine(stringResource(R.string.admin_dashboard_job_fps), i.fps?.let { Math.round(it).toString() } ?: "—")
             InfoLine(stringResource(R.string.admin_dashboard_job_segments)) {
                 if (i.segmentsTotal > 0) {
-                    Text("${i.segmentsReady} / ${i.segmentsTotal}", style = MaterialTheme.typography.bodyMedium, color = PleyColors.Fg)
+                    Text("${number(i.segmentsReady.toLong(), words.locale)} / ${number(i.segmentsTotal.toLong(), words.locale)}", style = MaterialTheme.typography.bodyMedium, color = PleyColors.Fg)
                     Bar(i.segmentsReady.toFloat() / i.segmentsTotal, Modifier.padding(top = 4.dp))
                 } else {
                     Text("—", style = MaterialTheme.typography.bodyMedium, color = PleyColors.Subtle)

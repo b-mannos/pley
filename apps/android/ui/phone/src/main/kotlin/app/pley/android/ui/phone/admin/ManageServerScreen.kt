@@ -73,6 +73,7 @@ internal fun ManageServerScreen() {
                 body = stringResource(R.string.admin_not_admin_body),
                 icon = PleyIcons.Lock,
             )
+            null -> Unit
         }
     }
 }

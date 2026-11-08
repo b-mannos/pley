@@ -789,9 +789,10 @@ passwords, and stay in the web app: the server doesn't let apps read or
 change them, and the page says where they are. The app asks for the
 `server` scope as it signs in, where the server offers it
 ([API.md](API.md#scopes)); an administrator signed in before then is
-offered to sign in again, and anyone else sees nothing of it. TVs don't
-manage the server: they sign in with a code, and the server never gives
-the scope to a code.
+offered to sign in again, and anyone else sees nothing of it, a phone
+someone else signed in that a cast switched to an administrator's
+profile included. TVs don't manage the server: they sign in with a code,
+and the server never gives the scope to a code.
 
 - **Dashboard**: what plays, with its transcode, and stopping a stream
   with a message; the server's and the machine's CPU and memory over the
@@ -808,11 +809,15 @@ the scope to a code.
   a channel's guide id. Without the list of sources, the lineup has no
   filter by source.
 - **Users** and **Invitations**: the accounts and profiles; an account's
-  page with everything an administrator changes on the web (name,
-  password, administrator, disabled, household, requests, libraries, age
-  limit, label exceptions, PIN, two-step sign-in, devices, apps,
-  deleting); making accounts and profiles; invitation links, made,
-  copied, shared and deleted. An age limit is set as on the web: by a
+  page with what an administrator changes on the web (name, password,
+  disabled, household, requests, libraries, age limit, label exceptions,
+  PIN, two-step sign-in, devices, apps, deleting, and taking the
+  administrator's role away); making accounts and profiles; invitation
+  links, made, copied, shared and deleted. Making an administrator, and
+  another administrator's password, PIN and two-step sign-in, stay in the
+  web app, as the server requires: either would let whoever holds the
+  phone into it as an administrator. An administrator's page has no age
+  limit or label exceptions, which don't apply to one. An age limit is set as on the web: by a
   country's rating, by age, or (for an account) by birthday, and titles
   with some labels are always or never shown. Without a TMDB key on the
   server, the page says that unrated movies are hidden; the key itself is

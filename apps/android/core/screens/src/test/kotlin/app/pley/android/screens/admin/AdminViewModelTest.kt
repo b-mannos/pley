@@ -15,6 +15,7 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -110,9 +111,10 @@ class AdminViewModelTest {
         assertEquals(AdminAccess.None, ServerAdmin.accessOf(session(false, setOf("library", "server"))))
         assertEquals(AdminAccess.SignInAgain, ServerAdmin.accessOf(session(true, setOf("library", "play"))))
         assertEquals(AdminAccess.Manages, ServerAdmin.accessOf(session(true, setOf("library", "server"))))
-        assertEquals(AdminAccess.None, ManageServerViewModel(ServerAdmin.None).access.value)
+        // Not known until the sign-in is read: neither page says "only administrators" meanwhile.
+        assertNull(ManageServerViewModel(ServerAdmin.None).access.value)
         val manages = ManageServerViewModel(FakeServerAdmin(AdminAccess.Manages))
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { manages.access.collect {} }
-        assertEquals(AdminAccess.Manages, manages.access.first { it != AdminAccess.None })
+        assertEquals(AdminAccess.Manages, manages.access.first { it != null })
     }
 }

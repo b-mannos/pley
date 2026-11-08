@@ -63,6 +63,8 @@
     <string name="admin_users_no_password_hint">Esta cuenta no tiene contraseña: define una para que pueda iniciar sesión.</string>
     <string name="admin_users_admin_hint">Puede gestionar las bibliotecas, los usuarios y los ajustes del servidor.</string>
     <string name="admin_users_managed_not_admin">Los perfiles gestionados no pueden ser administradores.</string>
+    <string name="admin_users_admin_in_web">Solo la aplicación web de Pley convierte una cuenta en administradora.</string>
+    <string name="admin_users_admin_sign_in">La contraseña, el PIN y el inicio de sesión en dos pasos de un administrador se cambian en la aplicación web de Pley.</string>
     <string name="admin_users_home">Miembro de este hogar</string>
     <string name="admin_users_home_hint">Se muestra en el selector de perfiles, para que los miembros del hogar puedan cambiar entre ellos.</string>
     <string name="admin_users_disabled">Desactivado</string>

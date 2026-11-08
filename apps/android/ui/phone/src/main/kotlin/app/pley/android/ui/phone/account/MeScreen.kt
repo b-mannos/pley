@@ -144,7 +144,7 @@ internal fun MeScreen() {
                     SettingsRow(stringResource(R.string.account_history), icon = PleyIcons.History, onClick = { navigator.open(PleyKey.History) })
                 }
             }
-            if (adminAccess != AdminAccess.None) {
+            if (adminAccess != null && adminAccess != AdminAccess.None) {
                 item(key = "server", contentType = "group") {
                     Group(stringResource(R.string.admin_me_group)) {
                         val manages = adminAccess == AdminAccess.Manages

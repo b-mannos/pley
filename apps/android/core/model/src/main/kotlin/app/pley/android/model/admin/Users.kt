@@ -49,15 +49,15 @@ data class UserAccount(
 
 /**
  * POST /api/users: a new account, or a managed profile ([managed], no
- * password, never an administrator). Fields left `null` are left out, so
- * the server's defaults apply.
+ * password). Never an administrator: the server leaves making one to its
+ * web app. Fields left `null` are left out, so the server's defaults
+ * apply.
  */
 @Serializable
 data class NewUserAccount(
     val username: String,
     val password: String? = null,
     val displayName: String? = null,
-    val isAdmin: Boolean = false,
     val managed: Boolean = false,
     val home: Boolean = true,
     val allLibraries: Boolean = true,

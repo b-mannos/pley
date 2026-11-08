@@ -126,11 +126,6 @@ internal fun AdminColumn(state: androidx.compose.foundation.lazy.LazyListState =
 internal val Modifier.adminWidth: Modifier get() = this.widthIn(max = ADMIN_MAX_WIDTH).fillMaxWidth()
 
 /**
- * The toasts of [model]'s changes: the server's refusals as the shell says
- * them ([app.pley.android.ui.phone.shell.PhoneShellState.report]), and
- * the confirmations [said] has words for.
- */
-/**
  * Runs [block] while the page is on screen (started), and stops it when it
  * isn't, as the web reads what changes only while it shows: a page above
  * it, the app in the background.
@@ -141,6 +136,11 @@ internal fun WhileShown(key: Any, block: suspend () -> Unit) {
     LaunchedEffect(key, lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { block() } }
 }
 
+/**
+ * The toasts of [model]'s changes: the server's refusals as the shell says
+ * them ([app.pley.android.ui.phone.shell.PhoneShellState.report]), and
+ * the confirmations [said] has words for.
+ */
 @Composable
 internal fun AdminEvents(model: AdminViewModel, said: (AdminDone) -> String? = { null }) {
     val shell = LocalPhoneShell.current

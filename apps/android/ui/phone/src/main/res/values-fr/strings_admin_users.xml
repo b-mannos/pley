@@ -63,6 +63,8 @@
     <string name="admin_users_no_password_hint">Ce compte n’a pas de mot de passe : définissez-en un pour qu’il puisse se connecter.</string>
     <string name="admin_users_admin_hint">Peut gérer les bibliothèques, les utilisateurs et les paramètres du serveur.</string>
     <string name="admin_users_managed_not_admin">Les profils gérés ne peuvent pas être administrateurs.</string>
+    <string name="admin_users_admin_in_web">Seule l’application web de Pley fait d’un compte un administrateur.</string>
+    <string name="admin_users_admin_sign_in">Le mot de passe, le code PIN et la connexion en deux étapes d’un administrateur se changent dans l’application web de Pley.</string>
     <string name="admin_users_home">Membre de ce foyer</string>
     <string name="admin_users_home_hint">Affiché dans le sélecteur de profil, pour que les membres du foyer puissent basculer de l’un à l’autre.</string>
     <string name="admin_users_disabled">Désactivé</string>

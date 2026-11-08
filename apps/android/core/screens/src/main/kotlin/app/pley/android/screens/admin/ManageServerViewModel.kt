@@ -16,9 +16,11 @@ import kotlinx.coroutines.flow.stateIn
  * Whether the profile manages the server from this phone (Me's row, and
  * Manage server's page): an administrator's account allowed `server`; one
  * signed in before the app could ask for it is offered to sign in again.
+ * `null` until the sign-in is read, so a page shows nothing rather than
+ * "only administrators" for a moment.
  */
 class ManageServerViewModel(admin: ServerAdmin) : ViewModel() {
-    val access: StateFlow<AdminAccess> = admin.access.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AdminAccess.None)
+    val access: StateFlow<AdminAccess?> = admin.access.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     companion object {
         val factory: ViewModelProvider.Factory = viewModelFactory {

@@ -123,15 +123,8 @@ internal fun NewUserPage() {
             }
         }
         item(key = "roles") {
-            SettingsGroup(null, Modifier.adminWidth) {
-                SwitchRow(
-                    stringResource(R.string.admin_users_administrator),
-                    checked = form.asAdmin,
-                    onChange = { on -> model.edit { it.copy(isAdmin = on) } },
-                    subtitle = stringResource(if (managed) R.string.admin_users_managed_not_admin else R.string.admin_users_admin_hint),
-                    enabled = !managed,
-                )
-                RowDivider(inset = false)
+            // An administrator is made in the web app, which the server leaves it to.
+            SettingsGroup(null, Modifier.adminWidth, footer = stringResource(R.string.admin_users_admin_in_web)) {
                 SwitchRow(
                     stringResource(R.string.admin_users_home),
                     checked = form.home,
@@ -142,7 +135,6 @@ internal fun NewUserPage() {
         }
         item(key = "requests") {
             val hint = when {
-                form.asAdmin -> R.string.admin_users_requests_admin
                 form.access.maxAge != null -> R.string.admin_users_requests_age_limit
                 else -> R.string.admin_users_requests_hint
             }
@@ -151,7 +143,6 @@ internal fun NewUserPage() {
                     stringResource(R.string.admin_users_requests),
                     value = requestLabel(form.requests),
                     icon = PleyIcons.Compass,
-                    enabled = !form.asAdmin,
                     onClick = { dialog = NewUserDialog.Requests },
                 )
             }
