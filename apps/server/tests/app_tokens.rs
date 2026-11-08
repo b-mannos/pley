@@ -65,8 +65,6 @@ const FIRST_PARTY: &[(&str, &str)] = &[
     ("DELETE", "/api/me/compatibility-tokens/{id}"),
     // Apps have their keys in their token answers.
     ("GET", "/api/server/proof-key"),
-    // For picking and showing age limits, which the web app does.
-    ("GET", "/api/ratings/systems"),
 ];
 
 /// Administration no app reaches, not even with `server` (what it opens is
@@ -75,7 +73,6 @@ const FIRST_PARTY: &[(&str, &str)] = &[
 /// web app.
 const ADMIN: &[(&str, &str)] = &[
     ("POST", "/api/libraries/{id}/collections"),
-    ("GET", "/api/labels"),
     ("PATCH", "/api/collections/{id}"),
     ("DELETE", "/api/collections/{id}"),
     ("POST", "/api/collections/{id}/items"),
@@ -400,7 +397,9 @@ async fn each_scope_opens_only_its_routes() {
                 }
                 None => assert!(challenge.is_empty(), "{scope}: {method} {uri}: {status} {challenge}"),
             }
-            if scope == "server" && *need == Need::Scope(Scope::Server) {
+            // The rating tables are any signed-in user's, as in the web app:
+            // the scope only lets an app read them.
+            if scope == "server" && *need == Need::Scope(Scope::Server) && *path != "/api/ratings/systems" {
                 // Ann isn't an administrator: the scope opens the route,
                 // her role doesn't let her through.
                 assert_eq!(status, StatusCode::FORBIDDEN, "{method} {uri}");

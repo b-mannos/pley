@@ -39,14 +39,14 @@ import app.pley.android.model.admin.UserDevice
 import app.pley.android.model.format.FormatWords
 import app.pley.android.model.format.formatRelative
 import app.pley.android.screens.admin.AdminLoad
-import app.pley.android.screens.admin.valueOrNull
-import app.pley.android.screens.admin.users.AccessChoice
 import app.pley.android.screens.admin.users.UserPage
 import app.pley.android.screens.admin.users.UserViewModel
+import app.pley.android.screens.admin.users.accessOf
 import app.pley.android.screens.admin.users.asAdmin
 import app.pley.android.screens.admin.users.passwordProblem
 import app.pley.android.screens.admin.users.pinOk
 import app.pley.android.screens.admin.users.requestsShown
+import app.pley.android.screens.admin.valueOrNull
 import app.pley.android.ui.phone.R
 import app.pley.android.ui.phone.account.Choice
 import app.pley.android.ui.phone.account.ChoiceSheet
@@ -88,6 +88,9 @@ internal fun UserAccountPage(id: Long) {
     val model: UserViewModel = viewModel(key = "user-$id", factory = UserViewModel.factory(id))
     val load by model.page.state.collectAsStateWithLifecycle()
     val libraries by model.libraries.state.collectAsStateWithLifecycle()
+    val ratingSystems by model.ratingSystems.state.collectAsStateWithLifecycle()
+    val labels by model.labels.state.collectAsStateWithLifecycle()
+    val metadataKeys by model.metadataKeys.state.collectAsStateWithLifecycle()
     val server by model.server.state.collectAsStateWithLifecycle()
     val devices by model.devices.state.collectAsStateWithLifecycle()
     val apps by model.apps.state.collectAsStateWithLifecycle()
@@ -144,13 +147,16 @@ internal fun UserAccountPage(id: Long) {
         }
         item(key = "access") {
             AccessGroup(
-                access = AccessChoice(user.allLibraries, user.libraryIds, user.maxAge),
+                access = accessOf(user),
                 libraries = libraries.valueOrNull,
+                sources = AccessSources(ratingSystems.valueOrNull, labels.valueOrNull, metadataKeys.valueOrNull?.tmdbKey),
                 onLibraries = model::setLibraries,
                 onAgeLimit = model::setAgeLimit,
+                onLabels = model::setLabels,
                 pickLibrary = stringResource(R.string.admin_users_pick_library),
                 modifier = Modifier.adminWidth,
                 enabled = idle,
+                birthday = true,
             )
         }
         if (!self) {

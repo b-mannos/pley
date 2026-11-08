@@ -43,6 +43,7 @@ import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.designsystem.text.formatWords
 import app.pley.android.model.Library
 import app.pley.android.model.admin.Invitation
+import app.pley.android.model.admin.RatingSystems
 import app.pley.android.model.format.FormatWords
 import app.pley.android.model.format.formatRelative
 import app.pley.android.screens.PleyKey
@@ -69,6 +70,7 @@ import app.pley.android.ui.phone.admin.adminWidth
 import app.pley.android.ui.phone.admin.numberIn
 import app.pley.android.ui.phone.admin.numberProblem
 import app.pley.android.ui.phone.admin.users.AccessGroup
+import app.pley.android.ui.phone.admin.users.AccessSources
 import app.pley.android.ui.phone.admin.users.ShownAgain
 import app.pley.android.ui.phone.admin.users.Tag
 import app.pley.android.ui.phone.admin.users.TagTone
@@ -98,6 +100,7 @@ private fun InvitationsList() {
     val model: InvitationsViewModel = viewModel(factory = InvitationsViewModel.factory)
     val load by model.invitations.state.collectAsStateWithLifecycle()
     val libraries by model.libraries.state.collectAsStateWithLifecycle()
+    val ratingSystems by model.ratingSystems.state.collectAsStateWithLifecycle()
     val navigator = LocalPhoneNavigator.current
     val resources = LocalResources.current
     val copy = rememberCopy()
@@ -143,6 +146,7 @@ private fun InvitationsList() {
                             now = now,
                             words = words,
                             libraries = libraries.valueOrNull,
+                            systems = ratingSystems.valueOrNull,
                             onCopy = model.link(invitation)?.let { link -> { copy(link) } },
                             onDelete = { deleting = invitation },
                         )
@@ -178,6 +182,7 @@ private fun InvitationRow(
     now: Long,
     words: FormatWords,
     libraries: List<Library>?,
+    systems: RatingSystems?,
     onCopy: (() -> Unit)?,
     onDelete: () -> Unit,
 ) {
@@ -194,7 +199,7 @@ private fun InvitationRow(
                     InvitationState.Expired -> Tag(stringResource(R.string.admin_invitations_status_expired), TagTone.Danger)
                 }
                 Tag(librariesLabel(invitation.allLibraries, invitation.libraryIds, libraries))
-                ageTag(invitation.maxAge)?.let { Tag(it) }
+                ageTag(systems, invitation.maxAgeSystem, invitation.maxAge)?.let { Tag(it) }
             }
             val expires = invitation.expiresAt
             val line = listOfNotNull(
@@ -234,6 +239,9 @@ private enum class NewInvitationDialog { Expiry, Uses, Note }
 private fun NewInvitationPage() {
     val model: NewInvitationViewModel = viewModel(factory = NewInvitationViewModel.factory)
     val load by model.libraries.state.collectAsStateWithLifecycle()
+    val ratingSystems by model.ratingSystems.state.collectAsStateWithLifecycle()
+    val labels by model.labels.state.collectAsStateWithLifecycle()
+    val metadataKeys by model.metadataKeys.state.collectAsStateWithLifecycle()
     val form by model.form.collectAsStateWithLifecycle()
     val busy by model.busy.collectAsStateWithLifecycle()
     val created by model.created.collectAsStateWithLifecycle()
@@ -283,8 +291,10 @@ private fun NewInvitationPage() {
             AccessGroup(
                 access = form.access,
                 libraries = libraries,
+                sources = AccessSources(ratingSystems.valueOrNull, labels.valueOrNull, metadataKeys.valueOrNull?.tmdbKey),
                 onLibraries = { all, ids -> model.edit { it.copy(access = it.access.copy(allLibraries = all, libraryIds = ids)) } },
-                onAgeLimit = { age -> model.edit { it.copy(access = it.access.copy(maxAge = age)) } },
+                onAgeLimit = { access -> model.edit { it.copy(access = access) } },
+                onLabels = { show, hide -> model.edit { it.copy(access = it.access.copy(showLabels = show, hideLabels = hide)) } },
                 pickLibrary = stringResource(R.string.admin_invitations_pick_library),
                 modifier = Modifier.adminWidth,
             )
@@ -293,10 +303,12 @@ private fun NewInvitationPage() {
             Column(Modifier.adminWidth, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 problem?.let {
                     val words = when (it) {
-                        NewInvitationProblem.PickLibrary -> R.string.admin_invitations_pick_library
-                        NewInvitationProblem.AtLeastOne -> R.string.admin_invitations_at_least_one
+                        NewInvitationProblem.PickLibrary -> stringResource(R.string.admin_invitations_pick_library)
+                        NewInvitationProblem.AtLeastOne -> stringResource(R.string.admin_invitations_at_least_one)
+                        NewInvitationProblem.LabelsInBoth ->
+                            stringResource(R.string.admin_users_labels_in_both, form.access.labelsInBoth.joinToString(", "))
                     }
-                    Text(stringResource(words), style = MaterialTheme.typography.bodyMedium, color = PleyColors.DangerText)
+                    Text(words, style = MaterialTheme.typography.bodyMedium, color = PleyColors.DangerText)
                 }
                 PrimaryButton(
                     stringResource(R.string.admin_invitations_create_link),

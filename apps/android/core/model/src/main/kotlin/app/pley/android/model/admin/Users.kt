@@ -30,6 +30,14 @@ data class UserAccount(
     val libraryIds: List<Long> = emptyList(),
     /** The age limit for movies and shows; `null`: none. */
     val maxAge: Int? = null,
+    /** The rating system [maxAge] is picked and shown in: a country, or "age"; `null`: the metadata region's. */
+    val maxAgeSystem: String? = null,
+    /** "2015-03": [maxAge] follows the profile's age, from this birthday; `null`: it doesn't. */
+    val birthMonth: String? = null,
+    /** Labels whose titles the profile sees even above [maxAge]. */
+    val showLabels: List<String> = emptyList(),
+    /** Labels whose titles the profile never sees, whatever their rating. */
+    val hideLabels: List<String> = emptyList(),
     val disabled: Boolean = false,
     /** False for a managed profile, and for an account without a password until it is given one. */
     val hasPassword: Boolean = true,
@@ -55,6 +63,11 @@ data class NewUserAccount(
     val allLibraries: Boolean = true,
     val libraryIds: List<Long> = emptyList(),
     val maxAge: Int? = null,
+    val maxAgeSystem: String? = null,
+    /** Instead of [maxAge]: the limit follows the profile's age from this birthday ("2015-03"). */
+    val birthMonth: String? = null,
+    val showLabels: List<String>? = null,
+    val hideLabels: List<String>? = null,
     val pin: String? = null,
     val requestAccess: RequestAccess? = null,
 )

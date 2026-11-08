@@ -7,7 +7,10 @@ import app.pley.android.data.ServerAdmin
 import app.pley.android.model.Library
 import app.pley.android.model.RequestAccess
 import app.pley.android.model.PleyJson
+import app.pley.android.model.admin.LabelUse
+import app.pley.android.model.admin.MetadataKeys
 import app.pley.android.model.admin.NewUserAccount
+import app.pley.android.model.admin.RatingSystems
 import app.pley.android.model.admin.UserAccount
 import app.pley.android.screens.admin.AdminViewModel
 import app.pley.android.screens.screensGraph
@@ -54,6 +57,9 @@ sealed interface NewUserProblem {
     data object PinDigits : NewUserProblem
 
     data object PickLibrary : NewUserProblem
+
+    /** A label both always and never shown. */
+    data class LabelsInBoth(val labels: List<String>) : NewUserProblem
 }
 
 /** [form]'s first problem, or `null`. */
@@ -62,6 +68,7 @@ fun problemOf(form: NewUserForm): NewUserProblem? {
     if (!form.managed) passwordProblem(form.password, form.username)?.let { return NewUserProblem.Password(it) }
     if (form.pin.isNotEmpty() && !pinOk(form.pin)) return NewUserProblem.PinDigits
     if (form.access.noLibrary) return NewUserProblem.PickLibrary
+    form.access.labelsInBoth.takeIf { it.isNotEmpty() }?.let { return NewUserProblem.LabelsInBoth(it) }
     return null
 }
 
@@ -71,6 +78,9 @@ fun problemOf(form: NewUserForm): NewUserProblem? {
  */
 class NewUserViewModel(admin: ServerAdmin) : AdminViewModel(admin) {
     val libraries = resource { get(ListSerializer(Library.serializer()), LIBRARIES) }
+    val ratingSystems = resource { get(RatingSystems.serializer(), RATING_SYSTEMS) }
+    val labels = resource { get(ListSerializer(LabelUse.serializer()), LABELS) }
+    val metadataKeys = resource { get(MetadataKeys.serializer(), SYSTEM) }
 
     private val formState = MutableStateFlow(NewUserForm())
     val form: StateFlow<NewUserForm> = formState.asStateFlow()
@@ -100,7 +110,12 @@ class NewUserViewModel(admin: ServerAdmin) : AdminViewModel(admin) {
             home = form.home,
             allLibraries = form.access.allLibraries,
             libraryIds = form.access.libraryIds,
-            maxAge = form.access.maxAge,
+            // A limit that follows a birthday is worked out by the server.
+            maxAge = form.access.maxAge.takeIf { form.access.birthMonth == null },
+            maxAgeSystem = form.access.maxAgeSystem,
+            birthMonth = form.access.birthMonth,
+            showLabels = form.access.showLabels.ifEmpty { null },
+            hideLabels = form.access.hideLabels.ifEmpty { null },
             pin = form.pin.ifEmpty { null },
             requestAccess = form.requests.takeIf { !form.asAdmin },
         )

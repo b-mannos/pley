@@ -5,8 +5,9 @@ import kotlinx.serialization.Serializable
 /**
  * A link that makes an account: GET /api/invites, and what POST
  * /api/invites answers (apps/server/src/api/accounts.rs, `InviteDto`).
- * Its account sees [allLibraries] or [libraryIds], up to [maxAge]. Times
- * are unix seconds; [expiresAt] `null`: never.
+ * Its account sees [allLibraries] or [libraryIds], up to [maxAge] (shown
+ * in [maxAgeSystem]), with the exceptions of [showLabels] and
+ * [hideLabels]. Times are unix seconds; [expiresAt] `null`: never.
  */
 @Serializable
 data class Invitation(
@@ -19,6 +20,9 @@ data class Invitation(
     val maxAge: Int? = null,
     /** What the administrator noted, for themselves ("for Sam"). */
     val note: String? = null,
+    val maxAgeSystem: String? = null,
+    val showLabels: List<String> = emptyList(),
+    val hideLabels: List<String> = emptyList(),
 )
 
 /**
@@ -32,5 +36,8 @@ data class NewInvitation(
     val allLibraries: Boolean = true,
     val libraryIds: List<Long> = emptyList(),
     val maxAge: Int? = null,
+    val maxAgeSystem: String? = null,
+    val showLabels: List<String>? = null,
+    val hideLabels: List<String>? = null,
     val note: String? = null,
 )

@@ -809,10 +809,14 @@ the scope to a code.
   filter by source.
 - **Users** and **Invitations**: the accounts and profiles; an account's
   page with everything an administrator changes on the web (name,
-  password, administrator, disabled, household, requests, libraries and
-  age limit, PIN, two-step sign-in, devices, apps, deleting); making
-  accounts and profiles; invitation links, made, copied, shared and
-  deleted. The administrator's own name, password, PIN, two-step
+  password, administrator, disabled, household, requests, libraries, age
+  limit, label exceptions, PIN, two-step sign-in, devices, apps,
+  deleting); making accounts and profiles; invitation links, made,
+  copied, shared and deleted. An age limit is set as on the web: by a
+  country's rating, by age, or (for an account) by birthday, and titles
+  with some labels are always or never shown. Without a TMDB key on the
+  server, the page says that unrated movies are hidden; the key itself is
+  added in the web app. The administrator's own name, password, PIN, two-step
   sign-in, devices and apps stay in Account in the web app, as the server
   requires.
 

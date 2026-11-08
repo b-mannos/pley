@@ -90,7 +90,14 @@ class InvitationsViewModelTest {
 
         page.edit { it.copy(access = AccessChoice(allLibraries = false)) }
         assertEquals(NewInvitationProblem.PickLibrary, page.create())
-        page.edit { it.copy(access = AccessChoice(allLibraries = false, libraryIds = listOf(2), maxAge = 7), uses = 0) }
+        page.edit { it.copy(access = AccessChoice(allLibraries = false, libraryIds = listOf(2), maxAge = 7, showLabels = listOf("a"), hideLabels = listOf("A"))) }
+        assertEquals(NewInvitationProblem.LabelsInBoth, page.create())
+        page.edit {
+            it.copy(
+                access = AccessChoice(allLibraries = false, libraryIds = listOf(2), maxAge = 7, maxAgeSystem = "GB", showLabels = listOf("Kids")),
+                uses = 0,
+            )
+        }
         assertEquals(NewInvitationProblem.AtLeastOne, page.create())
         assertTrue(server.callsTo("POST /api/invites").isEmpty())
         assertNull(page.link())
@@ -99,7 +106,7 @@ class InvitationsViewModelTest {
         assertNull(page.create())
         val sent = server.callsTo("POST /api/invites").single().body!!.jsonObject
         assertEquals(
-            """{"expires_in_days":30,"uses":5,"all_libraries":false,"library_ids":[2],"max_age":7,"note":"for Kai"}""",
+            """{"expires_in_days":30,"uses":5,"all_libraries":false,"library_ids":[2],"max_age":7,"max_age_system":"GB","show_labels":["Kids"],"note":"for Kai"}""",
             sent.toString(),
         )
         assertEquals("Nw7Code", page.created.value?.code)

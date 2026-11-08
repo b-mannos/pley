@@ -7,6 +7,7 @@ import app.pley.android.data.ServerAdmin
 import app.pley.android.data.Session
 import app.pley.android.model.Library
 import app.pley.android.model.ServerInfo
+import app.pley.android.model.admin.RatingSystems
 import app.pley.android.model.admin.UserAccount
 import app.pley.android.screens.admin.AdminViewModel
 import app.pley.android.screens.screensGraph
@@ -23,6 +24,9 @@ class UsersViewModel(admin: ServerAdmin, private val session: StateFlow<Session?
     val users = resource { get(ListSerializer(UserAccount.serializer()), USERS) }
     val libraries = resource { get(ListSerializer(Library.serializer()), LIBRARIES) }
     val server = resource { get(ServerInfo.serializer(), SERVER) }
+
+    /** What the rows' age limits are shown in ("Up to PG-13"). */
+    val ratingSystems = resource { get(RatingSystems.serializer(), RATING_SYSTEMS) }
 
     /** The signed-in account, marked "(you)". */
     val selfId: Long? get() = session.value?.me?.id
@@ -46,3 +50,6 @@ class UsersViewModel(admin: ServerAdmin, private val session: StateFlow<Session?
 internal val USERS = listOf("api", "users")
 internal val LIBRARIES = listOf("api", "libraries")
 internal val SERVER = listOf("api", "server")
+internal val RATING_SYSTEMS = listOf("api", "ratings", "systems")
+internal val LABELS = listOf("api", "labels")
+internal val SYSTEM = listOf("api", "system")

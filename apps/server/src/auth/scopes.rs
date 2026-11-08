@@ -344,6 +344,9 @@ pub const APP_ROUTES: &[(&str, &str, Need)] = &[
     ("GET", "/api/invites", Need::Scope(Server)),
     ("POST", "/api/invites", Need::Scope(Server)),
     ("DELETE", "/api/invites/{code}", Need::Scope(Server)),
+    // what an age limit and its exceptions are picked from
+    ("GET", "/api/ratings/systems", Need::Scope(Server)),
+    ("GET", "/api/labels", Need::Scope(Server)),
     // the dashboard and storage
     ("GET", "/api/system", Need::Scope(Server)),
     ("GET", "/api/system/resources", Need::Scope(Server)),
@@ -411,7 +414,7 @@ mod tests {
     fn every_app_route_is_on_a_real_path() {
         // Whether each names a route of api/mod.rs is checked by
         // tests/app_tokens.rs, which reads it.
-        assert_eq!(APP_ROUTES.len(), 135);
+        assert_eq!(APP_ROUTES.len(), 137);
         for (i, (method, path, _)) in APP_ROUTES.iter().enumerate() {
             assert!(["GET", "POST", "PUT", "PATCH", "DELETE"].contains(method), "{method} {path}");
             assert!(path.starts_with("/api/") && !path.ends_with('/'), "{path}");

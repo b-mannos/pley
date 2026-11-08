@@ -76,6 +76,45 @@ class UsersViewModelTest {
     private fun body(server: FakeServerAdmin, route: String): JsonElement? = server.callsTo(route).last().body
 
     @Test
+    fun theAgeLimitAndItsExceptionsAreSentAsTheWebsDialogSendsThem() = runTest {
+        val bea = """{"id":2,"username":"bea","name":"Bea","max_age":11,"max_age_system":null,"birth_month":"2015-03",
+            "show_labels":["Kids"],"hide_labels":[]}"""
+        val server = server(user(1, "Ann", admin = true), bea).apply { answer("GET /api/labels", "[]") }
+        // As the server does: a limit sent stops one following a birthday.
+        var state = PleyJson.parseToJsonElement(bea).jsonObject
+        server.answer("PATCH /api/users/2") { body ->
+            val sent = body as JsonObject
+            state = JsonObject(state + sent + if ("max_age" in sent) mapOf("birth_month" to JsonNull) else emptyMap())
+            state
+        }
+        val page = UserViewModel(server, session, 2)
+        val sent = { body(server, "PATCH /api/users/2").toString() }
+        val now = { accessOf(page.page.state.value.valueOrNull!!.user) }
+
+        // Another birthday: only it is sent, the server works the limit out.
+        page.setAgeLimit(now().copy(birthMonth = "2016-05", maxAge = 10))
+        assertEquals("""{"birth_month":"2016-05"}""", sent())
+        // A limit of the same age stops it following the birthday, so it's sent all the same.
+        page.setAgeLimit(now().copy(birthMonth = null))
+        assertEquals("""{"max_age":11}""", sent())
+        // Another country's ratings: the system goes with the limit; back to the region's is a null.
+        page.setAgeLimit(now().copy(maxAge = 10, maxAgeSystem = "CA"))
+        assertEquals("""{"max_age":10,"max_age_system":"CA"}""", sent())
+        page.setAgeLimit(now().copy(maxAgeSystem = null))
+        assertEquals("""{"max_age_system":null}""", sent())
+        val calls = server.callsTo("PATCH /api/users/2").size
+        page.setAgeLimit(now())
+        assertEquals("nothing changed, nothing sent", calls, server.callsTo("PATCH /api/users/2").size)
+
+        page.setLabels(listOf("Kids", "Anime"), emptyList())
+        assertEquals("""{"show_labels":["Kids","Anime"]}""", sent())
+        page.setLabels(listOf("Anime", "Kids"), listOf("Horror"))
+        assertEquals("""{"hide_labels":["Horror"]}""", sent())
+        // Read when the page opened, and again after each change, as a label a rule names is offered from then on.
+        assertEquals(3, server.callsTo("GET /api/labels").size)
+    }
+
+    @Test
     fun theListReadsTheAccountsTheirLibrariesAndTheServersRules() = runTest {
         val server = server(user(1, "Ann", admin = true), user(2, "Bea", all = false, ids = listOf(2)))
         val page = UsersViewModel(server, session)
@@ -145,9 +184,9 @@ class UsersViewModelTest {
         assertEquals("""{"disabled":true}""", body(server, "PATCH /api/users/2").toString())
         page.setRequests(RequestAccess.Auto)
         assertEquals("""{"request_access":"auto"}""", body(server, "PATCH /api/users/2").toString())
-        page.setAgeLimit(null)
+        page.setAgeLimit(AccessChoice(maxAge = null))
         assertEquals(JsonNull, body(server, "PATCH /api/users/2")!!.jsonObject["max_age"])
-        page.setAgeLimit(17)
+        page.setAgeLimit(AccessChoice(maxAge = 17))
         assertEquals("""{"max_age":17}""", body(server, "PATCH /api/users/2").toString())
         page.setPin("4321")
         assertEquals("""{"pin":"4321"}""", body(server, "PATCH /api/users/2").toString())
@@ -276,6 +315,32 @@ class UsersViewModelTest {
         assertEquals("\"off\"", sent["request_access"].toString())
         assertEquals("[2]", sent["library_ids"].toString())
         assertEquals("longname1", page.created.value?.name)
+    }
+
+    @Test
+    fun aNewAccountsLimitFollowsABirthdayAndItsLabelsMayNotClash() = runTest {
+        val server = FakeServerAdmin().apply {
+            answer("GET /api/libraries", "[]")
+            answer("POST /api/users", """{"id":9,"username":"kid","name":"Kid","managed":true}""")
+        }
+        val page = NewUserViewModel(server)
+        page.edit {
+            it.copy(
+                kind = AccountKind.Managed,
+                username = "kid",
+                access = AccessChoice(maxAge = 9, birthMonth = "2017-01", showLabels = listOf("Kids"), hideLabels = listOf("kids")),
+            )
+        }
+        assertEquals(NewUserProblem.LabelsInBoth(listOf("Kids")), page.create())
+        page.edit { it.copy(access = it.access.copy(hideLabels = listOf("Horror"), maxAgeSystem = "CA")) }
+        assertNull(page.create())
+        val sent = body(server, "POST /api/users")!!.jsonObject
+        // A limit that follows a birthday is the server's to work out.
+        assertNull(sent["max_age"])
+        assertEquals("\"2017-01\"", sent["birth_month"].toString())
+        assertEquals("\"CA\"", sent["max_age_system"].toString())
+        assertEquals("""["Kids"]""", sent["show_labels"].toString())
+        assertEquals("""["Horror"]""", sent["hide_labels"].toString())
     }
 
     @Test

@@ -8,11 +8,17 @@ import app.pley.android.data.Session
 import app.pley.android.model.Library
 import app.pley.android.model.PleyJson
 import app.pley.android.model.admin.Invitation
+import app.pley.android.model.admin.LabelUse
+import app.pley.android.model.admin.MetadataKeys
 import app.pley.android.model.admin.NewInvitation
+import app.pley.android.model.admin.RatingSystems
 import app.pley.android.screens.admin.AdminDone
 import app.pley.android.screens.admin.AdminViewModel
 import app.pley.android.screens.admin.users.AccessChoice
+import app.pley.android.screens.admin.users.LABELS
 import app.pley.android.screens.admin.users.LIBRARIES
+import app.pley.android.screens.admin.users.RATING_SYSTEMS
+import app.pley.android.screens.admin.users.SYSTEM
 import app.pley.android.screens.screensGraph
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -45,6 +51,9 @@ class InvitationsViewModel(
 ) : AdminViewModel(admin) {
     val invitations = resource { get(ListSerializer(Invitation.serializer()), INVITES) }
     val libraries = resource { get(ListSerializer(Library.serializer()), LIBRARIES) }
+
+    /** What the rows' age limits are shown in ("Up to PG-13"). */
+    val ratingSystems = resource { get(RatingSystems.serializer(), RATING_SYSTEMS) }
 
     private val shownAt = MutableStateFlow(clock())
 
@@ -91,11 +100,12 @@ data class NewInvitationForm(
 )
 
 /** What keeps a [NewInvitationForm] from being sent, as the web says it before asking the server. */
-enum class NewInvitationProblem { PickLibrary, AtLeastOne }
+enum class NewInvitationProblem { PickLibrary, AtLeastOne, LabelsInBoth }
 
 fun problemOf(form: NewInvitationForm): NewInvitationProblem? = when {
     form.access.noLibrary -> NewInvitationProblem.PickLibrary
     form.uses < 1 -> NewInvitationProblem.AtLeastOne
+    form.access.labelsInBoth.isNotEmpty() -> NewInvitationProblem.LabelsInBoth
     else -> null
 }
 
@@ -105,6 +115,9 @@ fun problemOf(form: NewInvitationForm): NewInvitationProblem? = when {
  */
 class NewInvitationViewModel(admin: ServerAdmin, private val session: StateFlow<Session?>) : AdminViewModel(admin) {
     val libraries = resource { get(ListSerializer(Library.serializer()), LIBRARIES) }
+    val ratingSystems = resource { get(RatingSystems.serializer(), RATING_SYSTEMS) }
+    val labels = resource { get(ListSerializer(LabelUse.serializer()), LABELS) }
+    val metadataKeys = resource { get(MetadataKeys.serializer(), SYSTEM) }
 
     private val formState = MutableStateFlow(NewInvitationForm())
     val form: StateFlow<NewInvitationForm> = formState.asStateFlow()
@@ -126,6 +139,9 @@ class NewInvitationViewModel(admin: ServerAdmin, private val session: StateFlow<
             allLibraries = form.access.allLibraries,
             libraryIds = form.access.libraryIds,
             maxAge = form.access.maxAge,
+            maxAgeSystem = form.access.maxAgeSystem,
+            showLabels = form.access.showLabels.ifEmpty { null },
+            hideLabels = form.access.hideLabels.ifEmpty { null },
             note = form.note.trim().ifEmpty { null },
         )
         change {

@@ -1305,7 +1305,9 @@ What apps see:
   (`POST /api/libraries`, `/api/libraries/scan`, `/api/libraries/order`,
   `PATCH` and `DELETE /api/libraries/{id}`, `/api/libraries/{id}/scan`,
   `/api/fs`), accounts and invitations (`/api/users`, `/api/users/{id}`
-  and its `devices`, `apps` and `two-step`, `/api/invites`), the dashboard
+  and its `devices`, `apps` and `two-step`, `/api/invites`, and what an
+  age limit and its exceptions are picked from, `/api/ratings/systems` and
+  `/api/labels`), the dashboard
   (`/api/system`, `/api/system/resources`, `/api/system/storage` and its
   `clean`, `/api/transcoder`) and Live TV's lineup and tuners
   (`/api/live/lineup`, its `groups` and `page`, `/api/live/tuners`). It
@@ -4469,6 +4471,8 @@ interface SystemInfo {
   database: { ok: boolean | null; problem?: string; checked_at: Timestamp | null }; // integrity check at start
   secret_key_ok: boolean;           // the server can use its secret.key: without it, authenticator apps can't
                                     // be set up or checked (the log says why)
+  tmdb_key: boolean;                // a TMDB key is set; without one, only NFO files give movies a rating,
+                                    // and an age limit hides unrated ones
   transcode_dir: {                  // the transcoder's work folder
     in_use: string;
     next: string | null;            // the one the next start uses, when another

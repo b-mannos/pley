@@ -653,6 +653,9 @@ pub async fn system(State(state): State<AppState>, AdminUser(admin): AdminUser) 
         "database": state.backups.health(),
         // Without it, authenticator apps can't be set up or checked.
         "secret_key_ok": state.two_step.can_set_up(),
+        // Whether movies get ratings from TMDB, which an age limit needs: an
+        // app can say so without reading the key, which stays in the web app.
+        "tmdb_key": !settings.tmdb_api_key.trim().is_empty(),
         "transcoder": transcoder,
         "counts": counts,
     })))

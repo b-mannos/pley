@@ -15,6 +15,8 @@ describes how they are made.
   Live TV's channels and tuners, users and invitations. The server's
   settings, network, transcoder, requests and Live TV's sources stay in
   the web app. A phone signed in before asks to sign in again for it.
+  Age limits are set as in the web app: by a country's rating, by age or
+  by birthday, with titles always or never shown by their labels.
 - Home opens on the newest movies and shows you haven't watched, as the
   web does: on phones a banner under a clear top bar, with the title's
   plot, Play, More info and My List, swiped between; on Android TV and

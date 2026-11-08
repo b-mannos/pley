@@ -9,6 +9,9 @@ import app.pley.android.data.Session
 import app.pley.android.model.Library
 import app.pley.android.model.RequestAccess
 import app.pley.android.model.ServerInfo
+import app.pley.android.model.admin.LabelUse
+import app.pley.android.model.admin.MetadataKeys
+import app.pley.android.model.admin.RatingSystems
 import app.pley.android.model.admin.UserAccount
 import app.pley.android.model.admin.UserApp
 import app.pley.android.model.admin.UserDevice
@@ -26,6 +29,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.put
@@ -60,6 +64,9 @@ class UserViewModel(
     }
     val libraries = resource { get(ListSerializer(Library.serializer()), LIBRARIES) }
     val server = resource { get(ServerInfo.serializer(), SERVER) }
+    val ratingSystems = resource { get(RatingSystems.serializer(), RATING_SYSTEMS) }
+    val labels = resource { get(ListSerializer(LabelUse.serializer()), LABELS) }
+    val metadataKeys = resource { get(MetadataKeys.serializer(), SYSTEM) }
     val devices = resource { if (isSelf()) emptyList() else get(ListSerializer(UserDevice.serializer()), path("devices")) }
     val apps = resource { if (isSelf()) emptyList() else get(ListSerializer(UserApp.serializer()), path("apps")) }
 
@@ -122,10 +129,40 @@ class UserViewModel(
     }
 
     /**
-     * The age limit; `null`: none. An account that asked an administrator
-     * for titles stops asking when a limit is added (the server does it).
+     * The age limit as [next] has it, what changed of it sent as the web's
+     * dialog sends it: a birthday the limit follows, else the limit (`null`:
+     * none), which stops one following a birthday; and the rating system
+     * it's shown in. An account that asked an administrator for titles
+     * stops asking when a limit is added (the server does it).
      */
-    fun setAgeLimit(age: Int?) = patch(buildJsonObject { if (age == null) put("max_age", JsonNull) else put("max_age", age) })
+    fun setAgeLimit(next: AccessChoice) {
+        val user = user ?: return
+        val body = buildJsonObject {
+            val born = next.birthMonth
+            if (born != null) {
+                if (born != user.birthMonth) put("birth_month", born)
+            } else if (next.maxAge != user.maxAge || user.birthMonth != null) {
+                put("max_age", next.maxAge?.let { JsonPrimitive(it) } ?: JsonNull)
+            }
+            // `null`: the metadata region's.
+            if (next.maxAgeSystem != user.maxAgeSystem) put("max_age_system", next.maxAgeSystem?.let { JsonPrimitive(it) } ?: JsonNull)
+        }
+        if (body.isNotEmpty()) patch(body)
+    }
+
+    /**
+     * The exceptions by label: titles always shown ([show]) and never
+     * shown ([hide]); a list is sent only when it changed. The labels are
+     * read again after, as one a rule names is offered from then on.
+     */
+    fun setLabels(show: List<String>, hide: List<String>) {
+        val user = user ?: return
+        val body = buildJsonObject {
+            if (!sameLabels(show, user.showLabels)) putJsonArray("show_labels") { show.forEach { add(it) } }
+            if (!sameLabels(hide, user.hideLabels)) putJsonArray("hide_labels") { hide.forEach { add(it) } }
+        }
+        if (body.isNotEmpty()) patch(body, then = labels::reload)
+    }
 
     fun setPin(pin: String) = patch(buildJsonObject { put("pin", pin) })
 
@@ -170,11 +207,18 @@ class UserViewModel(
     /**
      * Sends [body] to the account; what the server answers is shown. A
      * refusal reads the account again, so the page shows what it has.
+     * [then] runs after, whatever the answer.
      */
-    private fun patch(body: JsonObject, said: String? = null) {
+    private fun patch(body: JsonObject, said: String? = null, then: () -> Unit = {}) {
         val user = user ?: return
         var took = false
-        change(said = said?.let { AdminDone(it, listOf(user.name)) }, after = { if (!took) page.reload() }) {
+        change(
+            said = said?.let { AdminDone(it, listOf(user.name)) },
+            after = {
+                if (!took) page.reload()
+                then()
+            },
+        ) {
             val answer = send("PATCH", UserAccount.serializer(), listOf("api", "users", id), body)
             val now = (page.state.value as? AdminLoad.Ready)?.value
             page.set(now?.copy(user = answer) ?: UserPage(answer, 0))

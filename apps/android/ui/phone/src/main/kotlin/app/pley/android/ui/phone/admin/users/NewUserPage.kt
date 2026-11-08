@@ -27,6 +27,7 @@ import app.pley.android.screens.admin.users.NewUserProblem
 import app.pley.android.screens.admin.users.NewUserViewModel
 import app.pley.android.screens.admin.users.passwordProblem
 import app.pley.android.screens.admin.users.pinOk
+import app.pley.android.screens.admin.valueOrNull
 import app.pley.android.ui.phone.R
 import app.pley.android.ui.phone.account.Choice
 import app.pley.android.ui.phone.account.ChoiceSheet
@@ -56,6 +57,9 @@ private enum class NewUserDialog { Username, DisplayName, Password, Pin, Request
 internal fun NewUserPage() {
     val model: NewUserViewModel = viewModel(factory = NewUserViewModel.factory)
     val load by model.libraries.state.collectAsStateWithLifecycle()
+    val ratingSystems by model.ratingSystems.state.collectAsStateWithLifecycle()
+    val labels by model.labels.state.collectAsStateWithLifecycle()
+    val metadataKeys by model.metadataKeys.state.collectAsStateWithLifecycle()
     val form by model.form.collectAsStateWithLifecycle()
     val busy by model.busy.collectAsStateWithLifecycle()
     val created by model.created.collectAsStateWithLifecycle()
@@ -156,10 +160,13 @@ internal fun NewUserPage() {
             AccessGroup(
                 access = form.access,
                 libraries = libraries,
+                sources = AccessSources(ratingSystems.valueOrNull, labels.valueOrNull, metadataKeys.valueOrNull?.tmdbKey),
                 onLibraries = { all, ids -> model.edit { it.copy(access = it.access.copy(allLibraries = all, libraryIds = ids)) } },
-                onAgeLimit = { age -> model.edit { it.copy(access = it.access.copy(maxAge = age)) } },
+                onAgeLimit = { access -> model.edit { it.copy(access = access) } },
+                onLabels = { show, hide -> model.edit { it.copy(access = it.access.copy(showLabels = show, hideLabels = hide)) } },
                 pickLibrary = stringResource(R.string.admin_users_pick_library),
                 modifier = Modifier.adminWidth,
+                birthday = true,
             )
         }
         item(key = "pin") {
@@ -256,6 +263,7 @@ private fun problemWords(problem: NewUserProblem): String = when (problem) {
     is NewUserProblem.Password -> passwordWords()(problem.problem)
     NewUserProblem.PinDigits -> stringResource(R.string.admin_users_pin_digits)
     NewUserProblem.PickLibrary -> stringResource(R.string.admin_users_pick_library)
+    is NewUserProblem.LabelsInBoth -> stringResource(R.string.admin_users_labels_in_both, problem.labels.joinToString(", "))
 }
 
 /** A password or PIN typed, shown hidden on its row. */
