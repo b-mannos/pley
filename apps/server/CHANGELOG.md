@@ -67,6 +67,12 @@ describes how they are made.
   Portugal's "M/18", is read whole, no longer as "U" or "M", which allowed
   younger viewers. A file that gives a bare `<mpaa>` and a
   `<certification>` naming countries gives the latter's.
+- A Live TV channel given a guide channel by hand, or a channel without
+  one renamed as the guide names it, shows its programmes once the
+  source's guide is read again for it, no longer after the next guide
+  refresh.
+- Refreshing a Live TV source, or changing it, while it is being read
+  reads it again after that read, no longer nothing.
 - HDR video that libplacebo tone maps plays again in the Docker image and
   with other FFmpeg 7 installs: the transcoder no longer asks it for a
   shader cache that FFmpeg before 8.0 doesn't have.
