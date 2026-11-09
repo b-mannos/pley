@@ -2,8 +2,9 @@ import { useSignal, type Signal } from "@preact/signals";
 import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { errorMessage, isApiError } from "../../api/client";
-import type { Collection, Hub, ItemSummary, Library, LibraryKind, LibrarySort } from "../../api/types";
+import type { Collection, Hub, ItemSummary, Library, LibraryFilters, LibraryKind, LibrarySort } from "../../api/types";
 import { formatBitrate, formatBytes, pluralize } from "../../format/format";
+import { t } from "../../i18n";
 import type { AppState } from "../../state";
 import { useUi } from "../context";
 import { nudge } from "../focus";
@@ -22,24 +23,31 @@ import { seeAllSort } from "./home";
 import { pageOf, prefetchPlayback } from "./item-actions";
 import {
   AlphaIndex,
+  cleared,
   countLabel,
   defaultOrder,
+  dynamicRangeLabel,
   fitParams,
   gridStep,
-  grouped,
   hasFilter,
   inOrder,
   LETTERS,
   Listing,
   moved,
   ParamsStore,
+  qualityChoices,
+  resolutionLabel,
   TabStore,
   sameOrder,
+  showsBadges,
   showsJump,
   smartFilterOf,
-  SORT_LABELS,
+  sortLabel,
   sortsFor,
+  withChosen,
+  type DynamicRangeFilter,
   type LibraryParams,
+  type Resolution,
 } from "./library-data";
 
 const CHIPS_TOP = 80;
@@ -56,8 +64,6 @@ export function kindIcon(kind: LibraryKind): IconName {
 function tabsFor(kind: LibraryKind): LibraryTab[] {
   return kind === "music" ? ["recommended", "library"] : ["recommended", "library", "collections"];
 }
-
-const TAB_LABELS: Record<LibraryTab, string> = { recommended: "Recommended", library: "Library", collections: "Collections" };
 
 /** "12 movies", "3 shows" for a collection. */
 export function collectionCount(c: Collection, kind: LibraryKind | null): string {
@@ -99,10 +105,10 @@ export function LibraryScreen(p: { entry: Entry; id: number; tab?: LibraryTab; s
   const tabsRef = useRef<HTMLElement | null>(null);
 
   if (!libraries) return <LibrariesFailed />;
-  if (!library) return <ColumnMessage title="This library isn't here" body="It may have been removed, or this profile may not see it." />;
+  if (!library) return <ColumnMessage title={t("browse.library.missing")} body={t("browse.library.missingHint")} />;
 
-  const showTab = (t: LibraryTab) => {
-    entry.state.tab = t;
+  const showTab = (tab: LibraryTab) => {
+    entry.state.tab = tab;
     setTabState((n) => n + 1);
   };
   // A row's See all: the Library tab in that row's order, until the view is changed there.
@@ -137,8 +143,8 @@ export function LibraryScreen(p: { entry: Entry; id: number; tab?: LibraryTab; s
             return !!target && ui.focus.focus(target);
           }}
         >
-          {tabs.map((t) => (
-            <Tab key={t} fid={`tab/${t}`} label={TAB_LABELS[t]} shown={t === shown} onSelect={() => showTab(t)} />
+          {tabs.map((tab) => (
+            <Tab key={tab} fid={`tab/${tab}`} label={t(`browse.library.tabs.${tab}`)} shown={tab === shown} onSelect={() => showTab(tab)} />
           ))}
         </G>
       </div>
@@ -153,7 +159,10 @@ export function LibraryScreen(p: { entry: Entry; id: number; tab?: LibraryTab; s
 
 // ---- the Library tab
 
-type Panel = null | { kind: "sort" } | { kind: "filter" } | { kind: "genre"; from: "filter" | "chip" } | { kind: "year"; from: "filter" | "chip" };
+type Panel = null | { kind: "sort" } | { kind: "filter" } | { kind: FilterList; from: "filter" | "chip" };
+
+/** The filters whose choices are a list of their own, opened from the Filter panel or their chip. */
+type FilterList = "genre" | "year" | "resolution" | "dynamicRange";
 
 function LibraryGridTab(p: { entry: Entry; library: Library; asked?: LibrarySort; initial: boolean; focusTab: () => boolean }) {
   const app = useApp();
@@ -169,7 +178,7 @@ function LibraryGridTab(p: { entry: Entry; library: Library; asked?: LibrarySort
   const [version, setVersion] = useState(0);
   const listing = useMemo(
     () => new Listing(ui.api, lib.id, params, ui.tier === "low" ? 2000 : 5000, () => setVersion((v) => v + 1)),
-    [lib.id, params.sort, params.order, params.watched, params.genre, params.year],
+    [lib.id, params.sort, params.order, params.watched, params.genre, params.year, params.resolution, params.dynamicRange],
   );
   useEffect(() => {
     void listing.start();
@@ -181,13 +190,38 @@ function LibraryGridTab(p: { entry: Entry; library: Library; asked?: LibrarySort
   useEffect(() => {
     if (changes !== firstChanges.current) void listing.start();
   }, [changes]);
-  const filters = useLoad((c) => (music ? Promise.resolve({ genres: [], years: [] }) : ui.api.libraryFilters(lib.id, c)), [lib.id], { live: false });
+  const filters = useLoad((c) => (music ? Promise.resolve<LibraryFilters>({ genres: [], years: [] }) : ui.api.libraryFilters(lib.id, c)), [lib.id], { live: false });
   const [panel, setPanel] = useState<Panel>(null);
   const [jumpTo, setJumpTo] = useState<{ index: number; n: number } | null>(null);
   // Where focus is in the grid: only the A–Z jump reads it, so a move draws nothing else of the tab again.
   const focusedIndex = useSignal<number>((p.entry.state.gridIndex as number | undefined) ?? 0);
   const chipsRef = useRef<HTMLElement | null>(null);
+  const countRef = useRef<HTMLDivElement>(null);
   const panelOpener = useRef<string | null>(null);
+  /** How far the chips slide left: with many filters chosen they are wider than the screen. */
+  const [chipsShift, setChipsShift] = useState(0);
+  // The focused chip in view between the gutter and the safe area's edge, as Search's recent searches on Android and the native app.
+  useEffect(
+    () =>
+      ui.focus.onChange((el) => {
+        const row = chipsRef.current;
+        if (!el || !row || !row.contains(el)) return;
+        const max = Math.max(0, row.scrollWidth - row.clientWidth);
+        setChipsShift((s) => nudge(s, el.offsetLeft, el.offsetLeft + el.offsetWidth, 0, row.clientWidth, 0, max));
+      }),
+    [],
+  );
+  useLayoutEffect(() => {
+    const row = chipsRef.current;
+    if (row) {
+      // Fewer chips (a filter cleared): no further than they need.
+      const max = Math.max(0, row.scrollWidth - row.clientWidth);
+      if (chipsShift > max) setChipsShift(max);
+    }
+    // The count after the chips shows whole or not at all: with many filters chosen, cut short ("23 of 3…") it says nothing.
+    const el = countRef.current;
+    if (el) el.style.visibility = el.scrollWidth > el.clientWidth ? "hidden" : "";
+  });
 
   const setParams = (next: LibraryParams) => {
     const fitted = fitParams(next, lib.kind);
@@ -209,12 +243,15 @@ function LibraryGridTab(p: { entry: Entry; library: Library; asked?: LibrarySort
 
   const closePanel = () => {
     setPanel(null);
-    // Back to the chip that opened the first panel of the sequence.
+    // Back to the chip that opened the first panel of the sequence, or to Filter when that chip went with its
+    // value (Resolution or Dynamic range cleared from its own), as on Android: left on the chip that went, focus
+    // would be nowhere, and the next key would go to the tabs.
     const fid = panelOpener.current;
     panelOpener.current = null;
     if (fid) {
       setTimeout(() => {
-        const el = chipsRef.current?.querySelector<HTMLElement>(`[data-fid="${fid}"]`);
+        const chips = chipsRef.current;
+        const el = chips?.querySelector<HTMLElement>(`[data-fid="${fid}"]`) ?? chips?.querySelector<HTMLElement>('[data-fid="chip/filter"]');
         if (el) ui.focus.focus(el);
       }, 0);
     }
@@ -236,7 +273,7 @@ function LibraryGridTab(p: { entry: Entry; library: Library; asked?: LibrarySort
         kind={kind}
         fid={`grid/${item.id}`}
         initial={p.initial && i === 0}
-        badges
+        badges={showsBadges(params)}
         subtitle={bitrate ? bitrateLine(item) : undefined}
         priority={place.priority}
         onFocus={place.onFocus}
@@ -251,26 +288,26 @@ function LibraryGridTab(p: { entry: Entry; library: Library; asked?: LibrarySort
     message = (
       <ColumnMessage
         top={146}
-        title={failedTitle(listing.error, "Couldn't load this library")}
+        title={failedTitle(listing.error, t("browse.library.cantLoad"))}
         body={problem(listing.error)}
-        action={{ label: "Retry", icon: "refresh-cw", onSelect: () => setParams({ ...params }) }}
+        action={{ label: t("common.actions.retry"), icon: "refresh-cw", onSelect: () => setParams({ ...params }) }}
       />
     );
   } else if (total === 0 && filterSet) {
     message = (
       <ColumnMessage
         top={146}
-        title="No matches"
-        body="Nothing in this library matches the current filters."
-        action={{ label: "Clear filters", onSelect: () => setParams({ ...params, watched: null, genre: null, year: null }) }}
+        title={t("browse.library.noMatches")}
+        body={t("browse.library.noMatchesHint")}
+        action={{ label: t("browse.library.clearFilters"), onSelect: () => setParams(cleared(params)) }}
       />
     );
   } else if (total === 0) {
     message = (
       <ColumnMessage
         top={146}
-        title="This library is empty"
-        body="Nothing here yet. Titles appear as the server adds them."
+        title={t("browse.library.empty")}
+        body={t("browse.library.emptyHint")}
         focusInstead={p.focusTab}
         takeFocus={p.initial}
       />
@@ -279,30 +316,53 @@ function LibraryGridTab(p: { entry: Entry; library: Library; asked?: LibrarySort
 
   const genres = filters.data?.genres ?? [];
   const years = filters.data?.years ?? [];
+  const { resolutions, dynamicRanges } = qualityChoices(filters.data);
   return (
     <>
-      <G kind="row" class="library-chips" elRef={(el) => (chipsRef.current = el)} onEnter={(dir) => (dir === "down" ? chipsRef.current?.querySelector<HTMLElement>("[data-f]") ?? null : null)}>
+      <G
+        kind="row"
+        class="library-chips"
+        style={chipsShift ? `transform:translateX(${-chipsShift}px)` : undefined}
+        elRef={(el) => (chipsRef.current = el)}
+        onEnter={(dir) => (dir === "down" ? chipsRef.current?.querySelector<HTMLElement>("[data-f]") ?? null : null)}
+      >
         <Chip
           fid="chip/sort"
-          label={SORT_LABELS[params.sort]}
+          label={sortLabel(params.sort)}
           icon={params.order === "asc" ? "arrow-up-narrow-wide" : "arrow-down-wide-narrow"}
           onSelect={() => openPanel({ kind: "sort" }, "chip/sort")}
         />
-        {!music && <Chip fid="chip/filter" label="Filter" icon="sliders-horizontal" onSelect={() => openPanel({ kind: "filter" }, "chip/filter")} />}
+        {!music && <Chip fid="chip/filter" label={t("browse.library.filter")} icon="sliders-horizontal" onSelect={() => openPanel({ kind: "filter" }, "chip/filter")} />}
         {!music && (
-          <Chip fid="chip/unwatched" label="Unwatched" selected={params.watched === false} onSelect={() => setParams({ ...params, watched: params.watched === false ? null : false })} />
+          <Chip fid="chip/unwatched" label={t("browse.library.unwatched")} selected={params.watched === false} onSelect={() => setParams({ ...params, watched: params.watched === false ? null : false })} />
         )}
         {!music && (genres.length > 0 || params.genre) && (
-          <Chip fid="chip/genre" label={params.genre ?? "Genre"} selected={!!params.genre} maxWidth={220} onSelect={() => openPanel({ kind: "genre", from: "chip" }, "chip/genre")} />
+          <Chip fid="chip/genre" label={params.genre ?? t("browse.library.genre")} selected={!!params.genre} maxWidth={220} onSelect={() => openPanel({ kind: "genre", from: "chip" }, "chip/genre")} />
         )}
         {!music && (years.length > 0 || params.year) && (
-          <Chip fid="chip/year" label={params.year ? String(params.year) : "Year"} selected={!!params.year} onSelect={() => openPanel({ kind: "year", from: "chip" }, "chip/year")} />
+          <Chip fid="chip/year" label={params.year ? String(params.year) : t("browse.library.year")} selected={!!params.year} onSelect={() => openPanel({ kind: "year", from: "chip" }, "chip/year")} />
         )}
-        {total !== null && <div class="t-caption c-muted chips-count">{countLabel(total, lib.kind, filterSet && lib.item_count >= total ? lib.item_count : null)}</div>}
+        {/* The row has no room for two more filters: these are chosen in the Filter panel, and show here while chosen. */}
+        {!music && params.resolution && (
+          <Chip fid="chip/resolution" label={resolutionLabel(params.resolution)!} selected onSelect={() => openPanel({ kind: "resolution", from: "chip" }, "chip/resolution")} />
+        )}
+        {!music && params.dynamicRange && (
+          <Chip
+            fid="chip/dynamicRange"
+            label={dynamicRangeLabel(params.dynamicRange)!}
+            selected
+            onSelect={() => openPanel({ kind: "dynamicRange", from: "chip" }, "chip/dynamicRange")}
+          />
+        )}
+        {total !== null && (
+          <div ref={countRef} class="t-caption c-muted chips-count">
+            {countLabel(total, lib.kind, filterSet && lib.item_count >= total ? lib.item_count : null)}
+          </div>
+        )}
       </G>
       {message ?? (
         <PosterGrid
-          key={`${params.sort}.${params.order}.${params.watched}.${params.genre}.${params.year}`}
+          key={`${params.sort}.${params.order}.${params.watched}.${params.genre}.${params.year}.${params.resolution}.${params.dynamicRange}`}
           kind={kind}
           count={count}
           top={GRID_TOP}
@@ -327,6 +387,8 @@ function LibraryGridTab(p: { entry: Entry; library: Library; asked?: LibrarySort
         />
       )}
       {!message && <GridRest at={focusedIndex} itemAt={(i) => listing.at(i) ?? null} />}
+      {/* Chips slid past the gutter go under the closed rail, as a row's tiles do. */}
+      {chipsShift > 0 && <div class="rail-fade" />}
       {jump && alpha && (
         <JumpControl
           alpha={alpha}
@@ -354,12 +416,13 @@ function LibraryGridTab(p: { entry: Entry; library: Library; asked?: LibrarySort
         <FilterPanel
           music={music}
           params={params}
+          resolutions={resolutions.length > 0}
+          dynamicRanges={dynamicRanges.length > 0}
           onClose={closePanel}
           onChange={(next) => setParams(next)}
-          onGenre={() => setPanel({ kind: "genre", from: "filter" })}
-          onYear={() => setPanel({ kind: "year", from: "filter" })}
+          onList={(kind) => setPanel({ kind, from: "filter" })}
           onClear={() => {
-            setParams({ ...params, watched: null, genre: null, year: null });
+            setParams(cleared(params));
             closePanel();
           }}
           onSaveAs={() => {
@@ -373,8 +436,8 @@ function LibraryGridTab(p: { entry: Entry; library: Library; asked?: LibrarySort
       )}
       {panel?.kind === "genre" && (
         <ChoicePanel
-          title="Genre"
-          all="All genres"
+          title={t("browse.library.genre")}
+          all={t("browse.library.allGenres")}
           choices={genres}
           current={params.genre}
           onClose={closePanel}
@@ -386,13 +449,41 @@ function LibraryGridTab(p: { entry: Entry; library: Library; asked?: LibrarySort
       )}
       {panel?.kind === "year" && (
         <ChoicePanel
-          title="Year"
-          all="All years"
+          title={t("browse.library.year")}
+          all={t("browse.library.allYears")}
           choices={years.map(String)}
           current={params.year ? String(params.year) : null}
           onClose={closePanel}
           onPick={(y) => {
             setParams({ ...params, year: y ? Number(y) : null });
+            closePanel();
+          }}
+        />
+      )}
+      {panel?.kind === "resolution" && (
+        <ChoicePanel
+          title={t("browse.library.resolution")}
+          all={t("browse.library.allResolutions")}
+          choices={withChosen(resolutions, params.resolution)}
+          labelOf={(r) => resolutionLabel(r) ?? r}
+          current={params.resolution}
+          onClose={closePanel}
+          onPick={(r) => {
+            setParams({ ...params, resolution: r as Resolution | null });
+            closePanel();
+          }}
+        />
+      )}
+      {panel?.kind === "dynamicRange" && (
+        <ChoicePanel
+          title={t("browse.library.dynamicRange")}
+          all={t("browse.library.allDynamicRanges")}
+          choices={withChosen(dynamicRanges, params.dynamicRange)}
+          labelOf={(d) => dynamicRangeLabel(d) ?? d}
+          current={params.dynamicRange}
+          onClose={closePanel}
+          onPick={(d) => {
+            setParams({ ...params, dynamicRange: d as DynamicRangeFilter | null });
             closePanel();
           }}
         />
@@ -423,7 +514,7 @@ function GridRest(p: { at: Signal<number>; itemAt: (index: number) => ItemSummar
 function bitrateLine(item: ItemSummary): string {
   const m = item.media;
   const parts = [m?.bitrate ? formatBitrate(m.bitrate) : "", m?.size ? formatBytes(m.size) : ""].filter(Boolean);
-  return parts.length ? parts.join(" · ") : "Bitrate unknown";
+  return parts.length ? parts.join(" · ") : t("browse.library.bitrateUnknown");
 }
 
 /**
@@ -441,7 +532,7 @@ function JumpControl(p: { alpha: AlphaIndex; focusedIndex: Signal<number>; onJum
       <div class="jump-slot t-caption">{focused ? slot(LETTERS[at - 1]) : null}</div>
       <F
         class="jump-box t-title"
-        label={`Jump to a letter: ${shownLetter}`}
+        label={t("browse.library.jumpTo", { letter: shownLetter })}
         onFocus={() => {
           setLetter(p.alpha.letterAt(p.focusedIndex.peek()));
           setFocused(true);
@@ -473,20 +564,20 @@ function JumpControl(p: { alpha: AlphaIndex; focusedIndex: Signal<number>; onJum
 
 function SortPanel(p: { kind: LibraryKind; params: LibraryParams; onClose: () => void; onPick: (next: LibraryParams) => void }) {
   return (
-    <SidePanel onClose={p.onClose} label="Sort by">
-      <PanelTitle>Sort by</PanelTitle>
+    <SidePanel onClose={p.onClose} label={t("browse.library.sortBy")}>
+      <PanelTitle>{t("browse.library.sortBy")}</PanelTitle>
       {sortsFor(p.kind).map((s: LibrarySort) => (
         <PanelRow
           key={s}
-          label={SORT_LABELS[s]}
+          label={sortLabel(s)}
           checked={s === p.params.sort}
           initial={s === p.params.sort}
           onSelect={() => p.onPick({ ...p.params, sort: s, order: defaultOrder(s) })}
         />
       ))}
-      <div class="panel-heading-small t-caption c-muted">Order</div>
-      <PanelRow label="Ascending" checked={p.params.order === "asc"} onSelect={() => p.onPick({ ...p.params, order: "asc" })} />
-      <PanelRow label="Descending" checked={p.params.order === "desc"} onSelect={() => p.onPick({ ...p.params, order: "desc" })} />
+      <div class="panel-heading-small t-caption c-muted">{t("browse.library.order")}</div>
+      <PanelRow label={t("browse.library.ascending")} checked={p.params.order === "asc"} onSelect={() => p.onPick({ ...p.params, order: "asc" })} />
+      <PanelRow label={t("browse.library.descending")} checked={p.params.order === "desc"} onSelect={() => p.onPick({ ...p.params, order: "desc" })} />
     </SidePanel>
   );
 }
@@ -494,43 +585,75 @@ function SortPanel(p: { kind: LibraryKind; params: LibraryParams; onClose: () =>
 function FilterPanel(p: {
   music: boolean;
   params: LibraryParams;
+  /** The server offers resolutions to choose from; and dynamic ranges. */
+  resolutions: boolean;
+  dynamicRanges: boolean;
   onClose: () => void;
   onChange: (next: LibraryParams) => void;
-  onGenre: () => void;
-  onYear: () => void;
+  /** A filter's own list. */
+  onList: (kind: FilterList) => void;
   onClear: () => void;
   /** Save these filters as a smart playlist (Save as…). */
   onSaveAs: () => void;
 }) {
   const w = p.params.watched;
+  const { resolution, dynamicRange } = p.params;
   const value = (text: string) => <span class="panel-value t-caption">{text}</span>;
   const chevron = <Icon name="chevron-right" size={20} class="check" />;
   return (
-    <SidePanel onClose={p.onClose} label="Filter">
-      <PanelTitle>Filter</PanelTitle>
-      <div class="panel-heading-small t-caption c-muted">Show</div>
-      <PanelRow label="All" checked={w === null} initial={w === null} onSelect={() => p.onChange({ ...p.params, watched: null })} />
-      <PanelRow label="Unwatched" checked={w === false} initial={w === false} onSelect={() => p.onChange({ ...p.params, watched: false })} />
-      <PanelRow label="Watched" checked={w === true} initial={w === true} onSelect={() => p.onChange({ ...p.params, watched: true })} />
+    <SidePanel onClose={p.onClose} label={t("browse.library.filter")}>
+      <PanelTitle>{t("browse.library.filter")}</PanelTitle>
+      <div class="panel-heading-small t-caption c-muted">{t("browse.library.show")}</div>
+      <PanelRow label={t("browse.library.all")} checked={w === null} initial={w === null} onSelect={() => p.onChange({ ...p.params, watched: null })} />
+      <PanelRow label={t("browse.library.unwatched")} checked={w === false} initial={w === false} onSelect={() => p.onChange({ ...p.params, watched: false })} />
+      <PanelRow label={t("browse.library.watched")} checked={w === true} initial={w === true} onSelect={() => p.onChange({ ...p.params, watched: true })} />
       {!p.music && (
         <>
-          <PanelRow label="Genre" trailing={<>{value(p.params.genre ?? "All genres")}{chevron}</>} onSelect={p.onGenre} />
-          <PanelRow label="Year" trailing={<>{value(p.params.year ? String(p.params.year) : "All years")}{chevron}</>} onSelect={p.onYear} />
+          <PanelRow label={t("browse.library.genre")} trailing={<>{value(p.params.genre ?? t("browse.library.allGenres"))}{chevron}</>} onSelect={() => p.onList("genre")} />
+          <PanelRow
+            label={t("browse.library.year")}
+            trailing={<>{value(p.params.year ? String(p.params.year) : t("browse.library.allYears"))}{chevron}</>}
+            onSelect={() => p.onList("year")}
+          />
+          {/* When the library has two or more to choose from, or one is chosen, to change or clear it. */}
+          {(p.resolutions || resolution) && (
+            <PanelRow
+              label={t("browse.library.resolution")}
+              trailing={<>{value(resolution ? resolutionLabel(resolution)! : t("browse.library.allResolutions"))}{chevron}</>}
+              onSelect={() => p.onList("resolution")}
+            />
+          )}
+          {(p.dynamicRanges || dynamicRange) && (
+            <PanelRow
+              label={t("browse.library.dynamicRange")}
+              trailing={<>{value(dynamicRange ? dynamicRangeLabel(dynamicRange)! : t("browse.library.allDynamicRanges"))}{chevron}</>}
+              onSelect={() => p.onList("dynamicRange")}
+            />
+          )}
         </>
       )}
-      {hasFilter(p.params) && <PanelRow label="Clear filters" onSelect={p.onClear} />}
-      {hasFilter(p.params) && <PanelRow label="Save as…" icon="save" onSelect={p.onSaveAs} />}
+      {hasFilter(p.params) && <PanelRow label={t("browse.library.clearFilters")} onSelect={p.onClear} />}
+      {hasFilter(p.params) && <PanelRow label={t("browse.library.saveAs")} icon="save" onSelect={p.onSaveAs} />}
     </SidePanel>
   );
 }
 
-function ChoicePanel(p: { title: string; all: string; choices: string[]; current: string | null; onClose: () => void; onPick: (v: string | null) => void }) {
+/** A filter's list: its "None" choice ("All genres"), then each of the server's, in its words when `labelOf` gives them. */
+function ChoicePanel(p: {
+  title: string;
+  all: string;
+  choices: string[];
+  labelOf?: (choice: string) => string;
+  current: string | null;
+  onClose: () => void;
+  onPick: (v: string | null) => void;
+}) {
   return (
     <SidePanel onClose={p.onClose} label={p.title}>
       <PanelTitle>{p.title}</PanelTitle>
       <PanelRow label={p.all} checked={p.current === null} initial={p.current === null} onSelect={() => p.onPick(null)} />
       {p.choices.map((c) => (
-        <PanelRow key={c} label={c} checked={c === p.current} initial={c === p.current} onSelect={() => p.onPick(c)} />
+        <PanelRow key={c} label={p.labelOf ? p.labelOf(c) : c} checked={c === p.current} initial={c === p.current} onSelect={() => p.onPick(c)} />
       ))}
     </SidePanel>
   );
@@ -549,15 +672,22 @@ function RecommendedTab(p: { entry: Entry; library: Library; initial: boolean; f
   const rowIndex = (p.entry.state.recIndex as Record<string, number> | undefined) ?? {};
   p.entry.state.recIndex = rowIndex;
   if (!hubs.data && hubs.error) {
-    return <ColumnMessage top={CHIPS_TOP} title={failedTitle(hubs.error, "Couldn't load recommendations")} body={problem(hubs.error)} action={{ label: "Retry", icon: "refresh-cw", onSelect: hubs.reload }} />;
+    return (
+      <ColumnMessage
+        top={CHIPS_TOP}
+        title={failedTitle(hubs.error, t("browse.library.cantLoadRecommendations"))}
+        body={problem(hubs.error)}
+        action={{ label: t("common.actions.retry"), icon: "refresh-cw", onSelect: hubs.reload }}
+      />
+    );
   }
   if (!hubs.data) return <RowsSkeleton top={CHIPS_TOP} />;
   if (!rows.length && !cols.length) {
     return (
       <ColumnMessage
         top={CHIPS_TOP}
-        title="Nothing to recommend yet"
-        body="Recommendations appear once the library has some items."
+        title={t("browse.library.nothingToRecommend")}
+        body={t("browse.library.nothingToRecommendHint")}
         focusInstead={p.focusTab}
         takeFocus={p.initial}
       />
@@ -606,7 +736,7 @@ function RecommendedTab(p: { entry: Entry; library: Library; initial: boolean; f
       anchor: CHIPS_TOP,
       render: (onFocus) => (
         <Row
-          title="Collections"
+          title={t("browse.collections.title")}
           kind="poster"
           items={cols}
           keyOf={(c) => c.id}
@@ -662,7 +792,7 @@ export function RowsSkeleton(p: { top: number; kind?: TileKind }) {
     </div>
   );
   return (
-    <div aria-label="Loading" role="status">
+    <div aria-label={t("common.states.loading")} role="status">
       {one(p.top)}
       {one(p.top + 18 + 22 + spec.h + 28)}
     </div>
@@ -677,17 +807,23 @@ function CollectionsTab(p: { entry: Entry; library: Library; initial: boolean; f
   const loaded = useLoad((c) => ui.api.collections(lib.id, c), [lib.id]);
   const list = loaded.data?.collections ?? null;
   if (!list && loaded.error) {
-    return <ColumnMessage top={CHIPS_TOP} title={failedTitle(loaded.error, "Couldn't load collections")} body={problem(loaded.error)} action={{ label: "Retry", icon: "refresh-cw", onSelect: loaded.reload }} />;
+    return (
+      <ColumnMessage
+        top={CHIPS_TOP}
+        title={failedTitle(loaded.error, t("browse.collections.cantLoad"))}
+        body={problem(loaded.error)}
+        action={{ label: t("common.actions.retry"), icon: "refresh-cw", onSelect: loaded.reload }}
+      />
+    );
   }
   if (!list) return null;
   if (!list.length) {
-    const body =
-      lib.kind === "movies" ? "Movies of the same TMDB collection are grouped here once two of them are in this library." : "There are no collections in this library yet.";
-    return <ColumnMessage top={CHIPS_TOP} title="No collections yet" body={body} focusInstead={p.focusTab} takeFocus={p.initial} />;
+    const body = lib.kind === "movies" ? t("browse.library.noCollectionsHint") : t("browse.library.noCollectionsHere");
+    return <ColumnMessage top={CHIPS_TOP} title={t("browse.collections.none")} body={body} focusInstead={p.focusTab} takeFocus={p.initial} />;
   }
   return (
     <>
-      <div class="t-caption c-muted collections-count">{`${grouped(list.length)} ${list.length === 1 ? "collection" : "collections"}`}</div>
+      <div class="t-caption c-muted collections-count">{pluralize(list.length, "collection")}</div>
       <PosterGrid
         kind="grid"
         count={list.length}
@@ -717,12 +853,12 @@ function CollectionsTab(p: { entry: Entry; library: Library; initial: boolean; f
   );
 }
 
-// ---- Libraries (the rail's entry with more than three)
+// ---- Libraries (the rail's entry with more than six)
 
 /** "412 movies", "38 shows · Scanning…", "120 artists". */
 export function libraryCountLine(l: Library): string {
   const base = l.kind === "music" ? pluralize(l.item_count, "artist") : l.kind === "shows" ? pluralize(l.item_count, "show") : pluralize(l.item_count, "movie");
-  return l.scanning ? `${base} · Scanning…` : base;
+  return l.scanning ? t("browse.libraries.scanning", { counts: base }) : base;
 }
 
 /**
@@ -736,9 +872,9 @@ export function LibrariesFailed(p: { top?: number }) {
   return (
     <ColumnMessage
       top={p.top}
-      title={failedTitle(error, "Couldn't load your libraries")}
+      title={failedTitle(error, t("browse.libraries.cantLoad"))}
       body={problem(error)}
-      action={{ label: "Retry", icon: "refresh-cw", onSelect: () => void app.loadAccount().catch(() => undefined) }}
+      action={{ label: t("common.actions.retry"), icon: "refresh-cw", onSelect: () => void app.loadAccount().catch(() => undefined) }}
     />
   );
 }
@@ -770,10 +906,13 @@ export function librarySorting(app: AppState): "yes" | "no" | "older" | "refused
   return noSort.get(app.server.value ?? "") ?? "yes";
 }
 
-export const SORT_NEEDS_NEWER = "Sorting libraries needs a newer Pley on the server.";
+/** What a server too old to sort the libraries is told: on this page, and in Settings. */
+export function sortNeedsNewer(): string {
+  return t("browse.libraries.needsNewer");
+}
 
 /**
- * Every library (TvLibrariesScreen): the rail lists three, and Libraries
+ * Every library (TvLibrariesScreen): the rail lists six, and Libraries
  * opens this page. A card a library, in the profile's order: its kind's
  * icon, its name, how much it holds, and "Scanning…" while the server
  * scans it.
@@ -849,14 +988,14 @@ export function LibrariesScreen(p: { entry: Entry; sort?: boolean }) {
     const server = app.server.value ?? "";
     if (isApiError(e, 404) || isApiError(e, 405)) {
       noSort.set(server, "older");
-      ui.toast(SORT_NEEDS_NEWER, true);
+      ui.toast(sortNeedsNewer(), true);
     } else if (isApiError(e, 403)) {
       noSort.set(server, "refused");
-      ui.toast("This server doesn't let the app sort your libraries: sort them on the web", true);
+      ui.toast(t("browse.libraries.refused"), true);
     } else if (isApiError(e, 409)) {
       // A library came or went since they were listed.
       void app.loadAccount().catch(() => undefined);
-      ui.toast("Your libraries changed meanwhile: try again", true);
+      ui.toast(t("browse.libraries.changed"), true);
     } else ui.toast(sentence(errorMessage(e)), true);
     if (noSort.has(server)) {
       setSorting(false);
@@ -941,7 +1080,7 @@ export function LibrariesScreen(p: { entry: Entry; sort?: boolean }) {
   }, [inSort, p.sort]);
 
   if (!libraries) return <LibrariesFailed />;
-  if (!libraries.length) return <ColumnMessage title="No libraries yet" body="Ask the server owner to add a library." />;
+  if (!libraries.length) return <ColumnMessage title={t("browse.home.noLibraries")} body={t("browse.home.noLibrariesHint")} />;
   const toTarget = (i: number) => {
     // The pointer, with a card lifted: the card goes where it points (past the last, to the end).
     if (ui.input.pointerMoved) moveTo(Math.min(i, shown.length - 1), true);
@@ -954,15 +1093,15 @@ export function LibrariesScreen(p: { entry: Entry; sort?: boolean }) {
     <div class="libraries-page">
       <div class="libraries-header">
         <div class="t-page c-fg one-line" style="flex:1;min-width:0">
-          {inSort ? "Sort libraries" : "Libraries"}
+          {inSort ? t("browse.libraries.sort") : t("browse.libraries.title")}
         </div>
         {sortable && (
           <G kind="row" class="libraries-buttons" elRef={(el) => (headerRef.current = el)}>
-            {inSort && <Pill key="server" fid="serverOrder" label="Use the server's order" icon="rotate-ccw" disabled={liftedId !== null} onSelect={serverOrder} />}
+            {inSort && <Pill key="server" fid="serverOrder" label={t("browse.libraries.serverOrder")} icon="rotate-ccw" disabled={liftedId !== null} onSelect={serverOrder} />}
             <Pill
               key="sort"
               fid="sort"
-              label={inSort ? "Done" : "Sort libraries"}
+              label={inSort ? t("common.actions.done") : t("browse.libraries.sort")}
               icon={inSort ? "check" : "arrow-up-down"}
               disabled={liftedId !== null}
               onSelect={inSort ? endSorting : startSorting}
@@ -1010,7 +1149,7 @@ export function LibrariesScreen(p: { entry: Entry; sort?: boolean }) {
       </div>
       {inSort && (
         <div class="moving-hint t-label">
-          {liftedId !== null ? "Arrows to move it, OK to drop it here, Back to put it back" : "Press OK on a library to move it. Your order applies on all your devices."}
+          {liftedId !== null ? t("browse.libraries.liftedHint") : t("browse.libraries.sortHint")}
         </div>
       )}
       {actionsFor && (
@@ -1020,7 +1159,7 @@ export function LibrariesScreen(p: { entry: Entry; sort?: boolean }) {
             <div class="t-caption c-muted one-line">{libraryCountLine(actionsFor)}</div>
           </div>
           <PanelRow
-            label="Open"
+            label={t("common.actions.open")}
             icon="arrow-right"
             initial
             onSelect={() => {
@@ -1029,7 +1168,7 @@ export function LibrariesScreen(p: { entry: Entry; sort?: boolean }) {
             }}
           />
           <PanelRow
-            label="Move"
+            label={t("browse.actions.move")}
             icon="arrow-up-down"
             onSelect={() => {
               setActionsFor(null);
@@ -1038,7 +1177,7 @@ export function LibrariesScreen(p: { entry: Entry; sort?: boolean }) {
             }}
           />
           <PanelRow
-            label="Use the server's order"
+            label={t("browse.libraries.serverOrder")}
             icon="rotate-ccw"
             onSelect={() => {
               setActionsFor(null);
@@ -1080,7 +1219,7 @@ function LibraryCard(p: {
         class={`library-card${p.lifted ? " lifted" : ""}`}
         fid={`library/${l.id}`}
         initial={p.index === 0}
-        label={`${l.name}, ${libraryCountLine(l)}${p.sorting ? `, ${p.index + 1} of ${p.count}` : ""}`}
+        label={`${l.name}, ${libraryCountLine(l)}${p.sorting ? `, ${t("browse.libraries.position", { position: p.index + 1, total: p.count })}` : ""}`}
         onFocus={p.onFocus}
         onBlur={p.lifted ? p.onLeave : undefined}
         onSelect={p.onSelect}

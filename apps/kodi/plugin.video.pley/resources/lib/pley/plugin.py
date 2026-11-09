@@ -91,7 +91,8 @@ class Plugin(asking.Asking):
             if item["kind"] in listing.PLAYABLE:
                 # The resume point goes along, so playing needs no details first.
                 position = (item.get("user_state") or {}).get("position_ms") or 0
-                entries.append((self.url(route="play", id=item["id"], pos=position), li, False))
+                # So is its kind: what the user's remote may do (playback.obeys).
+                entries.append((self.url(route="play", id=item["id"], pos=position, kind=item["kind"]), li, False))
             else:
                 entries.append((self.url(route="item", id=item["id"]), li, True))
         xbmcplugin.addDirectoryItems(self.handle, entries, len(entries))
@@ -135,12 +136,13 @@ class Plugin(asking.Asking):
         except api.ApiError as e:
             kodi.log("%s: %s %s" % (route, e.code, e.message), xbmc.LOGWARNING)
             listing_route = self.handle >= 0 and route not in ACTIONS
-            if e.code == "unreachable" and listing_route:
+            if e.code in UNREACHABLE and listing_route:
                 # The server is off or out of reach (the internet needn't be
-                # there: pley works on the home network alone).
-                return self.unreachable()
-            if e.code == "unreachable":
-                message = kodi.text("cant_reach") % self.server_name()
+                # there: pley works on the home network alone), or another
+                # device answers at its address.
+                return self.unreachable(e.code)
+            if e.code in UNREACHABLE:
+                message = away_text(e.code, self.server_name())
             elif e.code == "signed_out":
                 message = kodi.text("signed_out")
             elif e.code == "service_off":
@@ -162,9 +164,10 @@ class Plugin(asking.Asking):
     def server_name(self) -> str:
         return kodi.setting("server_name") or server_setting()
 
-    def unreachable(self) -> None:
-        """What a listing shows when the server doesn't answer."""
-        li = xbmcgui.ListItem(kodi.text("cant_reach") % self.server_name(), offscreen=True)
+    def unreachable(self, code: str = "unreachable") -> None:
+        """What a listing shows when the server doesn't answer, or another
+        device answers at its address."""
+        li = xbmcgui.ListItem(away_text(code, self.server_name()), offscreen=True)
         li.setArt({"icon": "DefaultIconError.png", "thumb": "DefaultIconError.png"})
         li.getVideoInfoTag().setPlot(kodi.text("cant_reach_hint"))
         xbmcplugin.addDirectoryItem(self.handle, self.url(route="retry"), li, isFolder=False)
@@ -190,7 +193,11 @@ class Plugin(asking.Asking):
         except api.ApiError as e:
             # Its list ended already: what went wrong is said, not listed.
             kodi.log("Pley's window: %s %s" % (e.code, e.message), xbmc.LOGWARNING)
-            kodi.notify(kodi.text("cant_reach") % self.server_name() if e.code == "unreachable" else kodi.text("server_error") % e.message, error=True)
+            if e.code in UNREACHABLE:
+                message = away_text(e.code, self.server_name())
+            else:
+                message = kodi.text("server_error") % e.message
+            kodi.notify(message, error=True)
 
     def signed_in(self) -> bool:
         """Whether the add-on is signed in on the chosen server."""
@@ -376,7 +383,7 @@ class Plugin(asking.Asking):
         tmdb_query = requests.search_text(query)
         may_ask = bool(tmdb_query) and requests.may_ask(self.requests_summary(ask=False))
         tmdb = asking.Searching(self.client(asking.FOUND_WAIT), tmdb_query, self.path) if may_ask else None
-        found = client.get("/api/search", q=query, limit=100, summaries=1)
+        found = client.get("/api/search", q=query, limit=api.SEARCH_LIMIT, summaries=1)
         items = found.get("items", [])
         channels = found.get("channels") or []
         alone = not items and not channels
@@ -408,14 +415,30 @@ class Plugin(asking.Asking):
         item_id = int(self.params["id"])
         listed = self.params.get("pos")
         detail = None
-        if self.resume and listed is None:
+        if (self.params.get("start") or "").isdigit():
+            # Where it was asked to start, whatever Kodi was told: a cast's
+            # place, or its resume point where the add-on's Play resumes.
+            start_ms = int(self.params["start"])
+        elif self.resume and listed is None:
             # Not from a listing: the resume point is in the details.
             detail = client.get("/api/items/%d" % item_id)
             start_ms = (detail.get("user_state") or {}).get("position_ms", 0)
         else:
             start_ms = int(listed or 0) if self.resume else 0
-        li = playback.prepare(client, self.proxy_base, item_id, start_ms, detail)
+        given = self.given_tracks()
+        li = playback.prepare(client, self.proxy_base, item_id, start_ms, detail, kind=self.params.get("kind"), given=given)
         xbmcplugin.setResolvedUrl(self.handle, True, li)
+
+    def given_tracks(self):
+        """The tracks a cast named (casting.play checked them against the
+        file): {"audio", "subtitle"}, -1 for no subtitles; None for none."""
+        found = {}
+        for name in ("audio", "subtitle"):
+            value = self.params.get(name) or ""
+            found[name] = int(value) if re.fullmatch(r"-1|\d{1,9}", value) else None
+        if found["audio"] == -1:
+            found["audio"] = None
+        return found if found["audio"] is not None or found["subtitle"] is not None else None
 
     # --------------------------------------------------------------- Live TV
 
@@ -460,7 +483,7 @@ class Plugin(asking.Asking):
     def category(self, title: str, count, params: dict, icon: str) -> None:
         """A folder of Live TV's: a category of channels, how many it has."""
         params = dict({"route": "live_channels"}, **params)
-        label = "%s  [COLOR %s](%s)[/COLOR]" % (title, "FF8B95A5", "{:,}".format(count)) if count is not None else title
+        label = "%s  [COLOR %s](%s)[/COLOR]" % (title, "FF8B95A5", kodi.number(count)) if count is not None else title
         self.folder(label, params, icon)
 
     def route_live_search(self) -> None:
@@ -622,6 +645,7 @@ class Plugin(asking.Asking):
 
         client = self.client()
         me = client.get("/api/auth/me")
+        heard(me)
         dialog = xbmcgui.Dialog()
         tracks.edit_defaults(
             client,
@@ -630,6 +654,23 @@ class Plugin(asking.Asking):
             lambda words, error: kodi.notify(words, error=error),
             kodi.text,
             api.ApiError,
+        )
+
+    def route_language(self) -> None:
+        """Profile language (from the add-on's settings): the profile's own,
+        on all its devices (this device's on a server from before
+        languages), in Kodi's list dialog."""
+        from . import language
+
+        client = self.client()
+        me = client.get("/api/auth/me")
+        heard(me)
+        dialog = xbmcgui.Dialog()
+        language.choose(
+            client,
+            me,
+            lambda heading, labels, preselect: dialog.select(heading, labels, preselect=preselect),
+            lambda words, error: kodi.notify(words, error=error),
         )
 
     def route_subtitles(self) -> None:
@@ -743,10 +784,8 @@ class Plugin(asking.Asking):
                     needs, problem = "pin", profiles.refusal(e, kodi.text, self.server_name())
                     continue
                 return kodi.notify(profiles.refusal(e, kodi.text, self.server_name()), error=True)
-        kodi.set_property(profiles.GATE, "1")
         kodi.notify(kodi.text("watching_as") % name)
-        if kodi.get_property(kodi.WINDOW_OPEN):
-            xbmc.executebuiltin("NotifyAll(%s,%s)" % (kodi.ADDON_ID, profiles.SWITCHED))
+        profiles.tell_switched()
         # Requests are the profile's own.
         self.notify_service(forget=True)
         xbmc.executebuiltin("Container.Refresh")
@@ -820,6 +859,8 @@ class Plugin(asking.Asking):
     def sign_out(self) -> None:
         """Signs out, asked already, and says so."""
         if self.sign_out_quietly():
+            # No account: this device's language.
+            heard(None)
             kodi.notify(kodi.text("signed_out"))
         else:
             kodi.notify(kodi.text("service_off"), error=True)
@@ -885,8 +926,10 @@ class Plugin(asking.Asking):
                     # What it may do with requests is the new sign-in's.
                     self.notify_service(forget=True)
                     if previous and previous.get("refresh_token") != record["refresh_token"]:
-                        # The sign-in this one replaces ends on its server too.
-                        auth.revoke(previous, kodi.user_agent())
+                        # The sign-in this one replaces ends on its server
+                        # too, where that server proves it holds its key.
+                        if auth.proves(previous, kodi.user_agent()):
+                            auth.revoke(previous, kodi.user_agent())
                     outcome = signed_in_text(server, tokens["access_token"])
                 elif state == "denied":
                     outcome = kodi.text("code_refused")
@@ -922,6 +965,7 @@ ACTIONS = (
     "my_list",
     "settings",
     "tracks",
+    "language",
     "profiles",
     "rename_playlist",
     "delete_playlist",
@@ -932,6 +976,13 @@ ACTIONS = (
     "retry",
 ) + asking.ACTIONS
 RESOLVING = ("play", "live_play")
+# The server out of reach: nothing answers there, or another device does.
+UNREACHABLE = ("unreachable", "another_device")
+
+
+def away_text(code: str, server: str) -> str:
+    """What the add-on says of `server` out of reach (one of UNREACHABLE)."""
+    return kodi.text("cant_reach" if code == "unreachable" else code) % server
 
 
 def choose(server: str, name: str, server_id: str) -> None:
@@ -941,12 +992,20 @@ def choose(server: str, name: str, server_id: str) -> None:
     kodi.set_setting("server_id", server_id)
 
 
+def heard(me) -> None:
+    """The profile as GET /api/auth/me says it (None: signed out): its own
+    language shows."""
+    kodi.heard_account(me if isinstance(me, dict) else None)
+    kodi.follow_language()
+
+
 def signed_in_text(server: str, access_token: str) -> str:
     """"Signed in as Alice", or "Signed in" when the server doesn't say
-    who (the sign-in worked all the same)."""
+    who (the sign-in worked all the same), in the profile's language."""
     try:
         me = api.Client(server, kodi.user_agent(), access_token, timeout=5).get("/api/auth/me") or {}
         name = me.get("name") or me.get("username")
+        heard(me)
     except (api.ApiError, AttributeError):
         name = None
     return kodi.text("signed_in_as") % name if name else kodi.text("signed_in")
@@ -982,6 +1041,10 @@ def two_step_required(server: str) -> bool:
         found = api.Client(server, kodi.user_agent(), timeout=5).get("/api/server")
     except api.ApiError:
         return False
+    # Its language too, for a Kodi in a language Pley doesn't have: the
+    # sign-in screen's words change to it.
+    kodi.heard_server(found)
+    kodi.follow_language()
     return isinstance(found, dict) and found.get("two_step_required") is True
 
 
@@ -989,9 +1052,7 @@ def waiting_text(seconds_left: float) -> str:
     minutes = int(seconds_left // 60)
     if minutes < 1:
         return kodi.text("waiting_last_minute")
-    if minutes == 1:
-        return kodi.text("waiting_one_minute")
-    return kodi.text("waiting") % minutes
+    return kodi.count("waiting_minutes", minutes)
 
 
 def server_setting() -> str:

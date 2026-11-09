@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using Pley.Tv.Core;
+using Pley.Tv.Core.Requests;
 using Pley.Tv.Core.Ui;
 using Tizen.NUI;
 using Tizen.NUI.BaseComponents;
@@ -13,27 +15,38 @@ sealed record RailProfile(string Name, Color? Color = null)
 }
 
 /// <summary>
-/// The rail (the Android app's TvRail, design spec §2.1): 56 dp entries collapsed, 256 open. The
-/// avatar at the top switches profiles; then the entries; Settings at the foot, at y = 465.
+/// The rail (the Android app's TvRail, design spec §2.1): 56 dp entries collapsed, 256 open, 40
+/// tall. The avatar at the top switches profiles; then the entries, 4 apart from y = 67; Settings at
+/// the foot, at y = 473. Nine entries fit between them: more scroll as focus moves along them
+/// (<see cref="Rail.Scroll"/>), clipped from the avatar's foot to Settings' top, which stay put.
 /// Collapsed, the current entry has a 4 × 20 accent mark and its icon in Fg; open, it is a Surface3
 /// pill. The focused entry is the accent pill at 1.05. Open (focus in it), the rail is Surface at
 /// 96 % with a soft edge, and the page behind it is dimmed.
 ///
 /// It moves as tv-material's drawer does: the panel and the entries widen, the labels fade in as
-/// they slide in from the left and fade out where they are, and the dim comes and goes at once.
+/// they slide in from the left and fade out where they are, and the dim comes and goes at once. The
+/// panel fades over the last 15 % of its way, into the page's dark under the closed entries.
 /// Over 200 ms, as the design spec gives the drawer (PleyMotion.OverlayMs); with Reduce motion, it
 /// opens and closes in place.
 /// </summary>
 sealed class RailView : View
 {
-    /// <summary>The avatar's entry: 56 tall from y = 15, so its circle sits at y = 27 and Search starts at y = 75.</summary>
-    const float AvatarTop = 15, AvatarHeight = 56, AvatarSize = 32, FirstEntry = 75;
-    /// <summary>48 dp entries on a 56 dp pitch; Settings at the foot.</summary>
-    const float EntryHeight = 48, Pitch = 56, SettingsY = 465;
+    /// <summary>The avatar's entry: 48 tall from y = 15, so its circle sits at y = 23; the entries' view starts at its foot.</summary>
+    const float AvatarTop = 15, AvatarHeight = 48, AvatarSize = 32, ViewTop = AvatarTop + AvatarHeight;
+    /// <summary>40 dp entries on a 44 dp pitch from y = 67; Settings at the foot.</summary>
+    const float EntryHeight = Rail.EntryHeight, SettingsY = Rail.SettingsY;
     /// <summary>The open rail's soft right edge.</summary>
     const float Shadow = 64;
     /// <summary>How far a label slides in from: a little, not tv-material's whole width, since an entry doesn't clip it and it would cross the icon.</summary>
     const float LabelSlide = 24;
+    /// <summary>
+    /// The last of the panel's way, as a part of it (30 dp), over which it fades into the closed
+    /// rail's dark, as on Android TV: on the cubic ease out, the first 5 % of the time opening and
+    /// the last 53 % closing.
+    /// </summary>
+    const float Fade = 0.15f;
+    static readonly int FadeInMs = (int)MathF.Round(PleyMotion.OverlayMs * (1 - MathF.Cbrt(1 - Fade)));
+    static readonly int FadeOutFromMs = (int)MathF.Round(PleyMotion.OverlayMs * (1 - MathF.Cbrt(Fade)));
 
     readonly FocusTree tree;
     readonly View panel;
@@ -43,9 +56,19 @@ sealed class RailView : View
     readonly View avatarCircle;
     readonly TextLabel avatarInitial;
     readonly Func<bool> reduced;
+    /// <summary>The entries' view, clipped from the avatar's foot to Settings' top, and the entries in it, moved to scroll them.</summary>
+    readonly View view;
+    readonly View track;
     Animation? motion;
+    Animation? scrolling;
     string? current;
+    /// <summary>The entries above Settings, in order.</summary>
+    IReadOnlyList<RailItem> items = Array.Empty<RailItem>();
     bool open;
+    /// <summary>How far the entries are scrolled, in dp.</summary>
+    float scroll;
+    /// <summary>The entries are being made again: focus goes to its entry at once, leaving no animation running on the one that went.</summary>
+    bool remaking;
 
     public RailView(FocusTree tree, Func<bool> reducedMotion, Action<RailItem> onSelect, Action onProfile)
     {
@@ -81,11 +104,22 @@ sealed class RailView : View
         avatarInitial.HorizontalAlignment = HorizontalAlignment.Center;
         avatarCircle.Add(avatarInitial);
         avatar.Box.Add(avatarCircle);
-        avatar.SetSecondLine("Switch profile");
+        avatar.SetSecondLine(Strings.T("shell.rail.switchProfile"));
         Group.Add(avatar.Item);
         Add(avatar.Box);
+        // As wide as the rail with its edge, so an open entry at 1.05 isn't cut. Clipped to its box:
+        // ClipChildren needs a view that draws something, and with nothing to draw cut nothing.
+        view = new View
+        {
+            Size = new Size(Ui.Dp(PleyTv.RailExpanded + Shadow), Ui.Dp(SettingsY - ViewTop)),
+            Position = new Position(0, Ui.Dp(ViewTop)),
+            ClippingMode = ClippingModeType.ClipToBoundingBox,
+        };
+        track = new View { Position = new Position(0, Ui.Dp(Rail.FirstEntry - ViewTop)) };
+        view.Add(track);
+        Add(view);
         this.onSelect = onSelect;
-        Group.Add(AddEntry(Rail.SettingsItem, SettingsY).Item);
+        Group.Add(AddEntry(Rail.SettingsItem, SettingsY, this).Item);
 #if PROFILE
         // A profiling build says so, under Settings, where it's never in the way of a page.
         var debug = new TextLabel("DEBUG\nMODE")
@@ -99,8 +133,12 @@ sealed class RailView : View
         };
         Add(debug);
 #endif
-        // Focus in the rail is what opens it.
-        tree.Moved += item => Open(item?.Parent == Group);
+        // Focus in the rail is what opens it, and places the entry it is on.
+        tree.Moved += item =>
+        {
+            Open(item?.Parent == Group);
+            Follow(item);
+        };
     }
 
     readonly Action<RailItem> onSelect;
@@ -110,9 +148,16 @@ sealed class RailView : View
     /// <summary>The open rail's dim over the page, for the shell to put between the page and the rail.</summary>
     public View Scrim { get; }
 
-    /// <summary>The entries above Settings, as <see cref="Rail.Items"/> lists them.</summary>
+    /// <summary>
+    /// The entries above Settings, as <see cref="Rail.Items"/> lists them. Focus on an entry stays
+    /// on it as they're made again, or goes to the one in its place (<see cref="Rail.Refocus"/>):
+    /// left on the entry that went, nothing showed it, and Down went to the avatar.
+    /// </summary>
     public void SetItems(IReadOnlyList<RailItem> items)
     {
+        this.items = items;
+        var place = PlaceOf(tree.Current) ?? -1;
+        var focused = place >= 0 && place < Count ? entries.Find(e => e.Item == tree.Current) : null;
         foreach (var e in entries)
         {
             if (e.Id == Rail.SettingsItem.Id) continue;
@@ -120,8 +165,17 @@ sealed class RailView : View
             e.Box.Unparent();
         }
         entries.RemoveAll(e => e.Id != Rail.SettingsItem.Id);
-        for (var i = 0; i < items.Count; i++) Group.Insert(1 + i, AddEntry(items[i], FirstEntry + i * Pitch).Item);
+        for (var i = 0; i < items.Count; i++) Group.Insert(1 + i, AddEntry(items[i], i * Rail.Pitch, track).Item);
         Mark();
+        if (focused != null)
+        {
+            var to = Rail.Refocus(focused.Id, place, items);
+            remaking = true;
+            tree.Focus((FocusItem)Group.Children[1 + to]);
+            remaking = false;
+        }
+        // Made again: the focused entry, else the page's, placed by the same rule; on the avatar or Settings, the scroll within the entries' ends.
+        Follow(tree.Current);
     }
 
     public void SetProfile(RailProfile? profile)
@@ -136,6 +190,8 @@ sealed class RailView : View
     {
         current = id;
         Mark();
+        // Closed, the rail shows the page's entry where focus on it would.
+        Follow(tree.Current);
     }
 
     /// <summary>Focus to the current entry (D-pad rule 3: Left from content, Back from a top page), which opens the rail.</summary>
@@ -145,13 +201,59 @@ sealed class RailView : View
         return target != null && tree.Focus(target.Item);
     }
 
-    Entry AddEntry(RailItem item, float y)
+    Entry AddEntry(RailItem item, float y, View parent)
     {
         var e = new Entry(this, item.Id, item.Icon, item.Label, y, EntryHeight, () => onSelect(item));
+        if (item.Requests is { Badge: > 0 } requests) e.SetCount(requests);
         e.Open(open, null);
         entries.Add(e);
-        Add(e.Box);
+        parent.Add(e.Box);
         return e;
+    }
+
+    /// <summary>Entries between the avatar and Settings.</summary>
+    int Count => Group.Children.Count - 2;
+
+    /// <summary>Where <paramref name="item"/> is in the rail: an entry's index, -1 the avatar, <see cref="Count"/> Settings; null outside it.</summary>
+    int? PlaceOf(FocusItem? item)
+    {
+        if (item == null || item.Parent != Group) return null;
+        var children = Group.Children;
+        for (var i = 0; i < children.Count; i++)
+            if (children[i] == item) return i - 1;
+        return null;
+    }
+
+    /// <summary>
+    /// Focus moved to <paramref name="item"/>: the entries placed for its entry (<see cref="Rail.Scroll"/>), or, with
+    /// focus outside the rail, for the page's, so the rail opens on it without moving; on the avatar or Settings, kept
+    /// where they are.
+    /// </summary>
+    void Follow(FocusItem? item) => ScrollTo(Rail.Scroll(scroll, PlaceOf(item) ?? CurrentPlace(), Count));
+
+    /// <summary>The page's entry's index; -1 when it has none among the entries (Settings, Who's watching?).</summary>
+    int CurrentPlace()
+    {
+        for (var i = 0; i < items.Count; i++)
+            if (items[i].Id == current) return i;
+        return -1;
+    }
+
+    void ScrollTo(float target)
+    {
+        if (target == scroll) return;
+        scroll = target;
+        scrolling?.Stop();
+        scrolling = null;
+        var y = Ui.Dp(Rail.FirstEntry - ViewTop - target);
+        if (reduced())
+        {
+            track.PositionY = y;
+            return;
+        }
+        scrolling = new Animation(PleyMotion.FocusMs) { DefaultAlphaFunction = new AlphaFunction(AlphaFunction.BuiltinFunctions.EaseOut) };
+        scrolling.AnimateTo(track, "PositionY", y);
+        scrolling.Play();
     }
 
     void Open(bool on)
@@ -165,6 +267,7 @@ sealed class RailView : View
         if (reduced())
         {
             panel.SizeWidth = Ui.Dp(PleyTv.RailExpanded);
+            panel.Opacity = 1;
             edge.PositionX = Ui.Dp(PleyTv.RailExpanded);
             edge.Opacity = 1;
             Panel(on);
@@ -178,12 +281,16 @@ sealed class RailView : View
         {
             // From the closed rail's width: the panel grows out of it, its edge riding on its right.
             panel.SizeWidth = Ui.Dp(PleyTv.RailCollapsed);
+            panel.Opacity = 0;
             edge.PositionX = Ui.Dp(PleyTv.RailCollapsed);
             edge.Opacity = 0;
             Panel(true);
         }
         var width = Ui.Dp(on ? PleyTv.RailExpanded : PleyTv.RailCollapsed);
         a.AnimateTo(panel, "SizeWidth", width);
+        // Closing, from where the panel has the last of its way to go, on the same curve: its strength follows its width.
+        if (on) a.AnimateTo(panel, "Opacity", 1f, 0, FadeInMs, new AlphaFunction(AlphaFunction.BuiltinFunctions.Linear));
+        else a.AnimateTo(panel, "Opacity", 0f, FadeOutFromMs, PleyMotion.OverlayMs, new AlphaFunction(AlphaFunction.BuiltinFunctions.EaseOut));
         a.AnimateTo(edge, "PositionX", width);
         a.AnimateTo(edge, "Opacity", on ? 1f : 0f);
         avatar.Open(on, a);
@@ -197,6 +304,7 @@ sealed class RailView : View
             foreach (var e in entries) e.Closed();
         };
         motion = a;
+        Profile.Slowed(a);
         a.Play();
         Mark();
     }
@@ -229,6 +337,9 @@ sealed class RailView : View
         readonly TextLabel label;
         TextLabel? second;
         readonly View mark;
+        /// <summary>The number on the way into requests, ringed in the page's colour, astride the icon's upper right.</summary>
+        View? countRing;
+        CountBadge? count;
         readonly float height;
         bool lastOpen, lastCurrent, lastFocused, labelsShown;
         Animation? focusAnimation;
@@ -273,6 +384,26 @@ sealed class RailView : View
         public View Box { get; }
 
         public void SetLabel(string text) => Text.Show(label, text);
+
+        /// <summary>
+        /// The number waiting in requests (the Android app's RailCount): 18 dp, ringed 2 dp in the page's
+        /// colour, astride the icon's upper right; red while failed requests wait for a manager.
+        /// </summary>
+        public void SetCount(RequestsEntry entry)
+        {
+            count = new CountBadge(entry.Badge, entry.Alarm, height: 18);
+            countRing = new View
+            {
+                Size = new Size(count.SizeWidth + Ui.Dp(4), count.SizeHeight + Ui.Dp(4)),
+                Position = new Position(Ui.Dp(18 + 9), Ui.Dp((height - PleyTv.IconSize) / 2 - 10)),
+                CornerRadius = (count.SizeHeight + Ui.Dp(4)) / 2,
+                BackgroundColor = PleyColors.Bg,
+            };
+            count.Position = new Position(Ui.Dp(2), Ui.Dp(2));
+            countRing.Add(count);
+            Box.Add(countRing);
+            count.Focused(Item.Focused);
+        }
 
         /// <summary>The avatar's second line, under its name.</summary>
         public void SetSecondLine(string text)
@@ -345,6 +476,7 @@ sealed class RailView : View
             var ink = focused ? PleyColors.OnAccent : current ? PleyColors.Fg : PleyColors.Muted;
             if (icon != null) icon.Color = ink;
             label.TextColor = ink;
+            count?.Focused(focused);
             if (second != null) second.TextColor = focused ? PleyColors.OnAccent : PleyColors.Muted;
             if (current && !open) mark.Show();
             else mark.Hide();
@@ -354,7 +486,7 @@ sealed class RailView : View
             var scale = new Vector3(size, size, 1);
             focusAnimation?.Stop();
             focusAnimation = null;
-            if (rail.reduced())
+            if (rail.reduced() || rail.remaking)
             {
                 Box.Scale = scale;
                 return;

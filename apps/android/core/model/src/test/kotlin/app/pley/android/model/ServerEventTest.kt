@@ -2,6 +2,7 @@ package app.pley.android.model
 
 import kotlinx.serialization.SerializationException
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -33,6 +34,87 @@ class ServerEventTest {
         assertEquals(ServerEvent.UserStateChanged(listOf(201), children = true), ServerEvent.parse("""{"type":"user_state_changed","item_ids":[201],"children":true}"""))
         assertEquals(ServerEvent.LiveChannelsChanged, ServerEvent.parse("""{"type":"live_channels_changed"}"""))
         assertEquals(ServerEvent.LiveTunersChanged, ServerEvent.parse("""{"type":"live_tuners_changed"}"""))
+        assertEquals(
+            ServerEvent.LiveTakenOver("s3", 7, "Someone else needed this channel's connection to watch another channel."),
+            ServerEvent.parse(
+                """{"type":"live_taken_over","session_id":"s3","channel_id":7,"message":"Someone else needed this channel's connection to watch another channel."}""",
+            ),
+        )
+    }
+
+    @Test
+    fun playerCommandsRead() {
+        assertEquals(
+            ServerEvent.PlayerCommand("s1", Control.Seek, positionMs = 600_000, offsetMs = null),
+            ServerEvent.parse("""{"type":"player_command","session_id":"s1","command":"seek","position_ms":600000,"offset_ms":null}"""),
+        )
+        assertEquals(
+            ServerEvent.PlayerCommand("s1", Control.Skip, positionMs = null, offsetMs = -10_000),
+            ServerEvent.parse("""{"type":"player_command","session_id":"s1","command":"skip","position_ms":null,"offset_ms":-10000}"""),
+        )
+        assertEquals(ServerEvent.PlayerCommand("s2", Control.Previous), ServerEvent.parse("""{"type":"player_command","session_id":"s2","command":"previous"}"""))
+        // A command a newer server adds is read, and no player acts on it.
+        assertEquals(ServerEvent.PlayerCommand("s2", Control.Unknown), ServerEvent.parse("""{"type":"player_command","session_id":"s2","command":"shuffle"}"""))
+        val pause = ServerEvent.PlayerCommand("s3", Control.Pause)
+        assertEquals("""{"type":"player_command","session_id":"s3","command":"pause"}""", PleyJson.encodeToString(ServerEvent.serializer(), pause))
+        assertEquals(pause, ServerEvent.parse(PleyJson.encodeToString(ServerEvent.serializer(), pause)))
+        // Tracks name their stream; subtitles off is -1.
+        assertEquals(
+            ServerEvent.PlayerCommand("s4", Control.Audio, streamIndex = 2),
+            ServerEvent.parse("""{"type":"player_command","session_id":"s4","command":"audio","position_ms":null,"offset_ms":null,"stream_index":2}"""),
+        )
+        assertEquals(
+            ServerEvent.PlayerCommand("s4", Control.Subtitles, streamIndex = -1),
+            ServerEvent.parse("""{"type":"player_command","session_id":"s4","command":"subtitles","stream_index":-1}"""),
+        )
+        // A quality names the menu's entry.
+        assertEquals(
+            ServerEvent.PlayerCommand("s4", Control.Quality, quality = "8m"),
+            ServerEvent.parse("""{"type":"player_command","session_id":"s4","command":"quality","position_ms":null,"offset_ms":null,"stream_index":null,"quality":"8m"}"""),
+        )
+    }
+
+    @Test
+    fun castsRead() {
+        assertEquals(
+            ServerEvent.Cast("tv-1", itemId = 204, startMs = 60_000, from = "Kitchen phone"),
+            ServerEvent.parse(
+                """{"type":"cast","receiver_id":"tv-1","item_id":204,"playlist_id":null,"channel_id":null,"start_ms":60000,"shuffle":false,"from":"Kitchen phone"}""",
+            ),
+        )
+        assertEquals(
+            ServerEvent.Cast("tv-1", playlistId = 9, shuffle = true),
+            ServerEvent.parse("""{"type":"cast","receiver_id":"tv-1","playlist_id":9,"shuffle":true,"from":null}"""),
+        )
+        val channel = ServerEvent.Cast("tv-1", channelId = 1)
+        assertEquals(channel, ServerEvent.parse(PleyJson.encodeToString(ServerEvent.serializer(), channel)))
+        // The tracks the remote's page picked; subtitles off is -1.
+        assertEquals(
+            ServerEvent.Cast("tv-1", itemId = 204, audioIndex = 2, subtitleIndex = -1),
+            ServerEvent.parse("""{"type":"cast","receiver_id":"tv-1","item_id":204,"shuffle":false,"audio_index":2,"subtitle_index":-1,"from":null}"""),
+        )
+        // From another profile of the household: the caster's profile and the ticket to switch to it with, never
+        // written out where the event is.
+        val switch = ServerEvent.parse("""{"type":"cast","receiver_id":"tv-1","item_id":204,"shuffle":false,"from":null,"profile_id":2,"switch_ticket":"t1"}""")
+        assertEquals(ServerEvent.Cast("tv-1", itemId = 204, profileId = 2, switchTicket = "t1"), switch)
+        assertFalse("t1" in switch.toString())
+    }
+
+    @Test
+    fun sessionsSayTheirTracks() {
+        val session = PleyJson.decodeFromString(
+            PlayingSession.serializer(),
+            """{"session_id":"s1","kind":"item","audio_index":1,"subtitle_index":-1,"tracks":{"audio":[{"index":1,"language":"eng","title":null,""" +
+                """"codec":"eac3","channels":6,"default":true,"forced":false}],"subtitles":[{"index":3,"language":"fre","codec":"subrip","forced":true}]}}""",
+        )
+        assertEquals(1, session.audioIndex)
+        assertEquals(PlayingSession.SUBTITLES_OFF, session.subtitleIndex)
+        assertEquals(listOf(TrackOption(1, "eng", null, "eac3", 6, default = true)), session.tracks.audio)
+        assertEquals(listOf(TrackOption(3, "fre", codec = "subrip", forced = true)), session.tracks.subtitles)
+        // An older server's: no tracks, nothing known.
+        val older = PleyJson.decodeFromString(PlayingSession.serializer(), """{"session_id":"s2","kind":"live"}""")
+        assertEquals(SessionTracks(), older.tracks)
+        assertEquals(null, older.audioIndex)
     }
 
     @Test

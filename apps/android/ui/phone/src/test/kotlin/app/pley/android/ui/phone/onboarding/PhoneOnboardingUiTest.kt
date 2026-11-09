@@ -18,6 +18,9 @@ import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
 import app.pley.android.auth.Needs
+import app.pley.android.auth.TOO_OLD
+import app.pley.android.common.Language
+import app.pley.android.common.UiText
 import app.pley.android.screens.onboarding.BrowserSignIn
 import app.pley.android.screens.onboarding.LinkCode
 import app.pley.android.screens.onboarding.LinkStatus
@@ -28,6 +31,7 @@ import app.pley.android.screens.onboarding.ServerRow
 import app.pley.android.screens.onboarding.ServersProblem
 import app.pley.android.screens.onboarding.ServersUiState
 import app.pley.android.screens.onboarding.SignInProblem
+import app.pley.android.screens.settings.DeviceLanguageUiState
 import app.pley.android.ui.phone.theme.PhoneTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -35,6 +39,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import app.pley.android.common.R as CommonR
 
 /**
  * Getting in on a phone: the sign-in page (cards, the typed address, the
@@ -53,7 +58,12 @@ class PhoneOnboardingUiTest {
 
     private val events = mutableListOf<String>()
 
-    private fun signIn(state: ServersUiState, signIn: BrowserSignIn = BrowserSignIn.Idle, withoutBrowser: Boolean = false) {
+    private fun signIn(
+        state: ServersUiState,
+        signIn: BrowserSignIn = BrowserSignIn.Idle,
+        withoutBrowser: Boolean = false,
+        language: DeviceLanguageUiState? = null,
+    ) {
         compose.setContent {
             PhoneTheme {
                 PhoneSignInContent(
@@ -71,10 +81,36 @@ class PhoneOnboardingUiTest {
                     onUseCode = { events += "code" },
                     onRetry = { events += "retry" },
                     onOpenInBrowser = { events += "browser $it" },
+                    language = language,
+                    onLanguage = { events += "language ${it?.code}" },
                 )
             }
         }
         compose.waitForIdle()
+    }
+
+    @Test
+    fun theGlobeInTheTopBarPicksThisDevicesLanguage() {
+        signIn(
+            ServersUiState(rows = listOf(nas), selected = nas.url, searched = true),
+            language = DeviceLanguageUiState(shown = Language.English, picked = null, device = Language.English),
+        )
+        compose.onNodeWithTag(LANGUAGE_TAG).assertContentDescriptionEquals("Choose a language").assertIsEnabled().performClick()
+        compose.onNodeWithText("Automatic (English)").assertIsSelected()
+        compose.onNodeWithText("Español").performClick()
+        compose.onNodeWithText("Automatic (English)").assertDoesNotExist()
+        assertEquals(listOf("language es"), events)
+    }
+
+    @Test
+    fun theGlobeIsLabelledWithTheLanguageShownAndWaitsWhileSigningIn() {
+        signIn(
+            ServersUiState(rows = listOf(nas), selected = nas.url, searched = true),
+            signIn = BrowserSignIn.Waiting,
+            language = DeviceLanguageUiState(shown = Language.French, picked = Language.French, device = Language.English),
+        )
+        compose.onNodeWithText("FR").assertExists()
+        compose.onNodeWithTag(LANGUAGE_TAG).assertIsNotEnabled()
     }
 
     @Test
@@ -117,7 +153,7 @@ class PhoneOnboardingUiTest {
     @Test
     fun theUnencryptedWarningAndTheBrowsersStatesShow() {
         signIn(
-            ServersUiState(rows = listOf(nas), selected = nas.url, problem = ServersProblem.Unreachable("192.168.1.20:7539", "nothing answers there")),
+            ServersUiState(rows = listOf(nas), selected = nas.url, problem = ServersProblem.Unreachable("192.168.1.20:7539", UiText.res(CommonR.string.error_nothing_answers))),
             BrowserSignIn.Waiting,
         )
         compose.onNodeWithText("Couldn't reach 192.168.1.20:7539: nothing answers there").assertExists()
@@ -129,7 +165,7 @@ class PhoneOnboardingUiTest {
     fun anOlderServerOffersItsPageInTheBrowser() {
         signIn(
             ServersUiState(rows = listOf(nas), selected = nas.url),
-            BrowserSignIn.Failed(nas.url, SignInProblem.TooOld, "this server is too old for this app"),
+            BrowserSignIn.Failed(nas.url, SignInProblem.TooOld, TOO_OLD),
         )
         compose.onNodeWithText("Update Pley on Living room NAS to sign in from the app").assertExists()
         compose.onNodeWithText("Open in browser").performClick()

@@ -28,7 +28,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import app.pley.android.common.sentenceOf
+import app.pley.android.common.errorSentence
 import app.pley.android.data.Loadable
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyMotion
@@ -37,6 +37,7 @@ import app.pley.android.designsystem.PleyType
 import app.pley.android.designsystem.TvSafeArea
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcons
+import app.pley.android.designsystem.text.asString
 import app.pley.android.network.OfflineException
 import app.pley.android.ui.tv.R
 import kotlinx.coroutines.delay
@@ -102,9 +103,9 @@ internal fun failedTitle(error: Throwable, title: String): String =
 @Composable
 internal fun failedBody(error: Throwable): String =
     if (error is OfflineException && !error.blocked) {
-        stringResource(R.string.tv_shell_offline_body, sentenceOf(error))
+        stringResource(R.string.tv_shell_offline_body, errorSentence(error).asString())
     } else {
-        sentenceOf(error)
+        errorSentence(error).asString()
     }
 
 /** Reports [load] to the shell's [TvOfflineState] whenever it changes, with the one before. */
@@ -120,10 +121,10 @@ internal fun ReportOffline(load: Loadable<*>?) {
 }
 
 /**
- * "Showing what pley had saved. Reconnecting…" at the top right, where TV
- * toasts are (design spec §2.10), for [ANNOUNCE_MS] once the server is
- * found out of reach: the server-off icon and the line on surface3. Never
- * focusable, as there is nothing to do but wait; announced when it shows.
+ * "Pley is offline" at the top right, where TV toasts are (design spec
+ * §2.10), for [ANNOUNCE_MS] once the server is found out of reach: the
+ * server-off icon and the line on surface3. Never focusable, as there is
+ * nothing to do but wait; announced when it shows.
  */
 @Composable
 internal fun BoxScope.TvOfflineNotice(state: TvOfflineState) {

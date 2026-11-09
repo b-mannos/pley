@@ -1,27 +1,66 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useEffectEvent, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import { useDismiss } from "@/lib/hooks";
 
 /**
  * Small dropdown menu anchored to a trigger. Opened, its first item has
  * focus; the arrow keys, Home and End move through the items, Escape goes
- * back to the trigger and Tab leaves it closed.
+ * back to the trigger and Tab leaves it closed. The keys it takes go no
+ * further: a page's own shortcuts (a player's) leave them alone.
  */
 export function Menu({
   trigger,
   children,
   align = "right",
+  placement = "below",
+  label,
+  onOpenChange,
   className,
 }: {
   trigger: (props: { open: boolean; toggle: () => void }) => ReactNode;
   children: (close: () => void) => ReactNode;
-  align?: "left" | "right";
+  /** Which edge of the trigger it lines up with, or centred under it (the globe under the sign-in card). */
+  align?: "left" | "right" | "center";
+  /**
+   * The side it opens on (above: a dialog's footer). Where the window has no room for it there and
+   * more on the other side, as in a short window, it opens on the other.
+   */
+  placement?: "below" | "above";
+  /** What the menu is, for screen readers. */
+  label?: string;
+  /** Hears it open and close: a page whose controls hide keeps them while it is open. */
+  onOpenChange?: (open: boolean) => void;
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [side, setSide] = useState(placement);
   const ref = useRef<HTMLDivElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  // Measured as it is drawn, before it shows, so it never flashes on the side that doesn't fit.
+  const placeMenu = useCallback(
+    (menu: HTMLDivElement | null) => {
+      menuRef.current = menu;
+      const trigger = ref.current?.getBoundingClientRect();
+      if (!menu || !trigger) return;
+      const height = menu.getBoundingClientRect().height;
+      const gap = 8;
+      const below = window.innerHeight - trigger.bottom - gap;
+      const above = trigger.top - gap;
+      const other = placement === "below" ? "above" : "below";
+      const room = placement === "below" ? below : above;
+      const otherRoom = placement === "below" ? above : below;
+      setSide(height > room && otherRoom > room ? other : placement);
+    },
+    [placement],
+  );
   useDismiss(ref, open, () => setOpen(false));
+  // Gone while open (what it offered went) is closed too.
+  const opened = useEffectEvent((now: boolean) => onOpenChange?.(now));
+  useEffect(() => {
+    if (!open) return;
+    opened(true);
+    return () => opened(false);
+  }, [open]);
 
   const items = () => Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)') ?? []);
   useEffect(() => {
@@ -46,6 +85,7 @@ export function Menu({
         next = list.length - 1;
         break;
       case "Escape":
+        e.stopPropagation();
         setOpen(false);
         ref.current?.querySelector<HTMLElement>("button, [href], [tabindex]")?.focus();
         return;
@@ -56,6 +96,7 @@ export function Menu({
         return;
     }
     e.preventDefault();
+    e.stopPropagation();
     list[next]?.focus();
   };
 
@@ -64,12 +105,15 @@ export function Menu({
       {trigger({ open, toggle: () => setOpen((o) => !o) })}
       {open ? (
         <div
-          ref={menuRef}
+          ref={placeMenu}
           role="menu"
+          aria-label={label}
           onKeyDown={onKeyDown}
           className={cn(
-            "absolute top-full z-40 mt-2 min-w-48 animate-pop-in overflow-hidden rounded-lg border border-border bg-surface-2 py-1 shadow-xl shadow-black/50",
-            align === "right" ? "right-0" : "left-0",
+            // A long menu (Play on… with many devices) scrolls within the window rather than past its edge.
+            "absolute z-40 max-h-[min(28rem,calc(100dvh-6rem))] min-w-48 animate-pop-in overflow-y-auto overscroll-contain rounded-lg border border-border bg-surface-2 py-1 shadow-xl shadow-black/50",
+            side === "below" ? "top-full mt-2" : "bottom-full mb-2",
+            align === "right" ? "right-0" : align === "center" ? "left-1/2 -translate-x-1/2" : "left-0",
             className,
           )}
         >

@@ -25,13 +25,20 @@ public class ApiException : Exception
     public string Code { get; }
     /// <summary>The answer's JSON, when it had some (fields past <c>code</c> and <c>message</c>).</summary>
     public JsonElement? Body { get; }
+    /// <summary>The <c>error</c> of the refusal's Bearer challenge (RFC 6750 §3): "insufficient_scope".</summary>
+    public string? BearerError { get; init; }
+    /// <summary>The scope a 403 <c>insufficient_scope</c> names: the one that would open the route; null when none does.</summary>
+    public string? Scope { get; init; }
+
+    /// <summary>The app wasn't allowed this: signing in again can ask for <see cref="Scope"/>.</summary>
+    public bool NeedsScope => Status == 403 && (Code == "insufficient_scope" || BearerError == "insufficient_scope");
 }
 
 /// <summary>A playback session stopped from elsewhere (<c>410 session_stopped</c>), with what the one who stopped it wrote.</summary>
 public class SessionStoppedException : ApiException
 {
     /// <summary>What the player says, the Android app's words: who stopped it, then their note on a line of its own.</summary>
-    public const string ByAdmin = "Playback was stopped by the server's administrator.";
+    public static string ByAdmin => Strings.T("player.stopped.byAdmin");
 
     public SessionStoppedException(string? note)
         : base(410, "session_stopped", string.IsNullOrWhiteSpace(note) ? ByAdmin : ByAdmin + "\n" + note!.Trim()) => Note = note;
@@ -42,7 +49,7 @@ public class SessionStoppedException : ApiException
 /// <summary>The server answered with something that isn't what Pley answers: another program, or a much older Pley.</summary>
 public class UnreadableAnswerException : Exception
 {
-    public UnreadableAnswerException(int status, Exception? inner = null) : base("the server's answer can't be read: is it Pley, and up to date?", inner) =>
+    public UnreadableAnswerException(int status, Exception? inner = null) : base(Strings.T("common.errors.unreadable"), inner) =>
         Status = status;
 
     public int Status { get; }
@@ -52,12 +59,16 @@ public class UnreadableAnswerException : Exception
 public static class Errors
 {
     /// <summary>A failed page's title when the server answered nothing.</summary>
-    public const string OfflineTitle = "Can't reach your server";
+    public static string OfflineTitle => Strings.T("common.errors.offlineTitle");
 
-    /// <summary>Why <paramref name="e"/> happened, in a few words in lower case: "no answer in time".</summary>
+    /// <summary>
+    /// Why <paramref name="e"/> happened, in a few words in lower case: "no answer in time". A
+    /// network failure is said in the language shown now, whichever it failed in.
+    /// </summary>
     public static string Describe(Exception e) => e switch
     {
-        JsonException => "that isn't a Pley server",
+        JsonException => Strings.T("common.errors.notPley"),
+        NetworkException n => Transports.Reason(n.Failure),
         _ => e.Message,
     };
 
@@ -80,7 +91,7 @@ public static class Errors
     public static string UnreachableReason(Exception e) => Message(e);
 
     /// <summary>A failed page's text when the server answered nothing: why, and what to check.</summary>
-    public static string OfflineBody(Exception e) => $"{Message(e)} Check that the server is on and that this device is on its network.";
+    public static string OfflineBody(Exception e) => Strings.T("common.errors.offlineBody", ("reason", Message(e)));
 }
 
 // Answers whose shape is an envelope around the types.
@@ -88,7 +99,16 @@ public sealed record HubsAnswer(IReadOnlyList<Hub> Hubs);
 public sealed record ItemsPage(long Total, IReadOnlyList<ItemSummary> Items);
 public sealed record ItemsAnswer(IReadOnlyList<ItemSummary> Items);
 public sealed record ItemAnswer(ItemSummary? Item);
-public sealed record FiltersAnswer(IReadOnlyList<string> Genres, IReadOnlyList<int> Years);
+/// <summary>
+/// What a library's listing can be filtered by. <see cref="Resolutions"/> and <see cref="DynamicRanges"/>
+/// hold the server's tokens, best first, and only when the titles have two or more; a server from
+/// before them sends neither.
+/// </summary>
+public sealed record FiltersAnswer(IReadOnlyList<string> Genres, IReadOnlyList<int> Years)
+{
+    public IReadOnlyList<string> Resolutions { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<string> DynamicRanges { get; init; } = Array.Empty<string>();
+}
 public sealed record CollectionsAnswer(IReadOnlyList<Collection> Collections);
 public sealed record CollectionDetail : Collection
 {
@@ -99,7 +119,8 @@ public sealed record PlaylistDetail : Playlist
 {
     public IReadOnlyList<PlaylistEntry> Entries { get; init; } = new PlaylistEntry[0];
 }
-public sealed record SearchAnswer(IReadOnlyList<ItemSummary> Items, IReadOnlyList<PersonSummary>? People);
+/// <summary>Live TV's <see cref="Channels"/> by name, number or what's on, for those it's open to; none from a server without it.</summary>
+public sealed record SearchAnswer(IReadOnlyList<ItemSummary> Items, IReadOnlyList<PersonSummary>? People, IReadOnlyList<LiveChannel>? Channels = null);
 public sealed record CollectionRef(long Id, string Title);
 public sealed record ItemCollectionsAnswer(IReadOnlyList<CollectionRef> Collections);
 public sealed record AddedAnswer(long Added);
@@ -114,6 +135,10 @@ public sealed record LibraryQuery
     public bool? Watched { get; init; }
     public string? Genre { get; init; }
     public int? Year { get; init; }
+    /// <summary>"4k", "1080", "720" or "sd": a title's best file's.</summary>
+    public string? Resolution { get; init; }
+    /// <summary>"hdr" (any but SDR), "dolby_vision", "hdr10plus", "hdr10", "hlg" or "sdr": a title's best file's.</summary>
+    public string? DynamicRange { get; init; }
     /// <summary>Always sent, as the Android app sends it: the first page is at 0.</summary>
     public int Offset { get; init; }
     public int? Limit { get; init; }
@@ -168,35 +193,59 @@ public sealed class Api
     public async Task<HttpResponse> Send(string path, string method = "GET", object? body = null, IEnumerable<KeyValuePair<string, object?>>? query = null,
         CancellationToken cancel = default, int? timeoutMs = null, ResponseType responseType = ResponseType.Json, Action<long>? onProgress = null, string? accept = null)
     {
-        var token = await tokens.AccessToken().ConfigureAwait(false) ?? throw new SignedOutException();
-        var res = await Once(path, method, body, query, cancel, timeoutMs, responseType, onProgress, token, accept).ConfigureAwait(false);
-        if (res.Status == 401 && OwnServer(path) && InvalidToken(res.Header("WWW-Authenticate")))
+        HttpResponse res;
+        try
         {
-            var fresh = await Refreshed(token).ConfigureAwait(false);
-            // Once: a 401 after a refresh is the answer.
-            if (fresh != null) res = await Once(path, method, body, query, cancel, timeoutMs, responseType, onProgress, fresh, accept).ConfigureAwait(false);
+            var token = await tokens.AccessToken().ConfigureAwait(false) ?? throw new SignedOutException();
+            res = await Once(path, method, body, query, cancel, timeoutMs, responseType, onProgress, token, accept).ConfigureAwait(false);
+            if (res.Status == 401 && OwnServer(path) && InvalidToken(res.Header("WWW-Authenticate")))
+            {
+                var fresh = await Refreshed(token).ConfigureAwait(false);
+                // Once: a 401 after a refresh is the answer.
+                if (fresh != null) res = await Once(path, method, body, query, cancel, timeoutMs, responseType, onProgress, fresh, accept).ConfigureAwait(false);
+            }
+        }
+        catch (NetworkException e) when (!e.Cancelled && OwnServer(path))
+        {
+            Unanswered();
+            throw;
         }
         if (res.Status >= 200 && res.Status < 300) return res;
         throw ToError(res);
     }
 
     /// <summary>
+    /// A request to the server got no answer: the TV may be on another network now, so what
+    /// answers at the address next proves it is the server before a token goes.
+    /// </summary>
+    void Unanswered() => tokens.DoubtServer();
+
+    /// <summary>
     /// GET <paramref name="path"/> with the token, its body read as it comes for as long as it lasts
     /// (a live channel's MPEG-TS); refused, an <see cref="ApiException"/>, as <see cref="Send"/>'s.
     /// The server may stay silent <paramref name="timeoutMs"/> before it answers (null: the API's).
     /// </summary>
-    public async Task<StreamResponse> Open(string path, CancellationToken cancel = default, string accept = "*/*", int? timeoutMs = null)
+    public async Task<StreamResponse> Open(string path, CancellationToken cancel = default, string accept = "*/*", int? timeoutMs = null, string? range = null)
     {
-        var token = await tokens.AccessToken().ConfigureAwait(false) ?? throw new SignedOutException();
-        var res = await OpenOnce(path, token, cancel, accept, timeoutMs).ConfigureAwait(false);
-        if (res.Status == 401 && OwnServer(path) && InvalidToken(res.Header("WWW-Authenticate")))
+        StreamResponse res;
+        try
         {
-            var fresh = await Refreshed(token).ConfigureAwait(false);
-            if (fresh != null)
+            var token = await tokens.AccessToken().ConfigureAwait(false) ?? throw new SignedOutException();
+            res = await OpenOnce(path, token, cancel, accept, timeoutMs, range).ConfigureAwait(false);
+            if (res.Status == 401 && OwnServer(path) && InvalidToken(res.Header("WWW-Authenticate")))
             {
-                res.Dispose();
-                res = await OpenOnce(path, fresh, cancel, accept, timeoutMs).ConfigureAwait(false);
+                var fresh = await Refreshed(token).ConfigureAwait(false);
+                if (fresh != null)
+                {
+                    res.Dispose();
+                    res = await OpenOnce(path, fresh, cancel, accept, timeoutMs, range).ConfigureAwait(false);
+                }
             }
+        }
+        catch (NetworkException e) when (!e.Cancelled && OwnServer(path))
+        {
+            Unanswered();
+            throw;
         }
         if (res.Status >= 200 && res.Status < 300) return res;
         using (res)
@@ -210,9 +259,10 @@ public sealed class Api
         }
     }
 
-    Task<StreamResponse> OpenOnce(string path, string token, CancellationToken cancel, string accept, int? timeoutMs)
+    Task<StreamResponse> OpenOnce(string path, string token, CancellationToken cancel, string accept, int? timeoutMs, string? range = null)
     {
         var headers = new Dictionary<string, string> { ["Accept"] = accept };
+        if (range != null) headers["Range"] = range;
         if (OwnServer(path)) headers["Authorization"] = "Bearer " + token;
         return streams(new HttpRequest { Url = Url(path), Headers = headers, Cancel = cancel, TimeoutMs = timeoutMs ?? Transports.ReadTimeoutMs });
     }
@@ -307,6 +357,10 @@ public sealed class Api
     public Task<JsonElement?> SetTrackDefaults(string? audio, string? subtitle, string mode) =>
         Call("PUT", "/api/me/track-defaults", new Dictionary<string, object?> { ["audio_language"] = audio, ["subtitle_language"] = subtitle, ["subtitle_mode"] = mode });
 
+    /// <summary>The language the profile sees Pley in (scope play): "en", "fr", "es", or null for the server's; the profile as GET /api/auth/me shows it.</summary>
+    public Task<JsonElement?> SetLanguage(string? language) =>
+        Call("PUT", "/api/me/language", new Dictionary<string, object?> { ["language"] = language });
+
     // ---- browsing
 
     public Task<HubsAnswer> Home(CancellationToken cancel = default) => Get<HubsAnswer>("/api/hubs/home", cancel: cancel);
@@ -322,8 +376,10 @@ public sealed class Api
     public Task<ItemsPage> LibraryItems(long id, LibraryQuery query, CancellationToken cancel = default) =>
         Get<ItemsPage>($"/api/libraries/{id}/items", new[]
         {
+            // In this order: the server's listing ETag hashes the query as written.
             Q("sort", query.Sort), Q("order", query.Order), Q("watched", query.Watched), Q("genre", query.Genre),
-            Q("year", query.Year), Q("offset", query.Offset), Q("limit", query.Limit),
+            Q("year", query.Year), Q("resolution", query.Resolution), Q("dynamic_range", query.DynamicRange),
+            Q("offset", query.Offset), Q("limit", query.Limit),
         }, cancel);
 
     public Task<HubsAnswer> LibraryHubs(long id, CancellationToken cancel = default) => Get<HubsAnswer>($"/api/libraries/{id}/hubs", cancel: cancel);
@@ -346,8 +402,8 @@ public sealed class Api
 
     public Task<PersonDetail> Person(long id, CancellationToken cancel = default) => Get<PersonDetail>($"/api/people/{id}", cancel: cancel);
 
-    /// <summary>Items and people; Live TV channels come with Live TV.</summary>
-    public Task<SearchAnswer> Search(string q, CancellationToken cancel = default) => Get<SearchAnswer>("/api/search", new[] { Q("q", q), Q("limit", 60) }, cancel);
+    /// <summary>Up to 200 items and 200 people, the server's most, which search's rows show all of; as many Live TV channels come with Live TV.</summary>
+    public Task<SearchAnswer> Search(string q, CancellationToken cancel = default) => Get<SearchAnswer>("/api/search", new[] { Q("q", q), Q("limit", 200) }, cancel);
 
     public Task<PlaylistsAnswer> Playlists(CancellationToken cancel = default) => Get<PlaylistsAnswer>("/api/playlists", cancel: cancel);
 
@@ -431,12 +487,20 @@ public sealed class Api
     /// <summary>DELETE /api/playback/{session}: the session and its conversion end.</summary>
     public Task<JsonElement?> StopPlayback(string session) => Call("DELETE", $"/api/playback/{Uri.EscapeDataString(session)}");
 
-    /// <summary>POST /api/items/{id}/progress, with the session, so it and its conversion stay alive.</summary>
-    public Task<JsonElement?> Progress(long itemId, long positionMs, long? durationMs, string state, string? session)
+    /// <summary>
+    /// POST /api/items/{id}/progress, with the session, so it and its conversion stay alive.
+    /// <paramref name="tracks"/>: a video's tracks playing, which the server keeps on the session for
+    /// the profile's remotes, and <paramref name="quality"/>, its Quality menu's pick by id ("auto",
+    /// "original", "8m"…); music has neither to say.
+    /// </summary>
+    public Task<JsonElement?> Progress(long itemId, long positionMs, long? durationMs, string state, string? session, PlayingTracks? tracks = null, string? quality = null)
     {
         var body = new Dictionary<string, object?> { ["position_ms"] = positionMs, ["state"] = state };
         if (durationMs != null) body["duration_ms"] = durationMs;
         if (session != null) body["session_id"] = session;
+        if (tracks?.Audio != null) body["audio_index"] = tracks.Audio;
+        if (tracks != null) body["subtitle_index"] = tracks.Subtitle;
+        if (quality != null) body["quality"] = quality;
         return Call("POST", $"/api/items/{itemId}/progress", body);
     }
 
@@ -487,6 +551,33 @@ public sealed class Api
     /// making "couldn't be loaded".
     /// </summary>
     public const int PicturesTimeoutMs = 60_000;
+
+    /// <summary>
+    /// Bytes <paramref name="from"/> to <paramref name="to"/> (inclusive) of a picture track's .mks:
+    /// a whole one is served from the server's cache with ranges, so the pictures around where the
+    /// film is can be read without the rest (<see cref="Player.PictureRanges"/>). A server that
+    /// answers whole (200) gives the file from its start; one still making it says so
+    /// (<see cref="SubtitlePart.Complete"/>).
+    /// </summary>
+    public async Task<SubtitlePart> PictureSubtitlesPart(string url, long from, long to, CancellationToken cancel = default)
+    {
+        using var res = await Open(url, cancel, "video/x-matroska", PicturesTimeoutMs, $"bytes={from}-{to}").ConfigureAwait(false);
+        var bytes = await ReadAll(res, cancel).ConfigureAwait(false);
+        var complete = (res.Header("X-Pley-Complete") ?? "").Trim() != "0";
+        if (res.Status == 206 && ContentRange(res.Header("Content-Range")) is { } range) return new SubtitlePart(bytes, range.Start, range.Total, complete);
+        return new SubtitlePart(bytes, 0, complete ? bytes.Length : null, complete);
+    }
+
+    /// <summary>"bytes 0-65535/20997000": where the part starts and the whole's length (null: "*", not known yet); null for a header that isn't one.</summary>
+    internal static (long Start, long? Total)? ContentRange(string? header)
+    {
+        var m = ContentRangeForm.Match(header ?? "");
+        if (!m.Success || !long.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var start)) return null;
+        if (m.Groups[3].Value == "*") return (start, null);
+        return long.TryParse(m.Groups[3].Value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var total) ? (start, total) : null;
+    }
+
+    static readonly System.Text.RegularExpressions.Regex ContentRangeForm = new System.Text.RegularExpressions.Regex(@"^\s*bytes\s+(\d+)-(\d+)/(\d+|\*)\s*$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     /// <summary>The whole body of <paramref name="res"/>: into one array when its length is said, else gathered.</summary>
     static async Task<byte[]> ReadAll(StreamResponse res, CancellationToken cancel)
@@ -569,13 +660,28 @@ public sealed class Api
     /// POST /api/live/channels/{id}/watch with keyed URLs (the TV's player can't send the
     /// Authorization header): <paramref name="clientId"/> ends what this TV watched before.
     /// <paramref name="takeOver"/>: every connection in use, the channel whose connection to take.
+    /// <paramref name="controls"/>: what the player obeys from the remote (docs/API.md, "Remote
+    /// control"); it plays on a TV, which remotes are told.
     /// </summary>
-    public async Task<LiveWatching> WatchChannel(long id, string clientId, long? takeOver = null, CancellationToken cancel = default)
+    public async Task<LiveWatching> WatchChannel(long id, string clientId, long? takeOver = null, IReadOnlyList<string>? controls = null, CancellationToken cancel = default)
     {
-        var body = new Dictionary<string, object?> { ["client_id"] = clientId, ["keyed_urls"] = true };
+        var body = new Dictionary<string, object?>
+        {
+            ["client_id"] = clientId,
+            ["keyed_urls"] = true,
+            ["controls"] = controls ?? Array.Empty<string>(),
+            ["device_kind"] = "tv",
+        };
         if (takeOver != null) body["take_over"] = takeOver;
         return Read<LiveWatching>(await Send($"/api/live/channels/{id}/watch", "POST", body, cancel: cancel, timeoutMs: WatchTimeoutMs).ConfigureAwait(false));
     }
+
+    /// <summary>
+    /// GET /api/live/channels/{id}/stream.ts's path: the channel's MPEG-TS as the provider sends
+    /// it, read under <paramref name="clientId"/>, saying it plays on a TV, as watching does.
+    /// </summary>
+    public static string LiveStreamPath(long id, string clientId) =>
+        $"/api/live/channels/{id.ToString(System.Globalization.CultureInfo.InvariantCulture)}/stream.ts?client_id={Uri.EscapeDataString(clientId)}&device_kind=tv";
 
     /// <summary>
     /// Why a watching session ended (someone took its connection over, say), or null while it goes
@@ -587,6 +693,11 @@ public sealed class Api
         {
             await Send($"/api/live/sessions/{Uri.EscapeDataString(session)}/plan", cancel: cancel, timeoutMs: 8_000).ConfigureAwait(false);
             return null;
+        }
+        catch (SessionStoppedException e)
+        {
+            // The server's words, or "" when it gave none: not a video's "stopped by the administrator".
+            return e.Note?.Trim() ?? "";
         }
         catch (ApiException e) when (e.Status == 410)
         {
@@ -647,6 +758,63 @@ public sealed class Api
 
     static readonly Regex KeyedMedia = new Regex(@"^(https?://[^/]+)?/api/(live/)?media/", RegexOptions.CultureInvariant);
 
+    // ---- requests (docs/API.md, "Requests")
+
+    public Task<Core.Requests.RequestSummary> RequestSummary(CancellationToken cancel = default) => Get<Core.Requests.RequestSummary>("/api/requests/summary", cancel: cancel);
+
+    public Task<Core.Requests.DiscoverPage> Discover(Core.Requests.DiscoverList list, int page, CancellationToken cancel = default) =>
+        Get<Core.Requests.DiscoverPage>($"/api/discover/{Core.Requests.DiscoverLists.Wire(list)}", new[] { Q("page", page) }, cancel);
+
+    /// <summary>TMDB's titles for <paramref name="q"/>; <paramref name="missing"/> leaves out those a library has.</summary>
+    public Task<Core.Requests.DiscoverPage> DiscoverSearch(string q, int page, bool missing = false, CancellationToken cancel = default) =>
+        Get<Core.Requests.DiscoverPage>("/api/discover/search", new[] { Q("q", q), Q("page", page), Q("missing", missing ? "1" : null) }, cancel);
+
+    public Task<Core.Requests.DiscoverDetail> DiscoverTitle(string kind, long tmdbId, CancellationToken cancel = default) =>
+        Get<Core.Requests.DiscoverDetail>($"/api/discover/{Uri.EscapeDataString(kind)}/{tmdbId}", cancel: cancel);
+
+    public Task<Core.Requests.ItemRequest> ItemRequest(long itemId, CancellationToken cancel = default) => Get<Core.Requests.ItemRequest>($"/api/items/{itemId}/request", cancel: cancel);
+
+    public Task<Core.Requests.RequestList> Requests(Core.Requests.RequestQuery query, CancellationToken cancel = default) =>
+        Get<Core.Requests.RequestList>("/api/requests", new[]
+        {
+            Q("status", query.Statuses.Count > 0 ? string.Join(",", query.Statuses) : null),
+            Q("attention", query.Attention ? "1" : null),
+            Q("kind", query.Kind),
+            Q("user_id", query.UserId),
+            Q("q", string.IsNullOrWhiteSpace(query.Q) ? null : query.Q),
+            Q("order", query.Oldest ? "oldest" : null),
+            Q("mine", query.Mine ? "1" : null),
+            Q("unseen", query.Unseen ? "1" : null),
+            Q("changed_since", query.ChangedSince),
+            Q("offset", query.Offset),
+            Q("limit", query.Limit),
+        }, cancel);
+
+    public Task<Core.Requests.MediaRequest> Request(long id, CancellationToken cancel = default) => Get<Core.Requests.MediaRequest>($"/api/requests/{id}", cancel: cancel);
+
+    /// <summary>POST /api/requests: 201, a new request; 200, what was asked for is asked for already, and now followed.</summary>
+    public async Task<Core.Requests.Asked> Ask(Core.Requests.NewRequest request)
+    {
+        var res = await Send("/api/requests", "POST", request.Body()).ConfigureAwait(false);
+        return new Core.Requests.Asked(Read<Core.Requests.MediaRequest>(res), res.Status == 201);
+    }
+
+    public Task<JsonElement?> DeleteRequest(long id) => Call("DELETE", $"/api/requests/{id}");
+
+    public Task<JsonElement?> UnwatchRequest(long id) => Call("DELETE", $"/api/requests/{id}/watch");
+
+    public Task<JsonElement?> RequestsSeen() => Call("POST", "/api/requests/seen");
+
+    public Task<Core.Requests.MediaRequest> ApproveRequest(long id, Core.Requests.Approval approval) => Call<Core.Requests.MediaRequest>("POST", $"/api/requests/{id}/approve", approval.Body());
+
+    /// <summary>Declines, with the administrator's <paramref name="reason"/> when there is one.</summary>
+    public Task<Core.Requests.MediaRequest> DeclineRequest(long id, string? reason) =>
+        Call<Core.Requests.MediaRequest>("POST", $"/api/requests/{id}/decline", reason == null ? new Dictionary<string, object?>() : new Dictionary<string, object?> { ["reason"] = reason });
+
+    public Task<Core.Requests.MediaRequest> RequestHandled(long id) => Call<Core.Requests.MediaRequest>("POST", $"/api/requests/{id}/handled");
+
+    public Task<Core.Requests.RequestOptions> RequestOptions(CancellationToken cancel = default) => Get<Core.Requests.RequestOptions>("/api/requests/options", cancel: cancel);
+
     /// <summary>
     /// The refusal <paramref name="res"/> is: Pley's JSON, or the plain text a body or query the
     /// server couldn't read gets (400, 415, 422), as one short line; never a page's HTML.
@@ -673,9 +841,29 @@ public sealed class Api
         var code = (json is { } c ? Json.String(c, "code") : null) is { Length: > 0 } given ? given : StatusCode(res.Status);
         var message = bodyMessage.Length > 0 ? bodyMessage
             : json == null && !start.StartsWith("<", StringComparison.Ordinal) && Plain.FirstLine(text, MaxErrorText) is { Length: > 0 } line ? line
-            : $"the server refused (HTTP {res.Status})";
+            : Strings.T("common.errors.refused", ("status", res.Status));
         if (res.Status == 410 && code == "session_stopped") return new SessionStoppedException(bodyMessage.Length > 0 ? bodyMessage : null);
-        return new ApiException(res.Status, code, message, json);
+        var (error, scope) = Challenge(res.Header("WWW-Authenticate"));
+        return new ApiException(res.Status, code, message, json) { BearerError = error, Scope = scope };
+    }
+
+    static readonly Regex ChallengeParam = new Regex(@"([A-Za-z_]+)\s*=\s*(?:""((?:[^""\\]|\\.)*)""|([^\s,]+))", RegexOptions.CultureInvariant);
+    static readonly Regex Escaped = new Regex(@"\\(.)", RegexOptions.CultureInvariant);
+
+    /// <summary>The <c>error</c> and <c>scope</c> of a Bearer challenge: <c>Bearer error="insufficient_scope", scope="requests"</c>.</summary>
+    internal static (string? Error, string? Scope) Challenge(string? header)
+    {
+        var h = (header ?? "").Trim();
+        if (!h.StartsWith("Bearer", StringComparison.OrdinalIgnoreCase) || (h.Length > 6 && !char.IsWhiteSpace(h[6]))) return (null, null);
+        string? error = null, scope = null;
+        foreach (Match m in ChallengeParam.Matches(h.Substring(6)))
+        {
+            var value = m.Groups[2].Success ? Escaped.Replace(m.Groups[2].Value, "$1") : m.Groups[3].Value;
+            var name = m.Groups[1].Value.ToLowerInvariant();
+            if (name == "error") error ??= value;
+            else if (name == "scope" && value.Length > 0) scope ??= value;
+        }
+        return (error, scope);
     }
 
     static string StatusCode(int status) => status switch

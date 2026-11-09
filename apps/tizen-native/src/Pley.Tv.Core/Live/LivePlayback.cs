@@ -43,9 +43,18 @@ public sealed record LiveTrouble(LiveTroubleKind Kind, string Message, IReadOnly
     /// <summary>Whether trying again may help: not for a channel that is gone, nor a server that can't send it to this TV.</summary>
     public bool CanRetry => Kind != LiveTroubleKind.Missing && Kind != LiveTroubleKind.Older;
 
+    /// <summary>
+    /// Watching ended on the server (its connection taken over, stopped there, or let go after the
+    /// TV asked for nothing for a while): the server's own words, as every app says them.
+    /// </summary>
+    public static LiveTrouble Stopped(string? why) =>
+        new LiveTrouble(LiveTroubleKind.Stopped, string.IsNullOrWhiteSpace(why) ? LiveText.StoppedBody : Errors.AsSentence(why!.Trim()));
+
     /// <summary>The trouble <paramref name="error"/> is: a refusal of the server's, a network failure, or else.</summary>
     public static LiveTrouble Of(Exception error) => error switch
     {
+        // Not a video's "stopped by the administrator": the server's words for this channel.
+        SessionStoppedException e => Stopped(e.Note),
         ApiException e => new LiveTrouble(KindOf(e.Status), Errors.Message(e), BusyConnection.Of(e)),
         _ when Errors.Unreachable(error) => new LiveTrouble(LiveTroubleKind.Offline, Errors.Message(error)),
         _ => new LiveTrouble(LiveTroubleKind.Other, Errors.Message(error)),
@@ -112,8 +121,16 @@ public sealed record LiveState(long? ChannelId = null, LivePhase? Phase = null, 
 ///   tunes again twice (after 1 s, then 3 s) before it says why it doesn't play. The stream.ts
 ///   failing is watched again as HLS, as Android's: before it played, at once; while it played,
 ///   once the server has said watching didn't end there.
+/// - Someone taking over the channel's connection (the server's <c>live_taken_over</c>, sent
+///   before the stream breaks off) stops it at once with the server's words; it isn't tuned again
+///   by itself. The session stopped from elsewhere (<c>session_stopped</c>: an administrator, or
+///   the profile on another device) stops it the same way, saying who and why.
+/// - The profile's remote, on another device, changes channel: its next and previous are channel
+///   up and down, in the order the player goes through (<see cref="Zap"/>), which a player
+///   declares only when it has one.
 /// - <see cref="Stop"/> lets the session and the player go (the app went to the background),
-///   <see cref="Resume"/> tunes the channel again, <see cref="Close"/> ends it all.
+///   <see cref="Resume"/> tunes the channel again (not one that stopped on the server: its card
+///   stays), <see cref="Close"/> ends it all.
 ///
 /// Made and used on the UI thread.
 /// </summary>
@@ -164,13 +181,21 @@ public sealed class LivePlayback
     /// <summary>What plays is the channel's stream.ts: failing, it is watched again as HLS.</summary>
     bool direct;
     IDisposable? startTimer, pictureTimer, retryTimer, stallShown, stallCheck;
+    readonly IDisposable events;
 
     public LivePlayback(ILiveServer server, Func<IMediaEngine> engines, IScheduler scheduler)
     {
         this.server = server;
         this.engines = engines;
         this.scheduler = scheduler;
+        events = server.OnEvent(OnEvent);
     }
+
+    /// <summary>
+    /// Channel up (1) or down (-1), in the order the player goes through them: the remote's next
+    /// and previous do the same. Null, as long as the player has no order, declares neither.
+    /// </summary>
+    public Action<int>? Zap { get; set; }
 
     public Signal<LiveState> State { get; } = new Signal<LiveState>(new LiveState());
 
@@ -195,7 +220,10 @@ public sealed class LivePlayback
         if (State.Value.ChannelId is { } id) Start(id, takeOver);
     }
 
-    /// <summary>Back in front: the channel left in <see cref="Stop"/> plays again, from the live edge.</summary>
+    /// <summary>
+    /// Back in front: the channel left in <see cref="Stop"/> plays again, from the live edge,
+    /// unless it stopped on the server: its card stays until Watch again.
+    /// </summary>
     public void Resume()
     {
         if (State.Value.Is is LivePhase.Idle) Retry();
@@ -203,7 +231,8 @@ public sealed class LivePlayback
 
     /// <summary>
     /// Lets the session and the player go, keeping which channel it was: the app is in the
-    /// background. Nothing plays and no connection is held until <see cref="Resume"/>.
+    /// background. Nothing plays and no connection is held until <see cref="Resume"/>. A channel
+    /// that stopped on the server (taken over, say) keeps its card, as Android's.
     /// </summary>
     public void Stop()
     {
@@ -219,7 +248,8 @@ public sealed class LivePlayback
             engine.Release();
             engine = null;
         }
-        State.Value = new LiveState(State.Value.ChannelId);
+        var stopped = State.Value.Trouble is { Kind: LiveTroubleKind.Stopped };
+        State.Value = new LiveState(State.Value.ChannelId, stopped ? State.Value.Phase : null);
     }
 
     /// <summary>Ends watching for good: the server is told at once.</summary>
@@ -227,6 +257,68 @@ public sealed class LivePlayback
     {
         Stop();
         closed = true;
+        events.Dispose();
+    }
+
+    void OnEvent(ServerEvent e)
+    {
+        if (closed) return;
+        switch (e.Type)
+        {
+            case "live_taken_over" when e.ChannelId is { } channel:
+                TakenOver(channel, e.Message);
+                break;
+            case "session_stopped" when session != null && e.SessionId == session:
+                StoppedElsewhere(e.Message, e.ByAdmin ?? true);
+                break;
+            case "player_command":
+                Obey(e);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// The server stopped this TV's session (an administrator, or the profile on another device):
+    /// it stops now and says so, as for a connection taken over. Watching ended at the server:
+    /// nothing to leave.
+    /// </summary>
+    void StoppedElsewhere(string? message, bool byAdmin)
+    {
+        session = null;
+        Fail(new LiveTrouble(LiveTroubleKind.Stopped, LiveText.StoppedBy(message, byAdmin)));
+    }
+
+    /// <summary>The remote's next and previous: channel up and down. The new channel's watch tells the server, and so the remote.</summary>
+    void Obey(ServerEvent command)
+    {
+        var action = Remote.Action(new RemotePlayer(RemoteKind.Live, session, HasOrder: Zap != null), command);
+        if (action.Act == RemoteAct.Channel) Zap?.Invoke(action.By);
+    }
+
+    /// <summary>
+    /// Someone took over the connection of <paramref name="channelId"/>: the channel playing (or
+    /// tuning) stops at once, with the server's words, and isn't tuned again by itself. The event
+    /// names the channel, not the session (a stream's reader never learns its own), and the server
+    /// ends every viewer of it, each with an event of its own: the first says so, the others change
+    /// nothing, unless a 410 without words said so first. Let go in the background, nothing is held.
+    /// </summary>
+    void TakenOver(long channelId, string? message)
+    {
+        if (closed || State.Value.ChannelId != channelId) return;
+        var trouble = LiveTrouble.Stopped(message);
+        switch (State.Value.Is)
+        {
+            case LivePhase.Idle:
+                return;
+            case LivePhase.Failed failed:
+                // Only a card without the server's words takes these: another stop's words stay.
+                if (failed.Trouble.Kind == LiveTroubleKind.Stopped && failed.Trouble.Message == LiveText.StoppedBody && !string.IsNullOrWhiteSpace(message))
+                    State.Value = State.Value with { Phase = new LivePhase.Failed(trouble) };
+                return;
+        }
+        // Its session is gone on the server: nothing to leave.
+        session = null;
+        Fail(trouble);
     }
 
     void Start(long channelId, long? takeOver, bool allowDirect = true)
@@ -247,7 +339,8 @@ public sealed class LivePlayback
         // Asked for with the channel, as the server tunes for whichever comes first; after it when a
         // connection is taken over, as only the watch takes it.
         var stream = allowDirect && takeOver == null ? server.Stream(channelId, server.ClientId + StreamClient) : null;
-        Plays.When(scheduler, () => server.Watch(channelId, takeOver, token), watching =>
+        var controls = Remote.LiveControls(Zap != null);
+        Plays.When(scheduler, () => server.Watch(channelId, takeOver, controls, token), watching =>
         {
             if (mine != generation)
             {
@@ -307,11 +400,27 @@ public sealed class LivePlayback
             Open().Prepare(new EngineSource(playlist, Hls: true, Live: true), play: true);
             startTimer = scheduler.After(StartWaitMs, () =>
             {
-                if (mine == generation && !shown) Failed(new EngineError.Other("it didn't start in time"));
+                if (mine == generation && !shown) Failed(new EngineError.Other(LiveText.StartedLate));
             });
         }, e =>
         {
-            if (mine == generation && !Cancelled(e)) Fail(LiveTrouble.Of(e));
+            if (mine != generation || Cancelled(e)) return;
+            if (e is not ApiException { Status: 410 } || session is not { } asked)
+            {
+                Fail(LiveTrouble.Of(e));
+                return;
+            }
+            // Ended before it played (taken over, say): a keyed address only says the session has
+            // gone, its own address says why.
+            var keyed = (e as SessionStoppedException)?.Note;
+            Plays.When(scheduler, () => server.WhyEnded(asked), why => Ended(why), _ => Ended(null));
+
+            void Ended(string? why)
+            {
+                if (mine != generation || closed) return;
+                session = null;
+                Fail(LiveTrouble.Stopped(string.IsNullOrWhiteSpace(why) ? keyed : why));
+            }
         });
     }
 
@@ -346,7 +455,7 @@ public sealed class LivePlayback
             {
                 // Already gone at the server: nothing to leave.
                 session = null;
-                Fail(new LiveTrouble(LiveTroubleKind.Stopped, why));
+                Fail(LiveTrouble.Stopped(why));
                 return;
             }
             Start(channelId, null, allowDirect: false);
@@ -389,7 +498,7 @@ public sealed class LivePlayback
                 if (State.Value.Buffering) State.Value = State.Value with { Buffering = false };
                 break;
             case EngineStatus.Ended:
-                Failed(new EngineError.Other("the stream ended"));
+                Failed(new EngineError.Other(LiveText.StreamEnded));
                 break;
         }
     }
@@ -425,7 +534,7 @@ public sealed class LivePlayback
             stallCheck = scheduler.After(StallGiveUpMs - StallCheckMs, () =>
             {
                 stallCheck = null;
-                if (Stalled()) Failed(new EngineError.Other("it stalled"));
+                if (Stalled()) Failed(new EngineError.Other(LiveText.Stalled));
             });
             var asked = session;
             // Not of a stream.ts, as Android asks nothing of a stall: its HLS session, unread, goes
@@ -435,7 +544,7 @@ public sealed class LivePlayback
             {
                 if (why == null || !Stalled()) return;
                 session = null;
-                Fail(new LiveTrouble(LiveTroubleKind.Stopped, why));
+                Fail(LiveTrouble.Stopped(why));
             }, _ => { });
         });
     }
@@ -450,11 +559,13 @@ public sealed class LivePlayback
     /// <summary>
     /// The TV's player failed: the server is asked first whether watching ended there (someone
     /// took the connection over, or it was stopped), which the player can't say; then the channel
-    /// is tuned anew, twice.
+    /// is tuned anew, twice, the first time after a second: a take-over's event, on its way as the
+    /// stream breaks off, stops it before it asks for a connection that is gone.
     /// </summary>
     void Failed(EngineError error)
     {
-        if (closed || State.Value.ChannelId is not { } channelId) return;
+        // Stopped already (watching ended on the server, or it failed): the player's last words change nothing.
+        if (closed || State.Value.ChannelId is not { } channelId || State.Value.Is is LivePhase.Failed) return;
         if (direct)
         {
             DirectFailed();
@@ -475,8 +586,8 @@ public sealed class LivePlayback
             {
                 // Its session is gone on the server: nothing to leave.
                 if (why != null) session = null;
-                var said = why ?? (error is EngineError.Stopped { Message: { Length: > 0 } m } ? m : "The channel was stopped on the server.");
-                Fail(new LiveTrouble(LiveTroubleKind.Stopped, said));
+                var said = !string.IsNullOrWhiteSpace(why) ? why : (error as EngineError.Stopped)?.Message;
+                Fail(LiveTrouble.Stopped(said));
                 return;
             }
             if (retries < Retries)
@@ -491,7 +602,7 @@ public sealed class LivePlayback
                 });
                 return;
             }
-            Fail(new LiveTrouble(LiveTroubleKind.Other, error.Detail.Length > 0 ? $"The TV's player said: {error.Detail}" : ""));
+            Fail(new LiveTrouble(LiveTroubleKind.Other, error.Detail.Length > 0 ? LiveText.PlayerSaid(error.Detail) : ""));
         }
     }
 

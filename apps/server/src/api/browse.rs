@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use serde::Serialize;
 
 use super::items::item_or_404;
@@ -11,14 +11,17 @@ use super::wants_summaries;
 use crate::auth::AuthUser;
 use crate::catalog::{self, ItemSummary};
 use crate::error::{ApiResult, AppError};
-use crate::people::{self, PersonSummary};
+use crate::i18n;
+use crate::people::PersonSummary;
 use crate::state::AppState;
 
 pub async fn home(
     State(state): State<AppState>,
     user: AuthUser,
+    headers: HeaderMap,
     Query(query): Query<HashMap<String, String>>,
 ) -> ApiResult<Json<Hubs>> {
+    let language = i18n::for_user(&state.db, user.id, &state.settings.get().language, &headers).await?;
     let summaries = wants_summaries(&query);
     // A row for each library the user may open, in their order.
     let libraries = crate::access::visible_libraries(&state.db, &user).await?;
@@ -37,13 +40,13 @@ pub async fn home(
     let mut hubs = vec![
         Hub {
             key: "continue_watching".into(),
-            title: "Continue Watching".into(),
+            title: i18n::t(language, "hubs.continueWatching"),
             library_id: None,
             items: continue_rows.iter().map(|r| r.to_summary_with(summaries)).collect(),
         },
         Hub {
             key: "my_list".into(),
-            title: "My List".into(),
+            title: i18n::t(language, "hubs.myList"),
             library_id: None,
             items: my_list.iter().map(|r| r.to_summary_with(summaries)).collect(),
         },
@@ -52,7 +55,7 @@ pub async fn home(
         hubs.push(Hub {
             key: format!("recently_added:{}", lib.id),
             // "in" reads right whatever the library is called.
-            title: format!("Recently Added in {}", lib.name),
+            title: i18n::t_with(language, "hubs.recentlyAddedIn", &[("library", &lib.name)]),
             library_id: Some(lib.id),
             items: rows.iter().map(|r| r.to_summary_with(summaries)).collect(),
         });
@@ -62,7 +65,7 @@ pub async fn home(
 }
 
 /// `DELETE /api/continue-watching/{id}`: takes a row out of the user's
-/// Continue Watching (every one: Home's, the libraries', the Plex API's) until
+/// Continue Watching (every one: Home's, the libraries', the Jellyfin API's) until
 /// they play it again. An episode takes its whole show out. Progress and
 /// watched marks stay as they are.
 pub async fn hide_continue_watching(
@@ -76,9 +79,6 @@ pub async fn hide_continue_watching(
     catalog::hide_from_continue_watching(&state.db, &state.events, user.id, title).await?;
     Ok(StatusCode::NO_CONTENT)
 }
-
-/// Live TV channels a search gives at most.
-const SEARCH_CHANNELS: usize = 12;
 
 #[derive(Serialize)]
 pub struct SearchResults {
@@ -94,13 +94,16 @@ pub async fn search(
     Query(query): Query<HashMap<String, String>>,
 ) -> ApiResult<Json<SearchResults>> {
     let q = query.get("q").map(|s| s.trim()).unwrap_or_default();
+    // Up to `limit` of each: titles, people and channels.
     let limit = query.get("limit").and_then(|l| l.parse::<i64>().ok()).unwrap_or(40).clamp(1, 200);
     // Titles and people at the same time.
-    let (rows, people) =
-        tokio::try_join!(catalog::search(&state.db, user.id, q, limit), people::search(&state.db, user.id, q, 12))?;
+    let (rows, people) = tokio::try_join!(
+        crate::search::items(&state.db, user.id, q, limit),
+        crate::search::people(&state.db, user.id, q, limit)
+    )?;
     let summaries = wants_summaries(&query);
     let channels = if !q.is_empty() && state.live.may_watch(&user).await {
-        state.live.browse(&user, &crate::livetv::Category::All, q, 0, SEARCH_CHANNELS, None).await?.channels
+        state.live.browse(&user, &crate::livetv::Category::All, q, 0, limit as usize, None).await?.channels
     } else {
         Vec::new()
     };

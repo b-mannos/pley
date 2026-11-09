@@ -6,6 +6,7 @@ import { keys } from "@/api/hooks";
 import type { Id, ItemDetail, ItemSummary } from "@/api/types";
 import { useOptionalAudioPlayer } from "@/audio/AudioPlayer";
 import { useToast } from "@/components/Toast";
+import { t } from "@/i18n";
 import { isPlayableVideo } from "./format";
 import { shuffled } from "./shuffle";
 import { playUrl } from "./usePlayItem";
@@ -70,25 +71,29 @@ export async function nextInQueue(qc: QueryClient, position: QueuePosition): Pro
   return qc.fetchQuery({ queryKey: keys.item(id), queryFn: () => api.get<ItemDetail>(`/api/items/${id}`), staleTime: 0 });
 }
 
-/** Returns `start(items, opts)`: plays the movies and episodes of `items` in order. */
+/**
+ * Returns `start(items, opts)`: plays the movies and episodes of `items` in
+ * order. It returns whether one plays; when none does, it has said so.
+ */
 export function useVideoQueue() {
   const navigate = useNavigate();
   const audio = useOptionalAudioPlayer();
   const toast = useToast();
   return useCallback(
-    (items: ItemSummary[], opts: { startIndex?: number; shuffle?: boolean; returnTo?: string } = {}) => {
+    (items: ItemSummary[], opts: { startIndex?: number; shuffle?: boolean; returnTo?: string } = {}): boolean => {
       const start = items[opts.startIndex ?? 0];
       let videos = items.filter(isPlayableVideo);
       if (opts.shuffle) videos = shuffled(videos);
       else if (start) videos = videos.slice(Math.max(0, videos.indexOf(start)));
       const first = videos[0];
       if (!first) {
-        toast.info("Nothing to play");
-        return;
+        toast.info(t("play.nothing"));
+        return false;
       }
       const queue = saveQueue({ ids: videos.map((v) => v.id), returnTo: opts.returnTo });
       audio?.pause();
       void navigate(queuePlayUrl(queue, 0, first.id, first.user_state.watched ? 0 : first.user_state.position_ms));
+      return true;
     },
     [audio, navigate, toast],
   );

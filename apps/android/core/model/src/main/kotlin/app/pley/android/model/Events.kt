@@ -153,6 +153,69 @@ sealed interface ServerEvent {
         }
     }
 
+    /**
+     * The profile's remote, on another device, sent the player of
+     * [sessionId] a command (POST /api/sessions/{id}/command): [positionMs]
+     * for a seek, [offsetMs] for a skip, [streamIndex] for audio and
+     * subtitles (`-1`: none), [quality] the Quality menu's entry by id,
+     * `null` otherwise. Only the player playing that session acts on it.
+     */
+    @Serializable
+    data class PlayerCommand(
+        val sessionId: String,
+        val command: Control = Control.Unknown,
+        val positionMs: Long? = null,
+        val offsetMs: Long? = null,
+        val streamIndex: Int? = null,
+        val quality: String? = null,
+    ) : ServerEvent {
+        override val type: String get() = TYPE
+
+        companion object {
+            const val TYPE = "player_command"
+        }
+    }
+
+    /**
+     * The profile's remote, on another device, sent its device of
+     * [receiverId] something to play (POST /api/remote/devices/{id}/cast):
+     * exactly one of [itemId], [playlistId] and [channelId]; [startMs]
+     * where a title starts, [shuffle] for a playlist, an album or an artist;
+     * [audioIndex] and [subtitleIndex] (`-1`: none) the tracks picked on the
+     * remote's page, which it plays with, `null` when not given; [from] is
+     * the remote's device, `null` when the server can't name it. Only the
+     * device of that receiver plays it. Sent by another profile of the
+     * household, it names that profile ([profileId]) and a ticket
+     * ([switchTicket]) the device switches to it with before it plays; both
+     * are `null` otherwise.
+     */
+    @Serializable
+    data class Cast(
+        val receiverId: String,
+        val itemId: Long? = null,
+        val playlistId: Long? = null,
+        val channelId: Long? = null,
+        val startMs: Long? = null,
+        val shuffle: Boolean = false,
+        val audioIndex: Int? = null,
+        val subtitleIndex: Int? = null,
+        val from: String? = null,
+        val profileId: Long? = null,
+        val switchTicket: String? = null,
+    ) : ServerEvent {
+        override val type: String get() = TYPE
+
+        // A ticket is never written out where an event is.
+        override fun toString(): String =
+            "Cast(receiverId=$receiverId, itemId=$itemId, playlistId=$playlistId, channelId=$channelId, startMs=$startMs, shuffle=$shuffle, " +
+                "audioIndex=$audioIndex, subtitleIndex=$subtitleIndex, from=$from, profileId=$profileId, " +
+                "switchTicket=${if (switchTicket == null) "null" else "…"})"
+
+        companion object {
+            const val TYPE = "cast"
+        }
+    }
+
     /** Live TV's sources, channels or guide changed: the channels and the guide are asked for again. */
     data object LiveChannelsChanged : ServerEvent {
         const val TYPE = "live_channels_changed"
@@ -163,6 +226,24 @@ sealed interface ServerEvent {
     data object LiveTunersChanged : ServerEvent {
         const val TYPE = "live_tuners_changed"
         override val type: String get() = TYPE
+    }
+
+    /**
+     * Someone took the connection of [channelId], watched by this profile,
+     * to watch another channel: every player of it stops and shows
+     * [message] (who took it only when both are in the home).
+     */
+    @Serializable
+    data class LiveTakenOver(
+        val sessionId: String,
+        val channelId: Long,
+        val message: String,
+    ) : ServerEvent {
+        override val type: String get() = TYPE
+
+        companion object {
+            const val TYPE = "live_taken_over"
+        }
     }
 
     /**
@@ -289,10 +370,13 @@ sealed interface ServerEvent {
                 LibrariesChanged.TYPE -> LibrariesChanged
                 SessionsChanged.TYPE -> SessionsChanged
                 SessionStopped.TYPE -> json.decodeFromJsonElement(SessionStopped.serializer(), fields)
+                PlayerCommand.TYPE -> json.decodeFromJsonElement(PlayerCommand.serializer(), fields)
+                Cast.TYPE -> json.decodeFromJsonElement(Cast.serializer(), fields)
                 WatchlistChanged.TYPE -> WatchlistChanged
                 UserStateChanged.TYPE -> json.decodeFromJsonElement(UserStateChanged.serializer(), fields)
                 LiveChannelsChanged.TYPE -> LiveChannelsChanged
                 LiveTunersChanged.TYPE -> LiveTunersChanged
+                LiveTakenOver.TYPE -> json.decodeFromJsonElement(LiveTakenOver.serializer(), fields)
                 RequestsChanged.TYPE -> json.decodeFromJsonElement(RequestsChanged.serializer(), fields)
                 RequestAvailable.TYPE -> json.decodeFromJsonElement(RequestAvailable.serializer(), fields)
                 RequestDecided.TYPE -> json.decodeFromJsonElement(RequestDecided.serializer(), fields)
@@ -312,6 +396,9 @@ sealed interface ServerEvent {
                 is ScanFinished -> json.encodeToJsonElement(ScanFinished.serializer(), value).jsonObject
                 is LibraryChanged -> json.encodeToJsonElement(LibraryChanged.serializer(), value).jsonObject
                 is SessionStopped -> json.encodeToJsonElement(SessionStopped.serializer(), value).jsonObject
+                is PlayerCommand -> json.encodeToJsonElement(PlayerCommand.serializer(), value).jsonObject
+                is Cast -> json.encodeToJsonElement(Cast.serializer(), value).jsonObject
+                is LiveTakenOver -> json.encodeToJsonElement(LiveTakenOver.serializer(), value).jsonObject
                 is UserStateChanged -> json.encodeToJsonElement(UserStateChanged.serializer(), value).jsonObject
                 is RequestsChanged -> json.encodeToJsonElement(RequestsChanged.serializer(), value).jsonObject
                 is RequestAvailable -> json.encodeToJsonElement(RequestAvailable.serializer(), value).jsonObject

@@ -133,6 +133,10 @@ sub test_requests_badge_counts()
     tkEqual(reqBadge(reqTestSummary({ unseen: 2 })), { count: 2, danger: false })
     tkEqual(reqBadge(reqTestSummary({ manage: true, pending: 3, failed: 0, unseen: 1 })), { count: 4, danger: false })
     tkEqual(reqBadge(reqTestSummary({ manage: true, pending: 3, failed: 2, unseen: 1 })), { count: 6, danger: true })
+    ' Discover's way to them says the same.
+    tkEqual(reqRequestsChip(reqTestSummary({ manage: true, pending: 3, failed: 2, unseen: 1 })), { label: "Requests", width: 0, count: "6", accent: true, danger: true })
+    tkEqual(reqRequestsChip(reqTestSummary({ unseen: 0, own: 2 })).count, "", "nothing new: no number")
+    tkEqual(reqRequestsChip(reqTestSummary({ unseen: 120 })).count, "99+")
 end sub
 
 sub test_requests_allowance_words()
@@ -203,6 +207,19 @@ sub test_requests_grids_load_five_pages_until_the_focus_moves()
     further = reqFurtherTile()
     tkEqual(further.kind, "further")
     tkInvalid(navForTile(further), "the grid asks for more itself")
+end sub
+
+' A grid's later page that fails ends it in a tile saying so, which asks
+' again where that may help.
+sub test_requests_a_grid_s_failed_page_offers_retry()
+    away = reqMoreProblemTile({ status: 0, error: "network", message: "" }, false)
+    tkEqual(away.title, "Couldn't load more. Select to try again.")
+    tkEqual(away.kind, "retry")
+    tkInvalid(navForTile(away), "the grid asks again itself")
+    tkEqual(reqMoreProblemTile({ status: 503, error: "tmdb_down" }, false).title, "TMDB isn't answering. Select to try again.")
+    key = reqMoreProblemTile({ status: 503, error: "tmdb_key" }, false)
+    tkEqual(key.title, "TMDB refused this server's key.")
+    tkEqual(key.kind, "note")
 end sub
 
 sub test_requests_badges_come_from_the_title()
@@ -295,6 +312,15 @@ sub test_requests_rows()
     tkEqual(other.who, "Asked for by Ben · 3 days ago")
     tkTrue(reqBusy("downloading"))
     tkFalse(reqBusy("waiting"))
+end sub
+
+' An open list is asked again while a download moves, which sends no
+' events, and while no event can tell it what changed.
+sub test_requests_lists_are_asked_again_without_events()
+    tkEqual(reqListPoll(true, true), 10, "a download moves")
+    tkEqual(reqListPoll(true, false), 10)
+    tkEqual(reqListPoll(false, false), 30, "the event stream is down")
+    tkEqual(reqListPoll(false, true), 0, "events tell of changes")
 end sub
 
 ' Discover's Your requests: the stage under the poster, in its colour;
@@ -393,6 +419,17 @@ sub test_requests_search_says_what_stops_tmdb()
     tkEqual(other.kind, "retry")
 end sub
 
+' Search's Discover row reads on while too few titles the libraries lack
+' came: 20 at most, from three of TMDB's pages at most.
+sub test_requests_search_reads_up_to_three_pages()
+    tkTrue(reqSearchWantsPage(0, 1, 40, 1), "the first page all in a library")
+    tkTrue(reqSearchWantsPage(12, 2, 40, 2))
+    tkFalse(reqSearchWantsPage(12, 3, 40, 3), "three pages read")
+    tkFalse(reqSearchWantsPage(20, 1, 40, 1), "enough to show")
+    tkFalse(reqSearchWantsPage(4, 1, 1, 1), "the last page came")
+    tkEqual(reqSearchShown(), 20)
+end sub
+
 ' The See all of Search's Discover row: TMDB's results for the words as its search takes
 ' them, at most 200 characters.
 sub test_requests_see_all_of_a_list_or_a_search()
@@ -443,7 +480,7 @@ sub test_requests_title_page_leaves_out_what_can_t_be_pressed()
     tkEqual(used.note, "You've asked for all the movies you can for now: you can ask for more in 3 days.")
     again = reqTitlePage(reqTestDetail({}), reqTestSummary({ signInAgain: "requests" }), "", now, 0)
     tkEqual(again.actions, ["signIn"])
-    tkEqual(again.note, "Sign in again to ask for movies and shows." + Chr(10) + "This app signed in before it could ask. Signing in again lets it.")
+    tkEqual(again.note, "Sign in again to ask for movies and shows.")
 end sub
 
 ' A movie is asked for after a question: what asking does, what may still
@@ -607,6 +644,26 @@ sub test_requests_hero()
     tkEqual(reqHero({ kind: "movie", tmdb_id: 27205, title: "Inception", status: "none" }, reqTestSummary({ access: "off" }), "", now).note, "", "nothing to say where Discover doesn't show")
 end sub
 
+' The hero is the first title of the first list with any: trending's,
+' else the next list's once trending came with none or failed.
+sub test_requests_hero_comes_from_the_first_list_with_a_title()
+    dune = { kind: "movie", tmdb_id: 438631, title: "Dune" }
+    arrival = { kind: "movie", tmdb_id: 329865, title: "Arrival" }
+    lists = [{ key: "trending", state: "asked", first: invalid }, { key: "movies", state: "shown", first: dune }]
+    tkInvalid(reqHeroOf(lists), "trending still comes")
+    lists[0].first = arrival
+    tkEqual(reqHeroOf(lists), arrival, "trending's first, its later pages still coming")
+    lists[0].first = invalid
+    lists[0].state = "shown"
+    tkEqual(reqHeroOf(lists), dune, "trending had none the profile may ask for")
+    lists = [{ key: "trending", state: "shown", first: invalid }, { key: "movies", state: "waiting", first: invalid }, { key: "shows", state: "shown", first: dune }]
+    tkInvalid(reqHeroOf(lists), "the lists before it come first")
+    lists[1].state = "shown"
+    tkEqual(reqHeroOf(lists), dune)
+    none = [{ key: "trending", state: "shown", first: invalid }, { key: "requests", state: "waiting", first: invalid }]
+    tkEqual(reqHeroOf(none), {}, "no title anywhere: no hero; Your requests aren't waited for")
+end sub
+
 sub test_requests_list_queries_and_empty_lists()
     tkEqual(reqListQuery("attention", "", 0, "", 0), { attention: 1, order: "oldest", offset: 0, limit: 50 })
     tkEqual(reqListQuery("mine", "show", 0, "", 50), { mine: 1, kind: "show", offset: 50, limit: 50 })
@@ -620,6 +677,39 @@ sub test_requests_list_queries_and_empty_lists()
     tkEqual(reqEmptyText("all", false, false), "No one has asked for anything yet.")
     tkEqual(reqEmptyText("all", true, false), "You haven't asked for anything yet.")
     tkEqual(reqEmptyText("pending", false, true), "Nothing matches.")
+end sub
+
+sub test_requests_tabs_say_how_many_each_holds()
+    manager = reqTestSummary({ manage: true, access: "auto", pending: 2, failed: 1, own: 5 })
+    counts = { pending: 2, approved: 4, available: 30, declined: 0, failed: 1 }
+    tkEqual(reqTabCount("attention", manager, invalid, false, "attention", 3), 3, "what waits, before the counts come")
+    tkEqual(reqTabCount("all", manager, counts, false, "attention", 3), 37)
+    tkEqual(reqTabCount("approved", manager, counts, false, "attention", 3), 4)
+    tkEqual(reqTabCount("declined", manager, counts, false, "attention", 3), 0)
+    tkEqual(reqTabCount("all", manager, invalid, false, "all", -1), 0, "not known yet")
+    tkEqual(reqTabCount("mine", manager, counts, false, "all", 37), 5, "the account's own")
+    ' Filtered: the counts of what the filters keep.
+    narrow = { pending: 1, approved: 0, available: 2, declined: 0, failed: 0 }
+    tkEqual(reqTabCount("attention", manager, narrow, true, "all", 3), 1)
+    tkEqual(reqTabCount("mine", manager, narrow, true, "mine", 2), 2, "what Yours lists")
+    tkEqual(reqTabCount("mine", manager, narrow, true, "all", 3), 0, "not known while another tab shows")
+    tkEqual(reqTabCount("pending", reqTestSummary({}), { pending: 1 }, false, "all", 1), 1, "a status the answer lacks counts none")
+    chips = reqTabChips(true, manager, counts, false, "attention", 3)
+    tkEqual(chips[0], { label: "Needs attention", width: 0, count: "3" })
+    tkEqual(chips[5].count, "", "none: no number")
+    tkEqual(reqTabChips(false, reqTestSummary({}), invalid, false, "all", -1).Count(), 6)
+    tkEqual(reqCountText(1200, 999), "999+")
+    tkEqual(reqCountText(0, 99), "")
+    tkEqual(reqCountText(100, 99), "99+")
+end sub
+
+' Needs attention's and Yours' lists count only what they hold: the
+' statuses' counts are asked for beside them, with the same filters.
+sub test_requests_counts_are_asked_beside_narrow_tabs()
+    tkEqual(reqCountsQuery("attention", "movie", 3, "dune"), { kind: "movie", user_id: 3, q: "dune", offset: 0, limit: 1 })
+    tkEqual(reqCountsQuery("mine", "", 0, ""), { offset: 0, limit: 1 })
+    tkInvalid(reqCountsQuery("all", "", 0, ""), "All's list counts every status")
+    tkInvalid(reqCountsQuery("pending", "", 0, ""))
 end sub
 
 sub test_requests_open_on_a_tab_the_person_has()
@@ -643,8 +733,27 @@ sub test_requests_ready_notices()
     tkEqual(reqReadyText("Severance", "show", [2]), "Season 2 of “Severance” is ready to watch.")
     tkEqual(reqReadyText("Severance", "show", [1, 2]), "Seasons 1–2 of “Severance” are ready to watch.")
     tkEqual(reqReadyText("Severance", "show", invalid), "“Severance” is ready to watch.")
-    tkEqual(reqNotice([{ title: "Dune", kind: "movie", seasons: invalid, itemId: 12 }]), { text: "“Dune” is ready to watch.", itemId: 12 })
-    tkEqual(reqNotice([{}, {}, {}]), { text: "3 of your requests have news", itemId: 0 })
+    tkEqual(reqNotice([{ title: "Dune", kind: "movie", seasons: invalid, itemId: 12, poster: "/api/discover/images/poster/d.jpg" }], "http://nas:7539"), { text: "“Dune” is ready to watch.", itemId: 12, poster: "http://nas:7539/api/discover/images/poster/d.jpg?w=80" })
+    tkEqual(reqNotice([{ title: "Dune", kind: "movie", seasons: invalid, itemId: 12, poster: "" }], "http://nas:7539").poster, "", "no poster: a tick")
+    tkEqual(reqNotice([{}, {}, {}], "http://nas:7539"), { text: "3 of your requests have news", itemId: 0, poster: "" })
+end sub
+
+' A notice shows once the remote has rested 1.5 s, and never where it
+' would be in the way.
+sub test_requests_notices_wait_for_the_remote_to_rest()
+    tkFalse(reqRested(0, 0, -1), "a key within the second")
+    tkFalse(reqRested(1, -1, -1), "a key 1 to 2 s ago, not known when")
+    tkFalse(reqRested(1, 1200, -1))
+    tkTrue(reqRested(1, 1500, -1), "the key 1.5 s ago, a look having found a second gone")
+    tkTrue(reqRested(2, -1, -1))
+    tkFalse(reqRested(5, -1, 800), "a screen changed just now")
+    tkTrue(reqRested(5, -1, 1600))
+    tkTrue(reqNoticeOver("home"))
+    tkTrue(reqNoticeOver("discover"))
+    tkTrue(reqNoticeOver("details"))
+    for each route in ["player", "livePlayer", "link", "profiles", "requests", "requestSeasons", "sortLibraries"]
+        tkFalse(reqNoticeOver(route), route)
+    end for
 end sub
 
 sub test_requests_news_is_told_once()
@@ -657,6 +766,7 @@ sub test_requests_news_is_told_once()
     told = reqToAnnounce([movie, show, declined, unopenable], mark)
     tkEqual(told.Count(), 2, "ready ones a library it can open has: a declined one shows as the badge")
     tkEqual(told[0].requestId, 7)
+    tkEqual(told[0].poster, "/api/discover/images/poster/abc.jpg")
     tkInvalid(told[0].seasons, "the whole movie")
     tkEqual(told[1].seasons, [1])
     tkEqual(mark.at, now - 10)
@@ -675,11 +785,12 @@ end sub
 
 sub test_requests_events_tell_news_once()
     mark = { at: 0, ready: {} }
-    event = { type: "request_available", request_id: 8, title: "Severance", kind: "show", tmdb_id: 95396, item_id: 99, seasons: [1], complete: false }
+    event = { type: "request_available", request_id: 8, title: "Severance", kind: "show", tmdb_id: 95396, item_id: 99, poster_url: "/api/discover/images/poster/s.jpg", seasons: [1], complete: false }
     first = reqAnnounceEvent(event, mark)
     tkEqual(first.Count(), 1)
     tkEqual(first[0].seasons, [1])
     tkEqual(first[0].itemId, 99)
+    tkEqual(first[0].poster, "/api/discover/images/poster/s.jpg")
     tkEqual(reqAnnounceEvent(event, mark).Count(), 0, "the same news")
     event.seasons = [2]
     tkEqual(reqAnnounceEvent(event, mark)[0].seasons, [2])
@@ -701,7 +812,7 @@ sub test_requests_news_is_kept_as_told_once_its_notice_is_seen()
     told = reqToAnnounce([movie], mark)
     tkEqual(told.Count(), 1)
     tkEqual(before, { at: now - 600, ready: { "5": "all" } }, "the copy stays as it was")
-    notice = reqNotice(told)
+    notice = reqNotice(told, "")
     notice.before = before
     kept = reqMarkToKeep(mark, [notice])
     tkFalse(kept.ready.DoesExist("7"), "waiting: not kept as told")
@@ -732,4 +843,83 @@ sub test_requests_events_are_known()
     tkTrue(reqIsEvent({ type: "request_available" }))
     tkTrue(reqIsEvent({ type: "requests_settings_changed" }))
     tkFalse(reqIsEvent({ type: "library_changed" }))
+end sub
+
+' French: whole sentences with their own word order, no-break spaces
+' (Chr(160)) inside « » and before : and ?, counts in their plural form.
+sub test_requests_words_in_french()
+    i18nUse("fr")
+    nb = Chr(160)
+    now = reqTestNow()
+    both = reqAllowance({ moviesLeft: 2, seasonsLeft: 5, moviesLimit: 3, seasonsLimit: 10, moviesNextAt: 0, seasonsNextAt: 0 }, now)
+    tkEqual(both.text, "Vous pouvez encore demander 2 films et 5 saisons.")
+    tkEqual(both.limits, "Limites" + nb + ": 3 films et 10 saisons sur 7 jours.")
+    mixed = reqAllowance({ moviesLeft: 1, seasonsLeft: 0, moviesLimit: 3, seasonsLimit: 10, moviesNextAt: 0, seasonsNextAt: now + 86400 }, now)
+    tkEqual(mixed.text, "Vous pouvez encore demander 1 film, et d’autres saisons demain.")
+    movies = reqAllowance({ moviesLeft: 0, seasonsLeft: -1, moviesLimit: 1, seasonsLimit: -1, moviesNextAt: now + 3 * 86400, seasonsNextAt: 0 }, now)
+    tkEqual(movies.text, "Vous avez demandé tous les films possibles pour l’instant" + nb + ": vous pourrez en demander d’autres dans 3 jours.")
+    tkEqual(movies.limits, "Limite" + nb + ": 1 film sur 7 jours.")
+    tkEqual(reqAskConfirm("Dune", "auto", reqNoSummary(false), now).title, "Demander «" + nb + "Dune" + nb + "»" + nb + "?")
+    tkEqual(reqSeasonsLabel([0, 1, 2]), "Saisons 1–2 et épisodes spéciaux")
+    severance = "«" + nb + "Severance" + nb + "»"
+    tkEqual(reqReadyText("Severance", "show", [2]), "Saison 2 de " + severance + " est prête à regarder.")
+    tkEqual(reqReadyText("Severance", "show", [1, 2]), "Saisons 1–2 de " + severance + " sont prêtes à regarder.")
+    tkEqual(reqReadyText("Severance", "show", [0]), "Les épisodes spéciaux de " + severance + " sont prêts à regarder.")
+    tkEqual(reqNotice([{}, {}, {}], "").text, "3 de vos demandes ont du nouveau")
+    tkEqual(reqPickerButton(1, 5, ""), { label: "Demander 1 saison", line: "" })
+    tkEqual(reqPickerButton(3, 2, "").line, "Vous pouvez encore demander 2 saisons.")
+    tkEqual(reqSeasonState(reqTestSeason(2, "partial"), {}, false, false, now, 0).text, "Déjà 3 épisodes sur 8")
+    tkEqual(reqWho(reqTestRequest({}), now, 0), "Demandé par vous · il y a 3 jours")
+    seasons = [reqTestSeason(1, "library"), reqTestSeason(2, "missing"), reqTestSeason(3, "missing")]
+    tkEqual(reqDetailLine(reqTestDetail({ kind: "show", seasons: seasons, runtime_minutes: invalid, certification: "TV-MA", rating: 8.9, year: 2008 })), "2008 · 3 saisons · TV-MA · ★ 8,9")
+end sub
+
+sub test_requests_stages_in_french()
+    i18nUse("fr")
+    nb = Chr(160)
+    now = reqTestNow()
+    show = reqTestRequest({ status: "approved", stage: "waiting", stage_at: now + 9 * 3600 + 300 })
+    tkEqual(reqStage(show, false, now, 0).text, "Diffusion à 21:05", "24 hours in French")
+    show.stage_at = now + 20 * 3600
+    tkEqual(reqStage(show, false, now, 0).text, "Diffusion demain à 08:00")
+    downloading = reqTestRequest({ status: "approved", stage: "downloading", download: { progress: 0.42, state: "downloading", eta: now + 20 * 60, episodes: 3 } })
+    tkEqual(reqStage(downloading, false, now, 0).text, "Téléchargement 42" + nb + "% · dans 20 min")
+    partial = reqTestRequest({ status: "approved", stage: "partial", available_seasons: [1, 2] })
+    tkEqual(reqStage(partial, false, now, 0).text, "Prêt à regarder" + nb + ": Saisons 1–2")
+    failed = reqTestRequest({ status: "failed", stage: "failed", reason: "Sonarr isn't answering", retry_at: now + 300 })
+    tkEqual(reqStage(failed, true, now, 0), { text: "Envoi impossible" + nb + ": Sonarr isn't answering", tone: "problem", line: "Nouvel essai dans 5 min.", progress: -1 })
+end sub
+
+' Spanish: «» and ¿…?, the tabs' shorter words, and what the server's
+' answers become.
+sub test_requests_words_in_spanish()
+    i18nUse("es")
+    now = reqTestNow()
+    labels = []
+    for each tab in reqTabs(true)
+        labels.Push(tab.label)
+    end for
+    tkEqual(labels, ["Por revisar", "Todas", "En espera", "Aprobadas", "Listas", "Rechazadas", "Fallidas", "Las tuyas"])
+    tkEqual(reqSeasonsLabel([2]), "Temporada 2")
+    tkEqual(reqSeasonsLabel([3, 1, 2, 5]), "Temporadas 1–3, 5")
+    tkEqual(reqEmptyText("pending", true, false), "Ninguna de tus solicitudes espera una decisión.")
+    tkEqual(reqAsked(201, { status: "pending" }, "Dune"), "Solicitaste «Dune»: un administrador decidirá.")
+    limits = reqTestSummary({ moviesLimit: 1, seasonsLimit: 5 })
+    tooMany = { status: 429, error: "too_many_requests", message: "", data: { code: "too_many_requests", retry_at: invalid } }
+    tkEqual(reqAskProblem(tooMany, limits, "show", now), "Puedes solicitar como máximo 5 temporadas cada 7 días: elige menos.")
+    tkEqual(reqAskProblem(tooMany, limits, "movie", now), "Puedes solicitar como máximo 1 película cada 7 días: elige menos.")
+    tkEqual(reqConfirm("withdraw", "Dune", "declined"), { message: "¿Quitar «Dune» de tus solicitudes?", button: "Quitar" })
+    actions = []
+    for each option in reqActions(reqTestRequest({ status: "pending", actions: ["approve", "decline", "handled", "delete"] }), 0)
+        actions.Push(option.label)
+    end for
+    tkEqual(actions, ["Aprobar", "Rechazar", "Rechazar con un motivo…", "Marcar como añadido a mano", "Eliminar"])
+    tkEqual(reqMoreProblemTile({ status: 503, error: "tmdb_down" }, false).title, "TMDB no responde. OK para reintentar.")
+    tiles = reqTitleTiles([{ kind: "show", tmdb_id: 1396, title: "Breaking Bad", year: 2008, poster_url: invalid, status: "requested", item_id: invalid }], "", {})
+    tkEqual(tiles[0].subtitle, "2008 · Serie")
+    tkEqual(tiles[0].badge, "Solicitado")
+    tkEqual(reqDeclinedText({ reason: "Not in 4K", at: now, again_at: now + 12 * 86400 }, now), "Rechazado: «Not in 4K». Podrás volver a solicitarlo en 12 días.")
+    movie = reqTestRequest({ kind: "movie", status: "approved", stage: "waiting", stage_at: now + 3 * 86400 })
+    tkEqual(reqStage(movie, false, now, 0).text, "Se estrena el 4 nov")
+    tkEqual(reqSeeAll("", "dune").title, "Resultados de «dune»")
 end sub

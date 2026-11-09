@@ -38,8 +38,8 @@ use serde_json::{Value, json};
 use url::Url;
 
 use super::auth::{
-    NO_WAY_IN, NOT_ALLOWED, PIN_LOCKED, PIN_NEEDED, SwitchError, SwitchTarget, check_own_pin, check_switch,
-    switch_needs, switch_targets,
+    NO_WAY_IN, NOT_ALLOWED, PIN_LOCKED, PIN_NEEDED, SwitchError, SwitchTarget, TICKET_SPENT, check_own_pin,
+    check_switch, check_ticket_switch, switch_needs, switch_targets,
 };
 use crate::auth::grants::{self, GrantRow, IssueError, Issued, NewGrant, RefreshError, RefreshInput, SwitchInput};
 use crate::auth::scopes::{Scope, Scopes};
@@ -648,16 +648,22 @@ fn user_agent(headers: &HeaderMap) -> Option<String> {
     headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok()).map(str::to_owned)
 }
 
-/// A token answer (RFC 6749 §5.1), never cached.
-fn tokens(issued: Issued) -> Response {
+/// A token answer (RFC 6749 §5.1), never cached, with what the app keeps
+/// to tell this server from another device later ([`crate::identity`]).
+fn tokens(state: &AppState, issued: Issued) -> Response {
     let mut body = json!({
         "access_token": issued.access_token,
         "token_type": "Bearer",
         "expires_in": issued.expires_in,
         "scope": issued.scopes.to_string(),
+        "server_id": state.identity.id,
     });
     if let Some(refresh) = issued.refresh_token {
         body["refresh_token"] = json!(refresh);
+    }
+    if let Some(proof) = state.identity.proof_key(issued.grant_id) {
+        body["proof_id"] = json!(proof.id);
+        body["proof_key"] = json!(proof.key);
     }
     (StatusCode::OK, NO_STORE, Json(body)).into_response()
 }
@@ -785,7 +791,7 @@ async fn exchange_code(
         return Err(OAuthError::invalid_grant(refusal));
     }
     tracing::info!("{} may use {}'s account ({})", grant.app.label(), user.username, issued.scopes);
-    Ok(tokens(issued))
+    Ok(tokens(state, issued))
 }
 
 /// Why a code or a TV's answer got nothing although it was right.
@@ -818,7 +824,7 @@ async fn refresh(
         ip,
     };
     match state.auth.refresh(input).await {
-        Ok(issued) => Ok(tokens(issued)),
+        Ok(issued) => Ok(tokens(state, issued)),
         Err(RefreshError::WiderScope) => {
             Err(OAuthError::new("invalid_scope", "the app asked for more than it was allowed"))
         }
@@ -1083,7 +1089,7 @@ async fn device_token(
         }
         return Err(OAuthError::new("access_denied", SIGNED_OUT));
     }
-    Ok(tokens(issued))
+    Ok(tokens(state, issued))
 }
 
 /// The tokens of a TV that was allowed, when its account still may have them.
@@ -1167,7 +1173,11 @@ async fn switch_profile(
             format!("this app wasn't allowed to {}: sign in to it again to allow it", Scope::Profiles.words()),
         ));
     }
-    if profile == holder.user.id {
+    if let Some(ticket) = form.get("ticket") {
+        // A cast from another profile's remote: this device switches to it.
+        let device = format!("app-{}", holder.grant_id);
+        check_ticket_switch(state, &holder.user, Some(&device), profile, ticket, true).await.map_err(refused_switch)?;
+    } else if profile == holder.user.id {
         // "Who's watching?" as a TV starts: the profile's own PIN, checked
         // and answered as a switch to it would be. Without a PIN to check,
         // the app has nothing to ask (older servers answered this to every
@@ -1206,7 +1216,7 @@ async fn switch_profile(
             issued.scopes
         );
     }
-    Ok(tokens(issued))
+    Ok(tokens(state, issued))
 }
 
 /// A switch to the profile the app acts as, without a PIN to check.
@@ -1241,6 +1251,7 @@ fn refused_switch(err: SwitchError) -> OAuthError {
         SwitchError::PinLocked => ("pin_locked", PIN_LOCKED.to_owned()),
         SwitchError::PinNeeded => ("wrong_pin", PIN_NEEDED.to_owned()),
         SwitchError::WrongPin => ("wrong_pin", "wrong PIN".to_owned()),
+        SwitchError::TicketSpent => ("ticket_spent", TICKET_SPENT.to_owned()),
         SwitchError::PasswordNeeded | SwitchError::WrongPassword | SwitchError::TwoStep(_) => (
             "browser",
             "this profile can see more than yours: sign in to the app again, and pick the profile in the browser"
@@ -1252,6 +1263,13 @@ fn refused_switch(err: SwitchError) -> OAuthError {
             "browser",
             "this profile takes its password: sign in to the app again, and pick the profile in the browser".to_owned(),
         ),
+        // Too busy to check the PIN now (or without the memory to): try again.
+        SwitchError::Internal(AppError::Unavailable(busy)) => {
+            return OAuthError {
+                status: StatusCode::SERVICE_UNAVAILABLE,
+                ..OAuthError::new("temporarily_unavailable", busy)
+            };
+        }
         SwitchError::Internal(err) => return OAuthError::server_error(err),
     };
     OAuthError { reason: Some(reason), ..OAuthError::invalid_grant(description) }
@@ -1430,22 +1448,29 @@ impl From<GrantRow> for AppGrant {
 }
 
 /// What an app's grant was last used from, by the User-Agent of its token
-/// requests. pley's apps say "pleyAndroid/1.0 (Android 15)",
-/// "pleyKodi/0.1.0 (Kodi 21.2; Windows)" or "pleyRoku/0.1.0 (Roku OS 14.5;
-/// Roku Ultra)": the row names the app already, so the platform it gives in
-/// brackets.
+/// requests. Pley's apps say "pleyAndroid/1.0 (Android 15)",
+/// "pleyKodi/0.1.0 (Kodi 21.2; Windows)", "pleyRoku/0.1.0 (Roku OS 14.5;
+/// Roku Ultra)", "pleyLG/0.1.0 (webOS 23; OLED65C3PUA)",
+/// "pleyApple/0.1.0 (iPadOS 16.7; iPad)" or "pleyHomeAssistant/0.1.0 (Home
+/// Assistant 2026.11.0)": the row names the app already, so the platform it
+/// gives in brackets.
 fn grant_device(user_agent: &str) -> String {
-    for (app, platform) in [("pleyAndroid/", "Android"), ("pleyKodi/", "Kodi"), ("pleyRoku/", "Roku")] {
+    let apps = [
+        ("pleyAndroid/", "Android"),
+        ("pleyKodi/", "Kodi"),
+        ("pleyRoku/", "Roku"),
+        ("pleyLG/", "webOS"),
+        ("pleyApple/", "Apple"),
+        ("pleyHomeAssistant/", "Home Assistant"),
+    ];
+    for (app, platform) in apps {
         if user_agent.contains(app) {
-            let given = user_agent
-                .split_once('(')
-                .and_then(|(_, rest)| rest.split_once(')'))
-                .map(|(inside, _)| inside.trim())
-                .filter(|inside| !inside.is_empty());
+            let given = crate::accounts::bracketed(user_agent);
             return given.unwrap_or(platform).chars().take(60).collect();
         }
     }
-    // Samsung's and LG's TV apps send their TV's own agent: the system's version.
+    // Samsung's TV app, and LG's before it was a native app, send their TV's
+    // own agent: the system's version.
     if let Some(at) = user_agent.find("Tizen ") {
         return user_agent[at..].chars().take_while(|c| *c != ')' && *c != ';').take(60).collect();
     }
@@ -1538,6 +1563,18 @@ mod tests {
         assert_eq!(grant_device(webos), "webOS 23");
         assert_eq!(grant_device(&webos.replace("Chrome/94", "Chrome/99")), "webOS");
         assert_eq!(grant_device("pleyKodi/0.1.0 (Kodi 21.2; Windows)"), "Kodi 21.2; Windows");
+        assert_eq!(grant_device("pleyLG/0.1.0 (webOS 23; OLED65C3PUA)"), "webOS 23; OLED65C3PUA");
+        assert_eq!(grant_device("pleyLG/0.1.0"), "webOS");
+        let home_assistant = "pleyHomeAssistant/0.1.0 (Home Assistant 2026.11.0)";
+        assert_eq!(grant_device(home_assistant), "Home Assistant 2026.11.0");
+        assert_eq!(grant_device("pleyHomeAssistant/0.1.0"), "Home Assistant");
+    }
+
+    #[test]
+    fn apple_apps_name_their_system_and_device() {
+        assert_eq!(grant_device("pleyApple/0.1.0 (tvOS 18.2; Apple TV)"), "tvOS 18.2; Apple TV");
+        assert_eq!(grant_device("pleyApple/0.1.0 (iPadOS 16.7; iPad)"), "iPadOS 16.7; iPad");
+        assert_eq!(grant_device("pleyApple/0.1.0"), "Apple");
     }
 
     fn headers(pairs: &[(&'static str, &str)]) -> HeaderMap {

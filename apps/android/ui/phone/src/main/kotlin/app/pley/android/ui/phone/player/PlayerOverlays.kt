@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -35,6 +34,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -156,8 +156,9 @@ internal fun rememberSpinning(state: PlayerScreenState): Boolean {
  */
 @Composable
 internal fun BoxScope.SkipButton(state: PlayerScreenState) {
+    PlayerProbe.composed?.invoke("skip")
     val label = state.skipLabel
-    val shown = label != null && state.upNext == null && state.scrubMs == null && !state.locked && state.sheet == null
+    val shown = label != null && state.upNext == null && !state.scrubbing && !state.locked && state.sheet == null
     val lift by animateDpAsState(if (state.controlsVisible) AboveControls else 0.dp, PleyMotion.overlay(reducedMotion()), label = "skip")
     var last by remember { mutableStateOf(label) }
     if (label != null) last = label
@@ -165,7 +166,7 @@ internal fun BoxScope.SkipButton(state: PlayerScreenState) {
         shown,
         Modifier
             .align(Alignment.BottomEnd)
-            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .windowInsetsPadding(WindowInsets.player)
             .padding(end = 24.dp, bottom = 24.dp)
             .offset { IntOffset(0, -lift.roundToPx()) },
         enter = fadeIn(PleyMotion.reveal()),
@@ -210,7 +211,7 @@ internal fun BoxScope.UpNextCard(state: PlayerScreenState) {
         card != null && !state.locked && state.sheet == null,
         Modifier
             .align(Alignment.BottomEnd)
-            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .windowInsetsPadding(WindowInsets.player)
             .padding(end = 24.dp, bottom = 24.dp)
             .offset { IntOffset(0, -lift.roundToPx()) },
         enter = fadeIn(PleyMotion.reveal()),
@@ -330,12 +331,15 @@ internal fun BoxScope.SeekRunBadge(state: PlayerScreenState) {
 /** The volume or brightness while a drag sets it: an icon over a 4 dp bar, on the side dragged. */
 @Composable
 internal fun BoxScope.LevelIndicator(state: PlayerScreenState) {
-    val drag = state.levelDrag ?: return
-    val label = stringResource(if (drag.volume) R.string.player_volume else R.string.player_brightness)
+    PlayerProbe.composed?.invoke("level")
+    // Which level shows is read here; how far, only while drawing, so a drag moves the bar without recomposing.
+    val shown by remember(state) { derivedStateOf { state.levelDrag?.volume } }
+    val volume = shown ?: return
+    val label = stringResource(if (volume) R.string.player_volume else R.string.player_brightness)
     Column(
         Modifier
-            .align(if (drag.volume) Alignment.CenterEnd else Alignment.CenterStart)
-            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .align(if (volume) Alignment.CenterEnd else Alignment.CenterStart)
+            .windowInsetsPadding(WindowInsets.player)
             .padding(horizontal = 40.dp)
             .clip(PleyShape.Pill)
             .background(Color.Black.copy(alpha = 0.6f))
@@ -343,7 +347,7 @@ internal fun BoxScope.LevelIndicator(state: PlayerScreenState) {
             .semantics { contentDescription = label },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(if (drag.volume) PleyIcons.Volume2 else PleyIcons.Sun, contentDescription = null, size = 20.dp)
+        Icon(if (volume) PleyIcons.Volume2 else PleyIcons.Sun, contentDescription = null, size = 20.dp)
         Box(
             Modifier
                 .padding(top = 12.dp)
@@ -380,7 +384,7 @@ internal fun BoxScope.ModeLabel(state: PlayerScreenState) {
         color = PleyColors.Fg,
         modifier = Modifier
             .align(Alignment.TopCenter)
-            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .windowInsetsPadding(WindowInsets.player)
             .padding(top = 72.dp)
             .background(Color.Black.copy(alpha = 0.6f), PleyShape.Pill)
             .padding(horizontal = 16.dp, vertical = 8.dp)
@@ -400,7 +404,7 @@ internal fun BoxScope.UnlockButton(state: PlayerScreenState) {
         Modifier
             // At the top, clear of subtitles.
             .align(Alignment.TopCenter)
-            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .windowInsetsPadding(WindowInsets.player)
             .padding(top = 24.dp)
             .heightIn(min = 48.dp)
             .clip(PleyShape.Pill)

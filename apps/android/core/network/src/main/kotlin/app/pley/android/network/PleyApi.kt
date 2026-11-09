@@ -3,6 +3,7 @@ package app.pley.android.network
 import app.pley.android.model.Added
 import app.pley.android.model.Approval
 import app.pley.android.model.Asked
+import app.pley.android.model.CastRequest
 import app.pley.android.model.CollectionDetail
 import app.pley.android.model.Decline
 import app.pley.android.model.DiscoverDetail
@@ -27,10 +28,12 @@ import app.pley.android.model.ItemDetail
 import app.pley.android.model.ItemIds
 import app.pley.android.model.ItemList
 import app.pley.android.model.ItemsPage
+import app.pley.android.model.DynamicRangeFilter
 import app.pley.android.model.Library
 import app.pley.android.model.LibraryFilters
 import app.pley.android.model.LibraryIds
 import app.pley.android.model.LibrarySort
+import app.pley.android.model.ResolutionFilter
 import app.pley.android.model.LiveCategory
 import app.pley.android.model.LiveChannel
 import app.pley.android.model.LiveChannelPage
@@ -52,11 +55,14 @@ import app.pley.android.model.NewPlaylist
 import app.pley.android.model.PersonDetail
 import app.pley.android.model.PlaybackInfo
 import app.pley.android.model.PlaybackRequest
+import app.pley.android.model.PlayerCommandRequest
+import app.pley.android.model.PlayingSession
 import app.pley.android.model.PlaylistDetail
 import app.pley.android.model.PlaylistList
 import app.pley.android.model.PlaylistPatch
 import app.pley.android.model.ProgressReport
 import app.pley.android.model.RatingRequest
+import app.pley.android.model.RemoteDevice
 import app.pley.android.model.SearchResults
 import app.pley.android.model.ServerInfo
 import app.pley.android.model.SessionStatus
@@ -103,11 +109,18 @@ interface PleyApi {
     /** GET /api/health: `{ "status": "ok" }` while the server runs. No token needed. */
     suspend fun health(): Health
 
-    /** GET /api/server: the server's name and version. No token needed. */
+    /** GET /api/server: the server's name, version and language. No token needed. */
     suspend fun server(): ServerInfo
 
     /** GET /api/auth/me: the profile the app acts as, and what it was allowed. Any app token. */
     suspend fun me(): Me
+
+    /**
+     * PUT /api/me/language: the language Pley is in for the profile ("en",
+     * "fr", "es"), `null` for the server's; the profile, as [me] answers it.
+     * Scope `play`.
+     */
+    suspend fun setLanguage(language: String?): Me
 
     /**
      * GET /api/users/{id}/avatar: a profile's picture (JPEG, 256 px). Apps
@@ -146,8 +159,9 @@ interface PleyApi {
     /**
      * GET /api/libraries/{id}/items: a page of the library's top-level
      * items. [order] `null` is the server's default for [sort]; [watched]
-     * true matches shows whose every episode is watched. Without [limit],
-     * every item from [offset].
+     * true matches shows whose every episode is watched; [resolution] and
+     * [dynamicRange] match a title's best file (a show's best episode).
+     * Without [limit], every item from [offset].
      */
     suspend fun libraryItems(
         libraryId: Long,
@@ -156,11 +170,13 @@ interface PleyApi {
         watched: Boolean? = null,
         genre: String? = null,
         year: Int? = null,
+        resolution: ResolutionFilter? = null,
+        dynamicRange: DynamicRangeFilter? = null,
         offset: Int = 0,
         limit: Int? = null,
     ): ItemsPage
 
-    /** GET /api/libraries/{id}/filters: the genres and years to filter [libraryItems] by. */
+    /** GET /api/libraries/{id}/filters: the genres, years, resolutions and dynamic ranges to filter [libraryItems] by. */
     suspend fun libraryFilters(libraryId: Long): LibraryFilters
 
     /** GET /api/libraries/{id}/hubs: the library's rows (continue watching, recently added and released, top rated). */
@@ -240,11 +256,11 @@ interface PleyApi {
     suspend fun watchlist(): ItemList
 
     /**
-     * GET /api/search: titles by relevance, and people. [limit] at most
-     * 200; 60 by default, a few rows of a grid (the server's own default
-     * is 40).
+     * GET /api/search: titles by relevance, people and Live TV channels,
+     * up to [limit] of each: 200 by default, the most the server gives,
+     * so every result shows (the server's own default is 40).
      */
-    suspend fun search(query: String, limit: Int = 60): SearchResults
+    suspend fun search(query: String, limit: Int = 200): SearchResults
 
     // ---------------------------------------------------------------- playback (scope play)
 
@@ -320,6 +336,41 @@ interface PleyApi {
 
     /** GET /api/files/{id}/chapters/{n}.jpg: the picture of chapter [chapter] (0-based), once the file has previews. */
     fun chapterImageUrl(fileId: Long, chapter: Int, version: String? = null): String
+
+    // ---------------------------------------------------------------- remote control (docs/API.md, "Remote control")
+
+    /** GET /api/sessions (scope play): the profile's sessions whose players are there, this device's too, oldest first. */
+    suspend fun playingSessions(): List<PlayingSession>
+
+    /**
+     * POST /api/sessions/{id}/command (scope play): sends the player of
+     * [sessionId] a command, which it acts on and then reports. Refusals
+     * are [ApiException]s; [CommandRefusal.of] says which.
+     */
+    suspend fun sendCommand(sessionId: String, command: PlayerCommandRequest)
+
+    /**
+     * DELETE /api/sessions/{id} (scope play): stops one of the profile's
+     * sessions, on another device, at once; its player says so. One
+     * stopped already is fine.
+     */
+    suspend fun stopSession(sessionId: String)
+
+    /**
+     * GET /api/remote/devices?household=1 (scope play): the profile's
+     * devices that take casts (docs/API.md, "Casting"), this one too, and
+     * those of the household's other profiles that switch to the caster's,
+     * one each, by name.
+     */
+    suspend fun remoteDevices(): List<RemoteDevice>
+
+    /**
+     * POST /api/remote/devices/{id}/cast (scope play): sends receiver
+     * [receiverId] something to play, as its own Play would; `202` once it
+     * is on its way. Refusals are [ApiException]s; [CastRefusal.of] says
+     * which.
+     */
+    suspend fun cast(receiverId: String, request: CastRequest)
 
     /** POST /api/items/{id}/progress: where the player is, every ~10 s, on pause and on closing. */
     suspend fun reportProgress(itemId: Long, report: ProgressReport)
@@ -406,6 +457,13 @@ interface PleyApi {
      * when it isn't known by then.
      */
     suspend fun livePlan(sessionId: String): LivePlan?
+
+    /**
+     * GET /api/live/channels/{id}/stream.ts: the channel's MPEG-TS as the
+     * provider sends it, for [clientId] (reading it ends that device's HLS
+     * viewer), saying what kind of device reads it, as a watch request does.
+     */
+    fun liveStreamUrl(channelId: Long, clientId: String): String
 
     /** DELETE /api/live/sessions/{session} (scope play): stops watching now; a session already gone is fine. */
     suspend fun leaveChannel(sessionId: String)

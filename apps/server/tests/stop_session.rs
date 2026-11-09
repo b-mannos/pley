@@ -1,16 +1,16 @@
 //! Stopping a playback session from elsewhere (docs/API.md, "Stopping a
-//! stream"): `DELETE /api/sessions/{id}` and the Plex API's
-//! `/status/sessions/terminate`.
+//! stream"): `DELETE /api/sessions/{id}`, which Jellyfin's players hear of
+//! too.
 
 mod common;
 
 use std::time::Duration;
 
-use axum::http::{Method, StatusCode};
+use axum::http::{Method, StatusCode, header};
 use futures::StreamExt;
 use serde_json::{Value, json};
 
-use common::{TestApp, encode};
+use common::TestApp;
 
 /// What a browser playing Matroska directly says it plays.
 const CAPS: &str = r#"{"containers": ["mkv"], "video_codecs": ["h264"], "audio_codecs": ["aac"]}"#;
@@ -21,6 +21,7 @@ struct World {
     viewer: String,
     viewer_id: i64,
     other: String,
+    other_id: i64,
     film: i64,
 }
 
@@ -31,8 +32,8 @@ async fn world() -> World {
     let movies = app.library(&admin, "Movies", "movies", "movies").await;
     let film = app.ids(movies, &admin).await["Film"];
     let (viewer, viewer_id) = app.user(&admin, "viewer", json!({})).await;
-    let (other, _) = app.user(&admin, "other", json!({})).await;
-    World { app, admin, viewer, viewer_id, other, film }
+    let (other, other_id) = app.user(&admin, "other", json!({})).await;
+    World { app, admin, viewer, viewer_id, other, other_id, film }
 }
 
 /// A direct play of the film by `token`'s user: its session id.
@@ -168,40 +169,103 @@ async fn users_stop_their_own_sessions() {
     assert_eq!(stopped_event(&heard)["by_admin"], json!(false));
 }
 
+/// Tokens of an app by another publisher acting as `user_id`, allowed `scope`.
+async fn third_party_token(w: &World, user_id: i64, scope: &str) -> String {
+    let issued = w
+        .app
+        .state
+        .auth
+        .issue(pley::auth::grants::NewGrant {
+            user_id,
+            approved_by: user_id,
+            client_id: "https://apps.example.com/player.json".into(),
+            client_name: Some("Example Player".into()),
+            scopes: pley::auth::scopes::Scopes::parse(scope).unwrap(),
+            refresh: true,
+            first_party: false,
+            session_hash: None,
+            user_agent: None,
+            ip: None,
+        })
+        .await
+        .unwrap();
+    issued.access_token
+}
+
 #[tokio::test]
-async fn plex_tools_terminate_sessions() {
+async fn an_administrators_own_app_allowed_activity_stops_anyones_session() {
     let w = world().await;
     let app = &w.app;
     let session = play(&w, &w.viewer).await;
-    let sessions = app.plex_json("/status/sessions", &w.admin).await;
-    assert_eq!(sessions["Metadata"][0]["Session"]["id"], json!(session));
+    let uri = format!("/api/sessions/{session}");
 
-    let terminate = format!("/status/sessions/terminate?sessionId={session}&reason={}", encode("Too many streams"));
-    assert_eq!(app.plex(Method::GET, &terminate, &w.viewer, &[]).await.status, StatusCode::FORBIDDEN);
-    let missing = app.plex(Method::GET, "/status/sessions/terminate", &w.admin, &[]).await;
-    assert_eq!(missing.status, StatusCode::BAD_REQUEST);
-    let unknown = app.plex(Method::GET, "/status/sessions/terminate?sessionId=nope", &w.admin, &[]).await;
-    assert_eq!(unknown.status, StatusCode::NOT_FOUND);
-    let ended = app.plex(Method::GET, &terminate, &w.admin, &[]).await;
-    assert_eq!(ended.status, StatusCode::OK, "{}", ended.text());
-    assert_eq!(app.plex_json("/status/sessions", &w.admin).await["size"], json!(0));
-    let gone = app.get(&format!("/api/playback/{session}"), &w.viewer).await;
-    assert_eq!((gone.status, gone.body["message"].clone()), (StatusCode::GONE, json!("Too many streams")));
+    // Apps that may only play, an administrator's included, stop their
+    // profile's own; so does another publisher's app allowed activity
+    // (without play: either opens the route), and a non-administrator's own
+    // app allowed it.
+    let (play_only, _) = app.app_token(1, "library play").await;
+    let other = third_party_token(&w, 1, "library activity").await;
+    let (others_own, _) = app.app_token(w.other_id, "library play activity").await;
+    for token in [&play_only, &other, &others_own] {
+        let refused = app.app_call(Method::DELETE, &uri, token, None).await;
+        assert_eq!(refused.status, StatusCode::FORBIDDEN, "{}", refused.text());
+    }
+    assert!(app.state.sessions.get(&session).is_some(), "still playing");
+    // Each stops its own profile's session all the same.
+    let own = play(&w, &w.admin).await;
+    let stopped = app.app_call(Method::DELETE, &format!("/api/sessions/{own}"), &other, None).await;
+    assert_eq!(stopped.status, StatusCode::NO_CONTENT, "{}", stopped.text());
+    let theirs = play(&w, &w.other).await;
+    let stopped = app.app_call(Method::DELETE, &format!("/api/sessions/{theirs}"), &others_own, None).await;
+    assert_eq!(stopped.status, StatusCode::NO_CONTENT, "{}", stopped.text());
 
-    // A Plex player's reports don't start a stopped session again.
-    let client = [("x-plex-client-identifier", "living-room")];
-    let timeline = format!("/:/timeline?ratingKey={}&time=10000&state=playing", w.film);
-    app.plex(Method::GET, &timeline, &w.viewer, &client).await;
-    let plex_session = app.plex_json("/status/sessions", &w.admin).await["Metadata"][0]["Session"]["id"].clone();
-    let plex_session = plex_session.as_str().unwrap().to_owned();
-    let terminate = format!("/status/sessions/terminate?sessionId={plex_session}");
-    assert_eq!(app.plex(Method::GET, &terminate, &w.admin, &[]).await.status, StatusCode::OK);
-    app.plex(Method::GET, &timeline, &w.viewer, &client).await;
-    assert_eq!(app.plex_json("/status/sessions", &w.admin).await["size"], json!(0));
+    // An app allowed neither play nor activity can't stop any.
+    let (library, _) = app.app_token(1, "library").await;
+    let refused = app.app_call(Method::DELETE, &uri, &library, None).await;
+    assert_eq!((refused.status, &refused.body["code"]), (StatusCode::FORBIDDEN, &json!("insufficient_scope")));
+    assert_eq!(refused.headers[header::WWW_AUTHENTICATE], r#"Bearer error="insufficient_scope", scope="play""#);
+
+    // One of pley's own apps on the administrator's account, allowed
+    // activity (play or not): the viewer's session, as the dashboard stops
+    // it.
+    let (oversees, _) = app.app_token(1, "library activity").await;
+    let stop = async {
+        let body = Some(json!({"message": "Bedtime"}));
+        let stopped = app.app_call(Method::DELETE, &uri, &oversees, body).await;
+        assert_eq!(stopped.status, StatusCode::NO_CONTENT, "{}", stopped.text());
+    };
+    let heard = events_until(&w, &w.viewer, stop, "session_stopped").await;
+    let expected = json!({"type": "session_stopped", "session_id": session, "message": "Bedtime", "by_admin": true});
+    assert_eq!(stopped_event(&heard), expected);
+    assert_eq!(app.get(&format!("/api/playback/{session}"), &w.viewer).await.status, StatusCode::GONE);
+    assert_eq!(app.app_call(Method::DELETE, &uri, &oversees, None).await.status, StatusCode::NO_CONTENT, "again");
+    assert_eq!(app.app_call(Method::DELETE, &uri, &play_only, None).await.status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn a_jellyfin_players_reports_dont_start_a_stopped_session_again() {
+    let w = world().await;
+    let (app, viewer) = (&w.app, w.viewer.as_str());
+    let film = app.jf_item(w.film);
+    let report = |path: &'static str, ms: i64| {
+        let body = json!({"ItemId": film, "PositionTicks": ms * 10_000});
+        async move {
+            let reply = app.jf(Method::POST, &format!("/Sessions/Playing{path}"), viewer, Some(body)).await;
+            assert_eq!(reply.status, StatusCode::NO_CONTENT, "{}", reply.text());
+        }
+    };
+    report("", 10_000).await;
+    let sessions = app.state.sessions.list();
+    assert_eq!(sessions.len(), 1, "the player's reports make a session");
+    assert_eq!(sessions[0].client_id.as_deref(), Some("bench-1"), "keyed by the device");
+    let session = sessions[0].id.clone();
+
+    assert_eq!(app.delete(&format!("/api/sessions/{session}"), &w.admin).await.status, StatusCode::NO_CONTENT);
+    report("/Progress", 12_000).await;
+    assert!(app.state.sessions.list().is_empty(), "the player hasn't heard yet");
 
     // Once that player stops too, playing the title again shows up.
-    let stop = format!("/:/timeline?ratingKey={}&time=12000&state=stopped", w.film);
-    app.plex(Method::GET, &stop, &w.viewer, &client).await;
-    app.plex(Method::GET, &timeline, &w.viewer, &client).await;
-    assert_eq!(app.plex_json("/status/sessions", &w.admin).await["size"], json!(1));
+    report("/Stopped", 12_000).await;
+    report("", 12_000).await;
+    assert_eq!(app.state.sessions.list().len(), 1);
 }

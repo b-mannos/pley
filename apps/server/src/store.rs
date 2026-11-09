@@ -56,8 +56,19 @@ const CACHES: &[(&str, Duration)] = &[
     ("discover", Duration::from_secs(30 * DAY)),     // discover/pictures.rs: TMDB's pictures
 ];
 
-/// Hosts pictures may be downloaded from (metadata providers' image servers).
-const IMAGE_HOSTS: &[&str] = &["image.tmdb.org", "static.tvmaze.com", "artworks.thetvdb.com", "coverartarchive.org"];
+/// Hosts pictures may be downloaded from: metadata providers' image servers,
+/// and those library tools take artwork from (fanart.tv, ThePosterDB, and
+/// GitHub's raw files for Kometa's own). Public hosts only, so that no
+/// address can turn a download towards this network.
+const IMAGE_HOSTS: &[&str] = &[
+    "image.tmdb.org",
+    "static.tvmaze.com",
+    "artworks.thetvdb.com",
+    "coverartarchive.org",
+    "assets.fanart.tv",
+    "theposterdb.com",
+    "raw.githubusercontent.com",
+];
 
 /// Whether a stored reference is a blob (as opposed to a local file path).
 pub fn is_blob(reference: &str) -> bool {
@@ -262,18 +273,47 @@ impl Store {
     /// A picture from the internet, downloaded the first time and reused
     /// after that (image URLs of metadata providers change with the picture).
     pub async fn remote(&self, url: &str) -> anyhow::Result<String> {
+        if let Some(blob) = self.known_remote(url).await? {
+            return Ok(blob);
+        }
+        let bytes = self.fetch(url).await?;
+        let ext = picture_ext(&bytes).with_context(|| format!("{url} is not a picture"))?;
+        let blob = self.put(&bytes, ext).await?;
+        sqlx::query("INSERT OR REPLACE INTO remote_images (url, blob, fetched_at) VALUES (?, ?, ?)")
+            .bind(url)
+            .bind(&blob)
+            .bind(now())
+            .execute(&self.db.write)
+            .await?;
+        Ok(blob)
+    }
+
+    /// The bytes of a picture from the internet, as [`Self::remote`] gets
+    /// them but not stored: a picture someone chose by its address. Some of
+    /// the hosts serve anyone's files, so the caller decodes and re-encodes
+    /// it as an upload before storing it.
+    pub async fn download(&self, url: &str) -> anyhow::Result<Vec<u8>> {
+        if let Some(path) = self.known_remote(url).await?.and_then(|blob| self.path(&blob)) {
+            return Ok(tokio::fs::read(path).await?);
+        }
+        self.fetch(url).await
+    }
+
+    /// The blob a picture from `url` was stored as, if it still is.
+    async fn known_remote(&self, url: &str) -> anyhow::Result<Option<String>> {
         let known: Option<String> = sqlx::query_scalar("SELECT blob FROM remote_images WHERE url = ?")
             .bind(url)
             .fetch_optional(&self.db.read)
             .await?;
-        if let Some(blob) = known {
-            if let Some(name) = blob.strip_prefix(BLOB_PREFIX) {
-                self.hand_out(name);
-            }
-            if self.exists(&blob) {
-                return Ok(blob);
-            }
+        let Some(blob) = known else { return Ok(None) };
+        if let Some(name) = blob.strip_prefix(BLOB_PREFIX) {
+            self.hand_out(name);
         }
+        Ok(self.exists(&blob).then_some(blob))
+    }
+
+    /// Downloads `url` from one of the image hosts, up to [`MAX_REMOTE_BYTES`].
+    async fn fetch(&self, url: &str) -> anyhow::Result<Vec<u8>> {
         if !allowed_image_url(url) {
             bail!("pictures are not downloaded from {url}");
         }
@@ -287,15 +327,7 @@ impl Store {
             anyhow::ensure!(bytes.len() + chunk.len() <= MAX_REMOTE_BYTES, "{url} is too large");
             bytes.extend_from_slice(&chunk);
         }
-        let ext = picture_ext(&bytes).with_context(|| format!("{url} is not a picture"))?;
-        let blob = self.put(&bytes, ext).await?;
-        sqlx::query("INSERT OR REPLACE INTO remote_images (url, blob, fetched_at) VALUES (?, ?, ?)")
-            .bind(url)
-            .bind(&blob)
-            .bind(now())
-            .execute(&self.db.write)
-            .await?;
-        Ok(blob)
+        Ok(bytes)
     }
 
     /// Folder of files generated from the media file with this fingerprint.
@@ -790,11 +822,16 @@ mod tests {
         assert!(!allowed_image_url("http://image.tmdb.org/t/p/w780/x.jpg"));
         assert!(!allowed_image_url("https://image.tmdb.org.evil.com/x.jpg"));
         assert!(!allowed_image_url("https://localhost/x.jpg"));
+        assert!(allowed_image_url("https://raw.githubusercontent.com/team/images/master/poster.jpg"));
+        assert!(allowed_image_url("https://theposterdb.com/api/assets/1"));
+        assert!(!allowed_image_url("https://raw.githubusercontent.com@169.254.169.254/x.jpg"));
+        assert!(!allowed_image_url("https://raw.githubusercontent.com:8443/x.jpg"));
+        assert!(!allowed_image_url("https://theposterdb.com.example/x.jpg"));
     }
 
     #[tokio::test]
     async fn same_picture_is_stored_once() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let db = Db::open(&dir.path().join("pley.db")).await.unwrap();
         let store = Store::new(db, &dir.path().join("metadata"), &dir.path().join("media"), &dir.path().join("cache"));
         let a = store.put(b"\xff\xd8\xff\xe0 picture", "jpg").await.unwrap();
@@ -813,7 +850,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn a_picture_swapped_for_a_link_to_another_file_is_no_picture() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let store = store_in(dir.path()).await;
         let secret = dir.path().join("secret.key");
         std::fs::write(&secret, b"secret").unwrap();
@@ -836,7 +873,7 @@ mod tests {
 
     #[tokio::test]
     async fn clean_up_spares_what_is_used_and_what_is_new() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let store = store_in(dir.path()).await;
         let used = store.put(b"\xff\xd8\xff\xe0 used", "jpg").await.unwrap();
         let unused = store.put(b"\xff\xd8\xff\xe0 unused", "jpg").await.unwrap();
@@ -901,7 +938,7 @@ mod tests {
 
     #[tokio::test]
     async fn pictures_used_again_stay_until_their_reference_is_saved() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let store = store_in(dir.path()).await;
         let (poster, photo, unused) =
             (b"\xff\xd8\xff\xe0 poster", b"\xff\xd8\xff\xe0 photo", b"\xff\xd8\xff\xe0 unused");
@@ -938,7 +975,7 @@ mod tests {
     async fn what_is_handed_out_during_a_clean_up_stays() {
         // The steps of clean_older_than(0), with a refresh and a file moved
         // back between its snapshot of references and its sweeps.
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let store = store_in(dir.path()).await;
         let bytes = b"\xff\xd8\xff\xe0 poster";
         let blob = store.put(bytes, "jpg").await.unwrap();
@@ -971,7 +1008,7 @@ mod tests {
 
     #[tokio::test]
     async fn downloads_are_forgotten_after_the_grace_period_only() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let store = store_in(dir.path()).await;
         let fresh = store.put(b"\xff\xd8\xff\xe0 fresh", "jpg").await.unwrap();
         let old = store.put(b"\xff\xd8\xff\xe0 old", "jpg").await.unwrap();
@@ -999,7 +1036,7 @@ mod tests {
 
     #[tokio::test]
     async fn old_cache_files_go() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let store = store_in(dir.path()).await;
         let cache = dir.path().join("cache");
         let files = [
@@ -1044,7 +1081,7 @@ mod tests {
 
     #[tokio::test]
     async fn downloads_are_reused_and_only_from_image_hosts() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let store = store_in(dir.path()).await;
         let blob = store.put(b"\x89PNG\r\n\x1a\n known", "png").await.unwrap();
         let url = "https://image.tmdb.org/t/p/original/known.png";
@@ -1082,7 +1119,7 @@ mod tests {
 
     #[tokio::test]
     async fn unreadable_files_get_an_empty_fingerprint_and_are_retried_when_they_change() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let store = store_in(dir.path()).await;
         let readable = dir.path().join("a.mkv");
         std::fs::write(&readable, vec![1u8; 100]).unwrap();
@@ -1149,7 +1186,7 @@ mod tests {
 
     #[tokio::test]
     async fn fingerprinting_gives_up_when_saving_fails() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let store = pending_files(dir.path(), 300).await;
         // Saving fails, as on a full disk; the trigger counts the attempts.
         for sql in [
@@ -1172,7 +1209,7 @@ mod tests {
 
     #[tokio::test]
     async fn fingerprinting_moves_past_files_it_cannot_save() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let store = pending_files(dir.path(), 4).await;
         // One update fails, one changes nothing: neither stops the others.
         for sql in [

@@ -1,5 +1,7 @@
 ' An album (GET /api/items/{id}, its tracks /children): Play, Shuffle and
-' OK on a track hand its tracks to the music player and open Now Playing.
+' OK on a track hand its tracks to the music player and open Now Playing;
+' as on the other TVs, Go to artist opens its artist's page, and Now
+' playing goes back to the music while it plays.
 ' On several discs, each disc's tracks are under its heading, a row of
 ' the list that the focus passes over (lib/Music.brs, musicDiscRows).
 ' params: { id, title (shown until the server answers), trackId (the
@@ -13,6 +15,7 @@ sub init()
     m.buttons = m.top.findNode("buttons")
     m.tracks = m.top.findNode("tracks")
     m.message = m.top.findNode("message")
+    m.message.text = t("common.states.loading")
     m.started = false
     m.album = invalid
     m.queue = []
@@ -20,7 +23,10 @@ sub init()
     ' it was going when it lands on a heading.
     m.trackRow = 0
     m.lastFocus = m.buttons
-    m.buttons.buttons = ["Play", "Shuffle"]
+    ' What the buttons do, in their order: "play", "shuffle", "artist",
+    ' "nowPlaying".
+    m.actions = []
+    showButtons()
     m.buttons.observeField("buttonSelected", "onButton")
     m.tracks.observeField("itemSelected", "onTrack")
     m.tracks.observeField("itemFocused", "onTrackFocused")
@@ -35,6 +41,8 @@ sub onActive()
     end if
     uiChangesSince()
     if m.started
+        ' Now playing comes and goes with the music.
+        showButtons()
         if m.lastFocus.isSameNode(m.tracks)
             focusTracks()
         else if m.buttons.visible
@@ -65,6 +73,7 @@ sub onAlbum(event as object)
     m.album = answer.data
     m.title.text = httpSentence(m.album.title)
     showLine()
+    showButtons()
     image = contentTileImage(m.album, m.global.session.server, false, 420)
     agent = m.top.getScene().getHttpAgent()
     m.cover.setHttpAgent(agent)
@@ -87,7 +96,7 @@ sub onTracks(event as object)
     m.tracks.content = event.getRoSGNode().content
     showLine()
     if m.queue.Count() = 0
-        m.message.text = "This album has no tracks."
+        m.message.text = t("titles.music.noTracks")
         return
     end if
     m.message.visible = false
@@ -146,8 +155,36 @@ sub play(at as integer, shuffled as boolean)
     uiNavigate({ to: "nowPlaying" })
 end sub
 
+' Play and Shuffle, Go to artist once the album says whose it is, and Now
+' playing while music plays; the focus stays on the button it was on.
+sub showButtons()
+    actions = ["play", "shuffle"]
+    labels = [t("common.actions.play"), t("titles.actions.shuffle")]
+    if m.album <> invalid and httpNumber(m.album.parent_id, 0) > 0
+        actions.Push("artist")
+        labels.Push(t("titles.actions.goToArtist"))
+    end if
+    if m.global.music.state <> "stopped"
+        actions.Push("nowPlaying")
+        labels.Push(t("titles.actions.nowPlaying"))
+    end if
+    m.actions = actions
+    if FormatJson(labels) <> FormatJson(m.buttons.buttons)
+        focused = m.buttons.buttonFocused
+        m.buttons.buttons = labels
+        if focused > 0 and focused < labels.Count() then m.buttons.focusButton = focused
+    end if
+end sub
+
 sub onButton(event as object)
-    play(0, event.getData() = 1)
+    action = m.actions[event.getData()]
+    if action = "artist"
+        uiNavigate({ to: "artist", params: { id: httpNumber(m.album.parent_id, 0), title: httpSentence(m.album.parent_title) } })
+    else if action = "nowPlaying"
+        uiNavigate({ to: "nowPlaying" })
+    else
+        play(0, action = "shuffle")
+    end if
 end sub
 
 sub onTrack(event as object)

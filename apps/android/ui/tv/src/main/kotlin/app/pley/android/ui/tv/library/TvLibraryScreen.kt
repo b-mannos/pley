@@ -1,10 +1,14 @@
 package app.pley.android.ui.tv.library
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,13 +16,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
@@ -30,6 +37,8 @@ import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
@@ -59,7 +68,10 @@ import app.pley.android.screens.library.LibraryViewModel
 import app.pley.android.screens.library.TileLook
 import app.pley.android.screens.screensGraph
 import app.pley.android.ui.tv.R
+import app.pley.android.ui.tv.item.tileActions
 import app.pley.android.ui.tv.kit.FocusMemory
+import app.pley.android.ui.tv.kit.TvScrolling
+import app.pley.android.ui.tv.kit.railFade
 import app.pley.android.ui.tv.kit.rememberFocusMemory
 import app.pley.android.ui.tv.kit.rememberedFocus
 import app.pley.android.ui.tv.shell.LocalTvNavigator
@@ -73,18 +85,19 @@ import kotlinx.coroutines.launch
 /**
  * A library's page on TV (design spec §4.2, mockup tv-library): the name
  * at the top left and the tabs on the same line at the right, then the
- * tab: the Library tab's chips (Sort, Filter, Unwatched, Genre, Year and
- * the count) over a grid of six posters a row with the A to Z jump beside
- * it; the Recommended tab's rows; the Collections tab's grid. Sort and
- * filters open in a side panel. The first tile has focus, or the one
- * focused last when coming back.
+ * tab: the Library tab's chips (Sort, Filter, Unwatched, Genre, Year, the
+ * resolution and dynamic range while one is chosen, and the count) over a
+ * grid of six posters a row with the A to Z jump beside it; the
+ * Recommended tab's rows; the Collections tab's grid. Sort and filters
+ * open in a side panel. The first tile has focus, or the one focused last
+ * when coming back.
  */
 @Composable
 internal fun TvLibraryScreen(key: PleyKey.Library) {
     var saved by rememberSaveable { mutableStateOf<String?>(null) }
-    val resources = LocalResources.current
+    val context = LocalContext.current
     val vm: LibraryViewModel<ArtworkTileModel> = viewModel {
-        LibraryViewModel(key.libraryId, key.tab, saved, LibraryDeps.of(screensGraph()), TvTiles(resources), key.view)
+        LibraryViewModel(key.libraryId, key.tab, saved, LibraryDeps.of(screensGraph()), TvTiles(context), key.view)
     }
     LaunchedEffect(vm) {
         vm.state.map { it.params.toQueryString() }.distinctUntilChanged().collect { saved = it }
@@ -106,11 +119,17 @@ private fun TvLibraryPage(state: LibraryUiState<ArtworkTileModel>, vm: LibraryVi
     // Down from the tabs enters the tab's content (the header sits apart from it on screen).
     val contentFocus = remember { FocusRequester() }
     var returnTo by remember { mutableStateOf<TvPanel?>(null) }
+    // The grids' focus, kept here while the page is covered: Back to the page lands on the tile it had.
+    val libraryGrid = remember { TvGridFocus() }
+    val collectionsGrid = remember { TvGridFocus() }
+    val params by rememberUpdatedState(state.params)
     LaunchedEffect(panel) {
         val chip = returnTo
         if (panel == null && chip != null) {
             withFrameNanos { }
-            runCatching { chips.getValue(chip).requestFocus() }
+            // A resolution's or dynamic range's chip goes with its choice: focus goes to Filter, where it is chosen.
+            val gone = (chip == TvPanel.Resolution && params.resolution == null) || (chip == TvPanel.DynamicRange && params.dynamicRange == null)
+            runCatching { chips.getValue(if (gone) TvPanel.Filter else chip).requestFocus() }
             returnTo = null
         }
     }
@@ -122,7 +141,7 @@ private fun TvLibraryPage(state: LibraryUiState<ArtworkTileModel>, vm: LibraryVi
     var switched by rememberSaveable { mutableStateOf(false) }
     val openedOn = state.openedOn
     val tab = state.params.tab
-    Box(Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize().backToGrid(memory, mapOf("grid/" to libraryGrid, "collections/" to collectionsGrid))) {
         when {
             state.missing -> TvMessage(
                 title = stringResource(R.string.tv_library_missing_title),
@@ -139,9 +158,9 @@ private fun TvLibraryPage(state: LibraryUiState<ArtworkTileModel>, vm: LibraryVi
             else -> tabs.SaveableStateProvider(tab) {
                 val initial = !switched && tab == openedOn
                 when (tab) {
-                    LibraryTab.Library -> TvLibraryTab(state, vm, memory, skeleton, initial, chips, tabFocus, contentFocus, onPanel = openPanel)
+                    LibraryTab.Library -> TvLibraryTab(state, vm, memory, skeleton, initial, libraryGrid, chips, tabFocus, contentFocus, onPanel = openPanel)
                     LibraryTab.Recommended -> TvRecommendedTab(state, vm, memory, initial, tabFocus, Modifier.focusRequester(contentFocus).upTo(tabFocus))
-                    LibraryTab.Collections -> TvCollectionsTab(state, vm, memory, skeleton, initial, tabFocus, contentFocus)
+                    LibraryTab.Collections -> TvCollectionsTab(state, vm, memory, skeleton, initial, collectionsGrid, tabFocus, contentFocus)
                 }
             }
         }
@@ -212,17 +231,18 @@ private fun TvLibraryTab(
     memory: FocusMemory,
     skeleton: SkeletonState,
     initial: Boolean,
+    focus: TvGridFocus,
     chips: Map<TvPanel, FocusRequester>,
     tabFocus: FocusRequester,
     contentFocus: FocusRequester,
     onPanel: (TvPanel) -> Unit,
 ) {
     val navigator = LocalTvNavigator.current
+    val actions = tileActions()
     val resources = LocalResources.current
     val params = state.params
     val music = state.kind == LibraryKind.Music
     val cells = state.grid.cells.valueOrNull
-    val focus = remember { TvGridFocus() }
     val grid = rememberTvGridState()
     val jump = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
@@ -230,7 +250,7 @@ private fun TvLibraryTab(
     val columns = tvGridColumns(kind)
 
     // A new sort or filter starts at the top.
-    val query = params.query().toString()
+    val query = remember(params) { params.query().toString() }
     var shownQuery by rememberSaveable { mutableStateOf(query) }
     LaunchedEffect(query) {
         if (shownQuery != query) {
@@ -244,11 +264,7 @@ private fun TvLibraryTab(
 
     Column(Modifier.fillMaxSize()) {
         Spacer(Modifier.height(ChipsTop))
-        Row(
-            Modifier.padding(start = PleyTv.Gutter, end = TvSafeArea.Horizontal).height(40.dp).focusRequester(contentFocus).upTo(tabFocus),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        ChipRow(Modifier.focusRequester(contentFocus).upTo(tabFocus)) {
             TvChip(
                 label = stringResource(tvSortLabel(params.sort)),
                 icon = if (params.effectiveOrder == SortOrder.Ascending) PleyIcons.ArrowUpNarrowWide else PleyIcons.ArrowDownWideNarrow,
@@ -282,6 +298,23 @@ private fun TvLibraryTab(
                         selected = params.year != null,
                         onClick = { onPanel(TvPanel.Year) },
                         modifier = Modifier.focusRequester(chips.getValue(TvPanel.Year)).rememberedFocus(memory, "chip/year"),
+                    )
+                }
+                // Resolution and dynamic range are chosen in the Filter panel; their chips show only what is chosen.
+                params.resolution?.let { resolution ->
+                    TvChip(
+                        label = resolution.label,
+                        selected = true,
+                        onClick = { onPanel(TvPanel.Resolution) },
+                        modifier = Modifier.focusRequester(chips.getValue(TvPanel.Resolution)).rememberedFocus(memory, "chip/resolution"),
+                    )
+                }
+                params.dynamicRange?.let { range ->
+                    TvChip(
+                        label = tvRangeLabel(range),
+                        selected = true,
+                        onClick = { onPanel(TvPanel.DynamicRange) },
+                        modifier = Modifier.focusRequester(chips.getValue(TvPanel.DynamicRange)).rememberedFocus(memory, "chip/dynamic_range"),
                     )
                 }
             }
@@ -331,8 +364,7 @@ private fun TvLibraryTab(
                 }
                 else -> {
                     // A tile its actions took out of the grid (watched, with Unwatched on): focus comes back to the one in its place.
-                    val tileKeys = remember(cells) { cells?.tiles?.mapTo(HashSet()) { "grid/${it.id}" }.orEmpty() }
-                    memory.settle { it in tileKeys }
+                    memory.settle { key -> gridTileId(key)?.let { id -> cells != null && cells.positionOf(id) >= 0 } == true }
                     TvPosterGrid(
                         total = cells?.total ?: SKELETONS,
                         tileAt = { cells?.get(it) },
@@ -344,7 +376,7 @@ private fun TvLibraryTab(
                             val at = cells?.positionOf(tile.id) ?: -1
                             val near = cells?.let { c -> listOf(c.idAt(at + 1), c.idAt(at - 1)).firstOrNull { at >= 0 && it >= 0 } }
                             memory.mayLeave("grid/${tile.id}", near?.let { "grid/$it" })
-                            navigator.open(PleyKey.ItemActions(tile.id))
+                            actions.open(tile.id, continueWatching = false)
                         },
                         memory = memory,
                         memoryPrefix = "grid",
@@ -378,6 +410,36 @@ private fun TvLibraryTab(
     }
 }
 
+/**
+ * The Library tab's chips at y = 80, from the gutter. The row is as wide as
+ * the page, so a chip's focus growth is never cut. When the chips and the
+ * count don't all fit short of the safe area's edge (every filter chosen,
+ * a long genre), it scrolls to its end as focus nears it, and back to its
+ * start ([TvScrolling.ends]).
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ChipRow(modifier: Modifier, content: @Composable RowScope.() -> Unit) {
+    val density = LocalDensity.current
+    val scroll = rememberScrollState()
+    val ends = remember(density, scroll) { with(density) { TvScrolling.ends(scroll, PleyTv.Gutter.toPx(), TvSafeArea.Horizontal.toPx()) } }
+    CompositionLocalProvider(LocalBringIntoViewSpec provides ends) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                // Scrolled, the first chips pass under the closed rail, which the page fades out as its rows do.
+                .railFade { scroll.value > 0 }
+                .horizontalScroll(scroll)
+                .padding(start = PleyTv.Gutter, end = TvSafeArea.Horizontal)
+                .height(40.dp)
+                .then(modifier),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            content = content,
+        )
+    }
+}
+
 /** The Collections tab: the count at y = 80, then the collections' posters with their counts, from y = 136. */
 @Composable
 private fun TvCollectionsTab(
@@ -386,6 +448,7 @@ private fun TvCollectionsTab(
     memory: FocusMemory,
     skeleton: SkeletonState,
     initial: Boolean,
+    focus: TvGridFocus,
     tabFocus: FocusRequester,
     contentFocus: FocusRequester,
 ) {
@@ -431,6 +494,7 @@ private fun TvCollectionsTab(
                     memory = memory,
                     memoryPrefix = "collections",
                     skeleton = skeleton,
+                    focus = focus,
                     initialFocus = initial,
                     badge = { list?.getOrNull(it)?.count?.toString() },
                     modifier = Modifier.fillMaxSize().focusRequester(contentFocus).upTo(tabFocus),
@@ -440,6 +504,9 @@ private fun TvCollectionsTab(
     }
 }
 
+/** The item id of a grid tile's focus key ("grid/<id>"); `null` for any other key. */
+private fun gridTileId(key: String): Long? = key.removePrefix("grid/").takeIf { it.length < key.length }?.toLongOrNull()
+
 /** Up out of this group goes to [target] (the tabs), not to whatever is geometrically nearest. */
 internal fun Modifier.upTo(target: FocusRequester): Modifier = focusProperties {
     val inner = onExit
@@ -448,6 +515,26 @@ internal fun Modifier.upTo(target: FocusRequester): Modifier = focusProperties {
         if (requestedFocusDirection == FocusDirection.Up) {
             cancelFocusChange()
             runCatching { target.requestFocus() }
+        }
+    }
+}.focusGroup()
+
+/**
+ * Focus coming back to the page (Back from a title, Right from the rail)
+ * lands on the tile it left when that was one of [grids]' (by its key's
+ * prefix in [memory]), as the Samsung app's grid comes back to its last
+ * child. The page's own restore stops at the grid's focus group, which
+ * keeps no child of its own, and the page's first element took it: the
+ * Title chip, above a grid at its top.
+ */
+private fun Modifier.backToGrid(memory: FocusMemory, grids: Map<String, TvGridFocus>): Modifier = focusProperties {
+    onEnter = {
+        val key = memory.key
+        val grid = grids.entries.firstOrNull { key != null && key.startsWith(it.key) }?.value
+        val at = grid?.focused ?: -1
+        if (requestedFocusDirection == FocusDirection.Enter && at >= 0 && grid?.slots?.has(at) == true) {
+            cancelFocusChange()
+            grid.focus(at)
         }
     }
 }.focusGroup()

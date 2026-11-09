@@ -1,6 +1,7 @@
 package app.pley.android.ui.tv.kit
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Stable
@@ -8,7 +9,6 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.pley.android.designsystem.PleyTv
-import app.pley.android.designsystem.TvSafeArea
 
 /**
  * Where scrolling puts what has focus (D-pad rule 4, with the design
@@ -18,10 +18,11 @@ import app.pley.android.designsystem.TvSafeArea
  *
  * - [root] at the TV's root: the focused element's leading edge at 0.3 of
  *   the viewport, Google's TV value, for grids and lists.
- * - [row] inside each row: the focused tile's left edge at the gutter
- *   (x = 96), so focus stays put and the row moves, as on Plex and Google TV.
+ * - [itself] inside each row: the row moves itself, its focused tile's
+ *   left edge to the gutter (x = 96), so focus stays put and the row moves,
+ *   as on Plex and Google TV ([TvRow]).
  * - [page] around a page of rows: the focused tile's top where its row's
- *   header lands at y = 188, just under the info block.
+ *   header lands at y = 172, just under the info block.
  *
  * Each only says where; a scroll that can't go that far stops at the end.
  */
@@ -31,14 +32,20 @@ object TvScrolling {
     fun root(fraction: Float = 0.3f): BringIntoViewSpec = FractionSpec(fraction)
 
     /**
-     * The focused tile's left edge at [anchor] from the row's left edge (the
-     * screen's). A row of [state] whose tiles all fit before the safe area's
-     * edge stays where it starts instead: anchoring would only move it part
-     * of the way, leaving its first tile cut under the rail.
+     * For what the kit moves itself, to keep to its durations ([TvMotion]):
+     * Compose's own scrolling to the focused element leaves it be.
      */
-    fun row(density: Density, state: LazyListState? = null, anchor: Dp = PleyTv.Gutter): BringIntoViewSpec = with(density) {
-        if (state != null) RowSpec(anchor.toPx(), TvSafeArea.Horizontal.toPx(), state) else AnchorSpec(anchor.toPx())
-    }
+    val itself: BringIntoViewSpec = ItselfSpec
+
+    /**
+     * A short row that may not fit (a page's chips), scrolled by [state]:
+     * it stays at its start or goes to its end, whichever keeps the focused
+     * element [start] from the viewport's leading edge and [end] from its
+     * trailing one (the gutter and the safe area's edge); only an element
+     * neither end shows so is moved just that far. What fits there doesn't
+     * move.
+     */
+    fun ends(state: ScrollState, start: Float, end: Float): BringIntoViewSpec = EndsSpec(state, start, end)
 
     /** Whether every tile of [state]'s row fits on screen unscrolled, short of [endRoom]; null before its first layout. */
     fun fits(state: LazyListState, endRoom: Float): Boolean? {
@@ -52,7 +59,7 @@ object TvScrolling {
 
     /**
      * The focused tile's top at [tileTop] from the page's top: by default
-     * the row header's line (y = 188) plus the header and its gap to the
+     * the row header's line (y = 172) plus the header and its gap to the
      * tiles.
      *
      * A page that starts with a hero ([heroHeight] tall, the first item of
@@ -85,18 +92,37 @@ object TvScrolling {
     }
 
     @Stable
-    private class AnchorSpec(private val anchor: Float) : BringIntoViewSpec {
-        override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float = offset - anchor
+    private object ItselfSpec : BringIntoViewSpec {
+        override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float = 0f
     }
 
     /**
-     * [AnchorSpec] for a row that scrolls; back to its start for one that
-     * fits. Asked again on every frame of a scroll, so it follows the row.
+     * Asked again on every frame of a scroll, so it decides by where the
+     * element is in the row, which the scroll doesn't change: the same end
+     * every time, until the row is there.
      */
     @Stable
-    private class RowSpec(private val anchor: Float, private val endRoom: Float, private val state: LazyListState) : BringIntoViewSpec {
-        override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float =
-            if (fits(state, endRoom) == true) state.layoutInfo.visibleItemsInfo.first().offset.toFloat() else offset - anchor
+    private class EndsSpec(private val state: ScrollState, private val start: Float, private val end: Float) : BringIntoViewSpec {
+        override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+            val scrolled = state.value.toFloat()
+            val max = state.maxValue.toFloat()
+            val last = containerSize - end
+            val inRow = offset + scrolled
+            fun shows(at: Float) = inRow - at >= start && inRow - at + size <= last
+            val target = when {
+                shows(0f) -> 0f
+                shows(max) -> max
+                offset < start -> scrolled + offset - start
+                offset + size > last -> scrolled + offset + size - last
+                else -> scrolled
+            }
+            return target - scrolled
+        }
+    }
+
+    @Stable
+    private class AnchorSpec(private val anchor: Float) : BringIntoViewSpec {
+        override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float = offset - anchor
     }
 
     /**

@@ -45,6 +45,8 @@ import app.pley.android.ui.phone.kit.EmptyState
 import app.pley.android.ui.phone.kit.ErrorState
 import app.pley.android.ui.phone.kit.PleyTopAppBar
 import app.pley.android.ui.phone.kit.StarRating
+import app.pley.android.ui.phone.library.joined
+import app.pley.android.ui.phone.remote.CastTarget
 import app.pley.android.ui.phone.shell.LocalPhoneNavigator
 import app.pley.android.ui.phone.shell.LocalPhoneShell
 import app.pley.android.ui.phone.shell.ReportLoad
@@ -117,11 +119,12 @@ internal fun AlbumScreen(albumId: Long, trackId: Long?) {
                                 round = false,
                                 kind = stringResource(R.string.music_album),
                                 title = page.title,
-                                lines = listOf(listOfNotNull(page.year?.toString(), page.meta.ifEmpty { null }).joinToString(" · ")).filter { it.isNotEmpty() },
+                                lines = listOf(listOfNotNull(page.year?.toString(), page.metaTexts.joined(resources).ifEmpty { null }).joinToString(" · ")).filter { it.isNotEmpty() },
                                 busy = false,
                                 playEnabled = page.tracksLoading || page.tracks.isNotEmpty(),
                                 onPlay = { model.play(0) },
                                 onShuffle = model::shuffle,
+                                playOn = CastTarget(itemId = albumId, shuffles = true).takeIf { page.tracks.isNotEmpty() },
                                 extra = {
                                     val artistId = page.artistId
                                     if (page.artist != null) {

@@ -7,7 +7,7 @@ mod common;
 
 use std::io::Write;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use axum::Router;
@@ -36,6 +36,10 @@ struct Provider {
     open: AtomicUsize,
     most: AtomicUsize,
     opened: AtomicUsize,
+    /// Guides asked for, and while `held`, guides kept back until `released`.
+    guides: AtomicUsize,
+    held: AtomicBool,
+    released: tokio::sync::Notify,
 }
 
 struct Open(Arc<Provider>);
@@ -56,16 +60,20 @@ fn guide_xml() -> Vec<u8> {
 <tv>
   <channel id="one.test"><display-name>One</display-name></channel>
   <channel id="two.test"><display-name>Two HD</display-name></channel>
+  <channel id="quiz.test"><display-name>Quiz Time</display-name></channel>
   <programme start="{}" stop="{}" channel="one.test"><title>The News</title><desc>What happened.</desc><category>News</category></programme>
   <programme start="{}" stop="{}" channel="one.test"><title>The Film</title></programme>
   <programme start="{}" stop="{}" channel="two.test"><title>Football</title><live/></programme>
+  <programme start="{}" stop="{}" channel="quiz.test"><title>The Quiz</title></programme>
 </tv>"#,
         at(-600),
         at(1200),
         at(1200),
         at(7200),
         at(-60),
-        at(5400)
+        at(5400),
+        at(-300),
+        at(3600)
     );
     let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
     gz.write_all(xml.as_bytes()).unwrap();
@@ -101,14 +109,23 @@ async fn provider() -> (String, Arc<Provider>) {
          {base}/live/1.ts\n\
          #EXTINF:-1 tvg-chno=\"2\" group-title=\"Sport\",Two HD\n\
          {base}/live/2.ts\n\
-         #EXTINF:-1 tvg-chno=\"10\" group-title=\"Sport\",Ten\n\
+         #EXTINF:-1 tvg-id=\"ten.missing\" tvg-chno=\"10\" group-title=\"Sport\",Ten\n\
          {base}/live/10.ts\n\
          #EXTINF:-1 group-title=\"Films\",A film\n\
          {base}/movie/u/p/5.mkv\n"
     );
     let app = Router::new()
         .route("/list.m3u", get(move || async move { playlist }))
-        .route("/guide.xml.gz", get(|| async { ([(header::CONTENT_TYPE, "application/gzip")], guide_xml()) }))
+        .route(
+            "/guide.xml.gz",
+            get(|State(counts): State<Arc<Provider>>| async move {
+                counts.guides.fetch_add(1, Ordering::SeqCst);
+                if counts.held.load(Ordering::SeqCst) {
+                    counts.released.notified().await;
+                }
+                ([(header::CONTENT_TYPE, "application/gzip")], guide_xml())
+            }),
+        )
         .route("/logo.png", get(|| async { ([(header::CONTENT_TYPE, "image/png")], PNG) }))
         .route(
             "/live/{n}",
@@ -310,6 +327,140 @@ async fn channels_guide_favourites_and_connections() {
     assert_eq!(app.put("/api/live/settings", &admin, bad).await.status, StatusCode::BAD_REQUEST);
 }
 
+/// A guide channel set by hand that no channel wanted when the guide was
+/// read has its programmes at once: the guide is read again for it, and
+/// only for it.
+#[tokio::test]
+async fn a_guide_channel_set_by_hand_has_its_programmes_at_once() {
+    let (base, provider) = provider().await;
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let added = app
+        .post(
+            "/api/live/sources",
+            &admin,
+            json!({"name": "Provider", "kind": "m3u", "url": format!("{base}/list.m3u")}),
+        )
+        .await;
+    assert_eq!(added.status, StatusCode::CREATED, "{:?}", added.body);
+    wait_until_read(&app, &admin).await;
+    assert_eq!(provider.guides.load(Ordering::SeqCst), 1);
+    let channels = app.get("/api/live/channels", &admin).await.body;
+    let ten = &channels[2];
+    assert_eq!(ten["name"], "Ten");
+    assert!(ten["now"].is_null() && ten["has_guide"] == false, "{ten}");
+    let ten_id = ten["id"].as_i64().unwrap();
+
+    // The guide lists Quiz Time, which no channel wanted when it was read.
+    let set = app.patch("/api/live/lineup", &admin, json!({"ids": [ten_id], "guide_id": "quiz.test"})).await;
+    assert_eq!(set.status, StatusCode::NO_CONTENT);
+    assert_eq!(on_now(&app, &admin, ten_id).await["title"], "The Quiz", "read again for it");
+    wait_until_read(&app, &admin).await;
+    assert_eq!(provider.guides.load(Ordering::SeqCst), 2);
+
+    // One's guide channel has its programmes already: no read for it.
+    let set = app.patch("/api/live/lineup", &admin, json!({"ids": [ten_id], "guide_id": "one.test"})).await;
+    assert_eq!(set.status, StatusCode::NO_CONTENT);
+    let ten = app.get(&format!("/api/live/channels/{ten_id}"), &admin).await.body;
+    assert_eq!(ten["now"]["title"], "The News");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(provider.guides.load(Ordering::SeqCst), 2);
+}
+
+/// Channel `id`'s programme on now, once it has one (within 10 s).
+async fn on_now(app: &TestApp, admin: &str, id: i64) -> Value {
+    for _ in 0..100 {
+        let now = app.get(&format!("/api/live/channels/{id}"), admin).await.body["now"].clone();
+        if !now.is_null() {
+            return now;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    Value::Null
+}
+
+/// A guide channel set while the guide downloads is seen by that read: no
+/// second read for it. Refresh asked for during a read comes after it.
+#[tokio::test]
+async fn a_read_under_way_takes_the_channels_set_and_refresh_comes_after_it() {
+    let (base, provider) = provider().await;
+    provider.held.store(true, Ordering::SeqCst);
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let added = app
+        .post(
+            "/api/live/sources",
+            &admin,
+            json!({"name": "Provider", "kind": "m3u", "url": format!("{base}/list.m3u")}),
+        )
+        .await;
+    assert_eq!(added.status, StatusCode::CREATED, "{:?}", added.body);
+    let source_id = added.body["id"].as_i64().unwrap();
+    guides_asked(&provider, 1).await;
+    let lineup = app.get("/api/live/lineup", &admin).await.body;
+    let ten_id = lineup.as_array().unwrap().iter().find(|c| c["name"] == "Ten").unwrap()["id"].as_i64().unwrap();
+
+    // Set while the guide downloads, before the read lists the channels.
+    let set = app.patch("/api/live/lineup", &admin, json!({"ids": [ten_id], "guide_id": "quiz.test"})).await;
+    assert_eq!(set.status, StatusCode::NO_CONTENT);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    provider.held.store(false, Ordering::SeqCst);
+    provider.released.notify_one();
+    assert_eq!(on_now(&app, &admin, ten_id).await["title"], "The Quiz");
+    wait_until_read(&app, &admin).await;
+    assert_eq!(provider.guides.load(Ordering::SeqCst), 1, "no second read");
+
+    // Refresh during a read: read again after it, not left out.
+    provider.held.store(true, Ordering::SeqCst);
+    let refresh = format!("/api/live/sources/{source_id}/refresh");
+    assert_eq!(app.post(&refresh, &admin, json!({})).await.status, StatusCode::ACCEPTED);
+    guides_asked(&provider, 2).await;
+    assert_eq!(app.post(&refresh, &admin, json!({})).await.status, StatusCode::ACCEPTED);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    provider.held.store(false, Ordering::SeqCst);
+    provider.released.notify_one();
+    guides_asked(&provider, 3).await;
+    wait_until_read(&app, &admin).await;
+    assert_eq!(provider.guides.load(Ordering::SeqCst), 3);
+}
+
+/// Waits until the provider has been asked for `n` guides (within 5 s).
+async fn guides_asked(provider: &Provider, n: usize) {
+    for _ in 0..100 {
+        if provider.guides.load(Ordering::SeqCst) >= n {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(provider.guides.load(Ordering::SeqCst), n);
+}
+
+/// A channel renamed to a name the guide knows is matched to it at once,
+/// its playlist's guide channel being one the guide lacks.
+#[tokio::test]
+async fn a_channel_renamed_as_the_guide_names_it_has_its_programmes_at_once() {
+    let (base, provider) = provider().await;
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let added = app
+        .post(
+            "/api/live/sources",
+            &admin,
+            json!({"name": "Provider", "kind": "m3u", "url": format!("{base}/list.m3u")}),
+        )
+        .await;
+    assert_eq!(added.status, StatusCode::CREATED, "{:?}", added.body);
+    wait_until_read(&app, &admin).await;
+    let lineup = app.get("/api/live/lineup", &admin).await.body;
+    let ten_id = lineup.as_array().unwrap().iter().find(|c| c["name"] == "Ten").unwrap()["id"].as_i64().unwrap();
+
+    let renamed = app.patch("/api/live/lineup", &admin, json!({"ids": [ten_id], "name": "Quiz Time"})).await;
+    assert_eq!(renamed.status, StatusCode::NO_CONTENT);
+    assert_eq!(on_now(&app, &admin, ten_id).await["title"], "The Quiz");
+    wait_until_read(&app, &admin).await;
+    assert_eq!(provider.guides.load(Ordering::SeqCst), 2);
+}
+
 #[tokio::test]
 async fn changing_channels_frees_the_connection_the_old_stream_still_holds() {
     let (base, provider) = provider().await;
@@ -380,11 +531,16 @@ async fn channels_by_group_a_page_at_a_time() {
     assert_eq!(names(&app.get("/api/live/browse?q=foot", &bob).await.body), ["Two HD"]);
     assert_eq!(names(&app.get("/api/live/browse?q=1", &bob).await.body), ["One", "Ten"]);
     assert_eq!(names(&app.get("/api/live/browse?q=ten", &bob).await.body), ["Ten"]);
+    // A name's words in any order, and with a slip.
+    assert_eq!(names(&app.get("/api/live/browse?q=hd%20two", &bob).await.body), ["Two HD"]);
+    assert_eq!(names(&app.get("/api/live/browse?q=twoo", &bob).await.body), ["Two HD"]);
     assert_eq!(app.get("/api/live/browse?category=nope", &bob).await.status, StatusCode::BAD_REQUEST);
     // The app's search finds channels too.
     let found = app.get("/api/search?q=foot", &bob).await.body;
     let found: Vec<&str> = found["channels"].as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap()).collect();
     assert_eq!(found, ["Two HD"]);
+    let first = app.get("/api/search?q=1&limit=1", &bob).await.body;
+    assert_eq!(first["channels"].as_array().map(Vec::len), Some(1), "as many as titles: {first}");
 
     app.put(&format!("/api/live/channels/{ten}/favorite"), &bob, json!({})).await;
     assert_eq!(app.get("/api/live/groups", &bob).await.body["favorites"], 1);
@@ -472,18 +628,30 @@ async fn a_connection_in_use_is_taken_over_by_its_watcher_or_an_administrator() 
     let (one, two) = (channels[0]["id"].as_i64().unwrap(), channels[1]["id"].as_i64().unwrap());
 
     // Bob watches One; the administrator wants Two and may take One's connection.
-    let bobs = app.post(&format!("/api/live/channels/{one}/watch"), &bob, json!({"client_id": "tv"})).await.body;
+    // (as a TV's own player, with a keyed address)
+    let bobs = app
+        .post(&format!("/api/live/channels/{one}/watch"), &bob, json!({"client_id": "tv", "keyed_urls": true}))
+        .await
+        .body;
     let refused = app.post(&format!("/api/live/channels/{two}/watch"), &admin, json!({"client_id": "pc"})).await;
     assert_eq!(refused.status, StatusCode::CONFLICT);
     let held = &refused.body["connections"][0];
     assert_eq!((held["channel_id"].as_i64(), held["can_take_over"].as_bool()), (Some(one), Some(true)), "{held}");
     assert_eq!(held["watchers"], json!(["bob"]), "named to administrators");
 
-    // Bob may not take the administrator's back.
+    // Bob's player hears at once who took it, both being in the home; it's
+    // nobody else's to hear.
+    let mut events = app.state.events.subscribe();
     let taken = app
         .post(&format!("/api/live/channels/{two}/watch"), &admin, json!({"client_id": "pc", "take_over": one}))
         .await;
     assert_eq!(taken.status, StatusCode::OK, "{:?}", taken.body);
+    let session = bobs["session_id"].as_str().unwrap();
+    let told = taken_over(&mut events);
+    let said = "admin is watching Two HD now, on the connection this channel used.";
+    assert_eq!(told, [json!({"type": "live_taken_over", "session_id": session, "channel_id": one, "message": said})]);
+
+    // Bob may not take the administrator's back.
     let refused = app.post(&format!("/api/live/channels/{one}/watch"), &bob, json!({"client_id": "tv"})).await;
     let held = &refused.body["connections"][0];
     assert_eq!((held["can_take_over"].as_bool(), held["watchers"].clone()), (Some(false), json!([])), "{held}");
@@ -491,11 +659,111 @@ async fn a_connection_in_use_is_taken_over_by_its_watcher_or_an_administrator() 
         app.post(&format!("/api/live/channels/{one}/watch"), &bob, json!({"client_id": "tv", "take_over": two})).await;
     assert_eq!(not_his.status, StatusCode::FORBIDDEN);
 
-    // Bob's player is told who took the connection.
-    let session = bobs["session_id"].as_str().unwrap();
+    // His session says so from then on, at its keyed address too.
     let gone = app.get(&format!("/api/live/sessions/{session}/index.m3u8"), &bob).await;
     assert_eq!(gone.status, StatusCode::GONE);
-    assert!(gone.body["message"].as_str().unwrap().contains("started watching"), "{:?}", gone.body);
+    assert_eq!(gone.body["message"], said, "{:?}", gone.body);
+    let keyed = bobs["url"].as_str().unwrap();
+    assert!(keyed.starts_with("/api/live/media/"), "{keyed}");
+    let gone = app.call(Method::GET, keyed, None, None, &[]).await;
+    assert_eq!((gone.status, gone.body["message"].as_str()), (StatusCode::GONE, Some(said)), "{:?}", gone.body);
+
+    // Someone outside the home learns neither who took it nor for what.
+    let (carol, _) = app.user(&admin, "carol", json!({"home": false})).await;
+    app.delete(&format!("/api/live/sessions/{}", taken.body["session_id"].as_str().unwrap()), &admin).await;
+    let carols = app.post(&format!("/api/live/channels/{one}/watch"), &carol, json!({"client_id": "phone"})).await;
+    assert_eq!(carols.status, StatusCode::OK, "{:?}", carols.body);
+    let mut events = app.state.events.subscribe();
+    let taken = app
+        .post(&format!("/api/live/channels/{two}/watch"), &admin, json!({"client_id": "pc", "take_over": one}))
+        .await;
+    assert_eq!(taken.status, StatusCode::OK, "{:?}", taken.body);
+    let told = taken_over(&mut events);
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert_eq!(told[0]["message"], "Someone else needed this channel's connection to watch another channel.");
+
+    // Joining the channel someone watches ends nobody.
+    let mut events = app.state.events.subscribe();
+    let joined = app.post(&format!("/api/live/channels/{two}/watch"), &carol, json!({"client_id": "phone"})).await;
+    assert_eq!(joined.status, StatusCode::OK, "{:?}", joined.body);
+    assert!(taken_over(&mut events).is_empty());
+    let admins = taken.body["session_id"].as_str().unwrap();
+    assert_ne!(app.get(&format!("/api/live/sessions/{admins}/index.m3u8"), &admin).await.status, StatusCode::GONE);
+}
+
+/// Who is in the home counts as the connection is taken over, not as its
+/// watcher started: someone taken out of the home since isn't told who.
+#[tokio::test]
+async fn the_home_counts_as_the_connection_is_taken_over() {
+    let (base, _) = provider().await;
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let (bob, _) = app.user(&admin, "bob", json!({})).await;
+    let url = format!("{base}/list.m3u");
+    app.post("/api/live/sources", &admin, json!({"name": "P", "kind": "m3u", "url": url, "max_connections": 1})).await;
+    wait_until_read(&app, &admin).await;
+    let channels = app.get("/api/live/channels", &bob).await.body;
+    let (one, two) = (channels[0]["id"].as_i64().unwrap(), channels[1]["id"].as_i64().unwrap());
+    let bobs = app.post(&format!("/api/live/channels/{one}/watch"), &bob, json!({"client_id": "tv"})).await;
+    assert_eq!(bobs.status, StatusCode::OK, "{:?}", bobs.body);
+
+    // Bob, in the home as he started, is taken out of it while he watches.
+    sqlx::query("UPDATE users SET home = 0 WHERE username = 'bob'").execute(&app.state.db.write).await.unwrap();
+    let mut events = app.state.events.subscribe();
+    let taken = app
+        .post(&format!("/api/live/channels/{two}/watch"), &admin, json!({"client_id": "pc", "take_over": one}))
+        .await;
+    assert_eq!(taken.status, StatusCode::OK, "{:?}", taken.body);
+    let told = taken_over(&mut events);
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert_eq!(told[0]["message"], "Someone else needed this channel's connection to watch another channel.");
+}
+
+/// The `live_taken_over` events sent so far, as their streams see them.
+fn taken_over(events: &mut tokio::sync::broadcast::Receiver<pley::events::ServerEvent>) -> Vec<Value> {
+    let mut told = Vec::new();
+    while let Ok(event) = events.try_recv() {
+        let json = serde_json::to_value(&event).unwrap();
+        if json["type"] == "live_taken_over" {
+            told.push(json);
+        }
+    }
+    told
+}
+
+#[tokio::test]
+async fn a_link_signed_in_by_the_cookie_takes_no_connection_over() {
+    let (base, _) = provider().await;
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let (bob, _) = app.user(&admin, "bob", json!({})).await;
+    let url = format!("{base}/list.m3u");
+    app.post("/api/live/sources", &admin, json!({"name": "P", "kind": "m3u", "url": url, "max_connections": 1})).await;
+    wait_until_read(&app, &admin).await;
+    let channels = app.get("/api/live/channels", &bob).await.body;
+    let (one, two) = (channels[0]["id"].as_i64().unwrap(), channels[1]["id"].as_i64().unwrap());
+    let bobs = app.post(&format!("/api/live/channels/{one}/watch"), &bob, json!({"client_id": "tv"})).await;
+    assert_eq!(bobs.status, StatusCode::OK);
+
+    // Over plain HTTP, another site's link to Two's stream asking for One's
+    // connection is a GET like any: with the administrator's cookie, it
+    // takes nothing.
+    let stream = format!("/api/live/channels/{two}/stream.ts?client_id=pc&take_over={one}");
+    let req = Request::builder()
+        .uri(&stream)
+        .header(header::COOKIE, format!("{}={admin}", pley::auth::COOKIE_NAME))
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.api.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::CONFLICT, "Bob keeps the connection");
+    drop(resp);
+    // A player sending its token asks on purpose.
+    let req = Request::builder()
+        .uri(&stream)
+        .header(header::AUTHORIZATION, format!("Bearer {admin}"))
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(app.api.clone().oneshot(req).await.unwrap().status(), StatusCode::OK);
 }
 
 #[tokio::test]

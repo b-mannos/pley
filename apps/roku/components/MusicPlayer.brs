@@ -8,7 +8,9 @@
 ' at all is passed over. The end of the queue stops it. The queue keeps
 ' the order it was given in (lib/Music.brs), so Stop shuffling puts it
 ' back. The sleep timer (lib/Sleep.brs) is the music player's, not Now
-' Playing's: the music plays on while other screens show.
+' Playing's: the music plays on while other screens show. The user's
+' remote, on another device, controls it as Now Playing does (Remote.brs),
+' and its session stopped from elsewhere stops it.
 
 sub init()
     m.audio = m.top.findNode("audio")
@@ -18,6 +20,9 @@ sub init()
     m.top.observeField("play", "onPlay")
     m.top.observeField("control", "onControl")
     m.top.observeField("jump", "onJump")
+    m.top.observeField("seek", "onSeek")
+    m.top.observeField("serverStopped", "onServerStopped")
+    m.top.observeField("playerCommand", "onPlayerCommand")
     m.global.session.observeFieldScoped("accessToken", "onToken")
     m.clock = CreateObject("roTimespan")
     m.queue = musicQueue([], 0, false)
@@ -26,6 +31,8 @@ sub init()
     ' whether it has played.
     m.attempt = 0
     m.sessionId = ""
+    ' Where the track opening starts (ms): 0 but for a place a cast sent.
+    m.startMs = 0
     m.info = invalid
     m.detail = invalid
     m.mode = "auto"
@@ -57,7 +64,8 @@ sub onPlay()
     m.queue = musicQueue(request.queue, Int(httpNumber(request.at, 0)), httpTrue(request.shuffled))
     showQueue()
     m.top.message = ""
-    playTrack(m.queue.at, "auto")
+    m.top.stoppedBy = ""
+    playTrack(m.queue.at, "auto", Int(httpNumber(request.fromMs, 0)))
 end sub
 
 ' The queue as Now Playing lists it.
@@ -75,13 +83,17 @@ sub onJump()
     playTrack(at, "auto")
 end sub
 
-' The track at, from its start; its session and its details are asked for
-' together (the details say the file's container).
-sub playTrack(at as integer, mode as string)
+' The track at, from its start (or startMs into it: a place a cast sent);
+' its session and its details are asked for together (the details say the
+' file's container).
+sub playTrack(at as integer, mode as string, startMs = 0 as integer)
     showTrack(at, "loading")
     m.mode = mode
+    if startMs < 0 then startMs = 0
+    m.startMs = startMs
+    m.top.positionMs = startMs
     track = musicTrackAt(m.queue, at)
-    uiRequest({ op: "play", itemId: track.itemId, startMs: 0, mode: mode, attempt: m.attempt }, "onSession")
+    uiRequest({ op: "play", itemId: track.itemId, startMs: startMs, mode: mode, attempt: m.attempt, controls: remoteMusicControls() }, "onSession")
     uiRequest({ method: "GET", path: "/api/items/" + urlValue(track.itemId), attempt: m.attempt }, "onDetail")
 end sub
 
@@ -145,6 +157,7 @@ sub begin()
     content.url = url
     content.streamFormat = musicStreamFormat(m.info, m.detail)
     content.title = track.title
+    if m.startMs > 0 then content.playStart = Int(m.startMs / 1000)
     if LCase(Left(url, 8)) = "https://" then nodesFillCertificates(content)
     duration = Int(httpNumber(m.info.duration_ms, 0))
     if duration > 0 then m.top.durationMs = duration
@@ -187,7 +200,7 @@ sub onState(event as object)
         if not m.played and m.mode <> "transcode" and httpString(m.info.method) <> "transcode"
             playTrack(m.queue.at, "transcode")
         else
-            passOver("This track can't be played on this Roku.")
+            passOver(t("player.nowPlaying.cantPlay"))
         end if
     end if
 end sub
@@ -197,6 +210,28 @@ sub onPosition(event as object)
     if seconds = invalid or m.info = invalid then return
     m.top.positionMs = Int(seconds * 1000)
     if playerShouldReport(m.audio.state, m.clock.TotalMilliseconds() - m.lastReportAt) then report("playing")
+end sub
+
+' Now Playing's scrubber: the track goes on from there (its last second at
+' most), and the server hears of it at once, as after a video's seek.
+sub onSeek()
+    seekTo(m.top.seek)
+end sub
+
+sub seekTo(targetMs as integer)
+    ' Buffering (after another seek, say) the track still plays: the seek
+    ' goes on from there.
+    state = m.top.state
+    audio = m.audio.state
+    if m.info = invalid or (state <> "playing" and state <> "paused") then return
+    if audio <> "playing" and audio <> "paused" and audio <> "buffering" then return
+    target = targetMs
+    last = m.top.durationMs - 1000
+    if last > 0 and target > last then target = last
+    if target < 0 then target = 0
+    m.top.positionMs = target
+    m.audio.seek = target / 1000
+    report(state)
 end sub
 
 sub onControl()
@@ -238,6 +273,50 @@ sub onControl()
     end if
 end sub
 
+' The track's session stopped from another device or by the server's
+' administrator: the music stops, as a video does, and Now Playing says
+' who stopped it. The server ended the session: nothing to report or close.
+sub onServerStopped(event as object)
+    stopFromServer(event.getData())
+end sub
+
+sub stopFromServer(data as object)
+    if m.sessionId = "" or httpString(data.session_id) <> m.sessionId then return
+    m.sessionId = ""
+    m.info = invalid
+    m.top.stoppedBy = playerStoppedMessage(data)
+    stopAll()
+end sub
+
+' A command of the user's remote, on another device, for the track's
+' session (Remote.brs has the rule), as Now Playing's buttons and scrubber
+' do. Only a track playing or paused obeys: not one loading, or waiting
+' for Play after the sleep timer. A play or pause is reported as the
+' track's own are, when its state changes; a seek at once; another track
+' with its own session.
+sub onPlayerCommand(event as object)
+    state = m.top.state
+    if m.sessionId = "" or m.info = invalid or m.waiting or (state <> "playing" and state <> "paused") then return
+    duration = invalid
+    if m.top.durationMs > 0 then duration = m.top.durationMs
+    player = { kind: "music", session: m.sessionId, playing: state = "playing", positionMs: m.top.positionMs, durationMs: duration, hasNext: m.queue.at + 1 < m.queue.order.Count(), index: m.queue.at }
+    action = remoteAction(player, event.getData())
+    if action.act = "play"
+        m.audio.control = "resume"
+    else if action.act = "pause"
+        m.audio.control = "pause"
+    else if action.act = "report"
+        ' As it is already: said again, so a remote a little behind settles.
+        report(state)
+    else if action.act = "seek"
+        seekTo(action.positionMs)
+    else if action.act = "next"
+        nextTrack()
+    else if action.act = "previous"
+        playTrack(m.queue.at - 1, "auto")
+    end if
+end sub
+
 sub nextTrack()
     if m.queue.at + 1 < m.queue.order.Count()
         playTrack(m.queue.at + 1, "auto")
@@ -248,7 +327,7 @@ end sub
 
 ' A track that can't be played: said, and the next one plays.
 sub passOver(message as string)
-    m.top.message = musicTrackAt(m.queue, m.queue.at).title + ": " + message
+    m.top.message = t("player.nowPlaying.trackProblem", { title: musicTrackAt(m.queue, m.queue.at).title, message: message })
     nextTrack()
 end sub
 
@@ -285,7 +364,18 @@ sub report(state as string)
     if m.sessionId = "" then return
     m.lastReportAt = m.clock.TotalMilliseconds()
     track = musicTrackAt(m.queue, m.queue.at)
-    uiRequest({ method: "POST", path: "/api/items/" + urlValue(track.itemId) + "/progress", json: playerProgress(m.top.positionMs, m.top.durationMs, state, m.sessionId) }, "")
+    uiRequest({ method: "POST", path: "/api/items/" + urlValue(track.itemId) + "/progress", json: playerProgress(m.top.positionMs, m.top.durationMs, state, m.sessionId), session: m.sessionId }, "onReported")
+end sub
+
+' A session stopped while the event stream was down (or an https://
+' server's, which has none here) answers its next report with 410.
+sub onReported(event as object)
+    answer = event.getData()
+    if answer.status <> 410 then return
+    data = answer.data
+    if GetInterface(data, "ifAssociativeArray") = invalid then data = {}
+    data.session_id = event.getRoSGNode().spec.session
+    stopFromServer(data)
 end sub
 
 sub closeSession(sessionId as string)

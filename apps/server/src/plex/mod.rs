@@ -8,12 +8,14 @@
 //! with `Accept: application/json`. Everything goes through the same catalog,
 //! auth and playback code as pley's own API.
 
+mod collection_search;
 mod edit;
+mod keys;
 mod library;
-pub(crate) use library::{smart_count, smart_items, valid_smart_filter};
 mod lists;
 pub(crate) mod meta;
 mod notifications;
+mod pictures;
 mod playback;
 pub(crate) use playback::SessionKeys;
 mod queues;
@@ -38,7 +40,8 @@ use tower::{Layer, ServiceExt};
 use tower_http::compression::predicate::{NotForContentType, Predicate, SizeAbove};
 use tower_http::compression::{CompressionLayer, CompressionLevel};
 
-use crate::auth::{AuthUser, token_without_cookie};
+use crate::auth::grants::APP_TOKEN_PREFIX;
+use crate::auth::{AuthUser, ClientIp, UsedFrom, compatibility, token_without_cookie};
 use crate::error::AppError;
 use crate::state::AppState;
 pub use xml::Node;
@@ -114,11 +117,17 @@ pub fn is_plex_request(request: &Request) -> bool {
     if path.starts_with("/api/") || path.starts_with("/.well-known/") {
         return false;
     }
+    names_itself(request) || only_plex(path)
+}
+
+/// Whether `request` says it is for this API: an `X-Plex-…` header, or
+/// such a parameter in the query. The Jellyfin-compatible API leaves these
+/// to it on pley's port.
+pub fn names_itself(request: &Request) -> bool {
     request.headers().keys().any(|name| name.as_str().starts_with("x-plex-"))
         || request.uri().query().is_some_and(|query| {
             query.split('&').any(|pair| pair.get(..7).is_some_and(|key| key.eq_ignore_ascii_case("x-plex-")))
         })
-        || only_plex(path)
 }
 
 fn only_plex(path: &str) -> bool {
@@ -189,22 +198,8 @@ pub struct PlexInfo {
 }
 
 impl PlexInfo {
-    /// Reads `<data-dir>/plex-machine-id`, creating it on first use.
     pub(crate) fn load(data_dir: &Path) -> Self {
-        let file = data_dir.join("plex-machine-id");
-        let existing = std::fs::read_to_string(&file).ok().map(|s| s.trim().to_owned());
-        let machine_id = match existing.filter(|id| id.len() == 40 && id.chars().all(|c| c.is_ascii_hexdigit())) {
-            Some(id) => id,
-            None => {
-                let id =
-                    format!("{}{}", uuid::Uuid::new_v4().simple(), &uuid::Uuid::new_v4().simple().to_string()[..8]);
-                if let Err(err) = std::fs::write(&file, &id) {
-                    tracing::warn!("cannot save {}: {err}", file.display());
-                }
-                id
-            }
-        };
-        Self { machine_id }
+        Self { machine_id: crate::identity::load_id(data_dir) }
     }
 
     /// Deterministic UUID for a library section.
@@ -249,7 +244,7 @@ fn router(state: AppState, info: Arc<PlexInfo>) -> Router {
         .route("/playlists/{id}/composite/{version}", get(lists::composite))
         .route("/updater/status", get(server::empty))
         .route("/prefs", get(server::prefs))
-        .route("/_/prefs", get(server::prefs).put(server::accepted))
+        .route("/_/prefs", get(server::prefs).put(server::settings_refused))
         .route("/media/providers", get(server::media_providers))
         .route("/library", get(library::root))
         .route("/library/sections", get(library::sections))
@@ -265,6 +260,7 @@ fn router(state: AppState, info: Arc<PlexInfo>) -> Router {
         .route("/library/sections/{id}/search", get(library::section_search))
         .route("/library/sections/{id}/emptyTrash", any(server::accepted))
         .route("/library/sections/{id}/analyze", any(server::accepted))
+        .route("/library/sections/{id}/prefs", get(library::section_prefs).put(server::settings_refused))
         .route("/library/sections/{id}/{filter}", get(library::filter_choices))
         .route("/library/all", get(library::library_all))
         .route("/library/onDeck", get(library::on_deck))
@@ -289,7 +285,10 @@ fn router(state: AppState, info: Arc<PlexInfo>) -> Router {
         .route("/library/collections/{id}", get(lists::collection).delete(lists::collection_delete))
         .route("/library/collections/{id}/items", put(lists::collection_add))
         .route("/library/collections/{id}/items/{item}", delete(lists::collection_remove))
+        .route("/library/collections/{id}/items/{item}/move", put(lists::collection_move))
         .route("/library/collections/{id}/children", get(lists::collection_children))
+        .route("/library/collections/{id}/prefs", put(lists::collection_prefs))
+        .route("/library/collections/{id}/refresh", put(lists::collection_refresh))
         .route(
             "/library/collections/{id}/{image}",
             get(lists::collection_image)
@@ -308,6 +307,9 @@ fn router(state: AppState, info: Arc<PlexInfo>) -> Router {
         .route("/hubs/home/recentlyAdded", get(library::home_recently_added))
         .route("/hubs/sections/{id}", get(library::section_hubs))
         .route("/hubs/sections/{id}/continueWatching/items", get(library::section_continue_watching))
+        .route("/hubs/sections/{id}/manage", get(lists::managed_hubs).post(lists::promote_hub))
+        .route("/hubs/sections/{id}/manage/{identifier}", put(lists::change_hub).delete(lists::change_hub))
+        .route("/hubs/sections/{id}/manage/{identifier}/move", put(lists::change_hub))
         .route("/search", get(library::search))
         .route("/photo/_/transcode", get(library::photo_transcode))
         .route("/_/timeline", any(playback::timeline))
@@ -426,6 +428,9 @@ fn wants_json(headers: &HeaderMap) -> bool {
 #[derive(Debug)]
 pub enum PlexError {
     Unauthorized,
+    /// A token that isn't a compatibility token, such as a Pley session's,
+    /// which this API took before: `401`, saying what to use instead.
+    NotACompatibilityToken,
     Forbidden,
     NotFound,
     BadRequest(String),
@@ -442,15 +447,25 @@ impl From<AppError> for PlexError {
             | AppError::TwoStep(_)
             | AppError::TwoStepSetup(..)
             | AppError::InvalidToken
-            | AppError::TokenPlacement => PlexError::Unauthorized,
+            | AppError::TokenPlacement
+            | AppError::CompatibilityToken => PlexError::Unauthorized,
             AppError::Forbidden(_) | AppError::ForbiddenAs(..) | AppError::InsufficientScope(_) => PlexError::Forbidden,
             AppError::NotFound(_) | AppError::SessionStopped(_) => PlexError::NotFound,
-            AppError::BadRequest(m) | AppError::Conflict(m) | AppError::ConflictWith(m, _) => PlexError::BadRequest(m),
+            AppError::BadRequest(m)
+            | AppError::Conflict(m)
+            | AppError::ConflictWith(m, _)
+            | AppError::ConflictAs(_, m) => PlexError::BadRequest(m),
             AppError::Unavailable(m) | AppError::TooManyRequests(m) | AppError::NotImplemented(m) => {
                 PlexError::Unavailable(m)
             }
             AppError::Internal(e) => PlexError::Internal(e),
         }
+    }
+}
+
+impl From<crate::listing::FilterError> for PlexError {
+    fn from(err: crate::listing::FilterError) -> Self {
+        PlexError::BadRequest(err.0)
     }
 }
 
@@ -464,6 +479,10 @@ impl IntoResponse for PlexError {
     fn into_response(self) -> Response {
         let (status, detail) = match self {
             PlexError::Unauthorized => (StatusCode::UNAUTHORIZED, String::new()),
+            PlexError::NotACompatibilityToken => (
+                StatusCode::UNAUTHORIZED,
+                "this API takes tokens for other apps only: make one in Pley, under Account".to_owned(),
+            ),
             PlexError::Forbidden => (StatusCode::FORBIDDEN, String::new()),
             PlexError::NotFound => (StatusCode::NOT_FOUND, String::new()),
             PlexError::BadRequest(m) => (StatusCode::BAD_REQUEST, m),
@@ -486,12 +505,19 @@ fn html_escape(value: &str) -> String {
 
 // ------------------------------------------------------------------ auth
 
-/// The caller, authenticated by `X-Plex-Token` (header or query) or by
-/// pley's own token in `Authorization: Bearer`, `X-Pley-Token` or `?token=`.
+/// The caller, authenticated by a compatibility token (see
+/// [`crate::auth::compatibility`]) in `X-Plex-Token` (header or query), or
+/// in `Authorization: Bearer`, `X-Pley-Token` or `?token=` as pley's own
+/// tokens go. Its rights are what the token's scopes allow, each checked by
+/// name: everyone's sessions, history and accounts, and file paths, only
+/// with `activity` ([`sees_everyone`]), and changes only through
+/// [`PlexAdmin`]. A token is never an administrator (`is_admin` is false).
 ///
-/// Never by the web UI's cookie: browsers send it to this port too (cookies
-/// aren't per port), and several Plex endpoints change things on a GET, so a
-/// page elsewhere could otherwise act for whoever is signed in to pley.
+/// Never by a session's token: those are for pley's own apps, with every
+/// right the account has. Never by the web UI's cookie either: browsers send
+/// it to this port too (cookies aren't per port), and several Plex endpoints
+/// change things on a GET, so a page elsewhere could otherwise act for
+/// whoever is signed in to pley.
 #[derive(Debug, Clone)]
 pub struct PlexUser(pub AuthUser);
 
@@ -503,19 +529,43 @@ impl FromRequestParts<AppState> for PlexUser {
             Some(user) => user.clone(),
             None => {
                 let token = request_token(parts).ok_or(PlexError::Unauthorized)?;
-                let user = state.auth.validate(&token).await.ok_or(PlexError::Unauthorized)?;
+                if !token.starts_with(compatibility::PREFIX) {
+                    return Err(PlexError::NotACompatibilityToken);
+                }
+                let Ok(ClientIp(ip)) = ClientIp::from_request_parts(parts, state).await;
+                let user_agent = parts.headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok()).map(str::to_owned);
+                let used = UsedFrom { ip, user_agent };
+                let user =
+                    state.auth.validate_compatibility(&token, Some(&used)).await.ok_or(PlexError::Unauthorized)?;
                 parts.extensions.insert(user.clone());
                 user
             }
         };
         if let Some(Viewer(admin)) = parts.extensions.get::<Viewer>() {
-            let _ = admin.set(user.is_admin);
+            let _ = admin.set(sees_everyone(&user));
         }
         Ok(PlexUser(user))
     }
 }
 
-/// Administrator rights are required (library refreshes, server-wide views).
+/// Whether the caller sees everyone's sessions, history and accounts, and
+/// where files are: a token with `activity`, on an account that is an
+/// administrator now. Seeing, never changing.
+pub(crate) fn sees_everyone(user: &AuthUser) -> bool {
+    user.compatibility_allows(compatibility::Scope::Activity)
+}
+
+/// The caller as collections are listed to it: with `manage`, those still
+/// empty too, which it may fill (as administrators see them in Pley).
+pub(crate) fn collections_viewer(user: &AuthUser) -> AuthUser {
+    AuthUser { is_admin: user.compatibility_allows(compatibility::Scope::Manage), ..user.clone() }
+}
+
+/// Changes only administrators make (library and item refreshes, edits,
+/// collections, stopping others' sessions): a compatibility token with
+/// `manage`, on an account that is an administrator; `activity` or `play`
+/// alone get `403`. The handler acts with an administrator's rights for
+/// that change, none of which administers accounts or the server.
 pub struct PlexAdmin(pub AuthUser);
 
 impl FromRequestParts<AppState> for PlexAdmin {
@@ -523,19 +573,21 @@ impl FromRequestParts<AppState> for PlexAdmin {
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
         let PlexUser(user) = PlexUser::from_request_parts(parts, state).await?;
-        if !user.is_admin {
+        if !user.compatibility_allows(compatibility::Scope::Manage) {
             return Err(PlexError::Forbidden);
         }
-        Ok(PlexAdmin(user))
+        Ok(PlexAdmin(AuthUser { is_admin: true, ..user }))
     }
 }
 
 /// The token of a Plex request: `X-Plex-Token` (header or query), or a
 /// bearer token. Never the web UI's cookie: pages on other sites could make
-/// a browser send that. Never an app's token (`pley_…`): apps use pley's
-/// own API only, within what they were allowed.
+/// a browser send that. Never an app's token (`pley_…` but `pley_ct_…`):
+/// apps use pley's own API only, within what they were allowed.
 pub(super) fn request_token(parts: &Parts) -> Option<String> {
-    plex_token(parts).or_else(|| token_without_cookie(parts)).filter(|token| !token.starts_with("pley_"))
+    plex_token(parts)
+        .or_else(|| token_without_cookie(parts))
+        .filter(|token| token.starts_with(compatibility::PREFIX) || !token.starts_with(APP_TOKEN_PREFIX))
 }
 
 fn plex_token(parts: &Parts) -> Option<String> {
@@ -551,26 +603,12 @@ fn plex_token(parts: &Parts) -> Option<String> {
 
 // ------------------------------------------------------------------ request helpers
 
-/// Decoded query parameters in request order (repeated keys kept).
-#[derive(Debug, Clone, Default)]
-pub struct Params(pub Vec<(String, String)>);
+pub use crate::listing::{Page, Params};
 
 impl Params {
-    pub fn get(&self, key: &str) -> Option<&str> {
-        self.0.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
-    }
-
     /// Case-insensitive lookup (`X-Plex-…` parameters).
     pub fn get_ci(&self, key: &str) -> Option<&str> {
         self.0.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v.as_str())
-    }
-
-    pub fn parse<T: std::str::FromStr>(&self, key: &str) -> Option<T> {
-        self.get(key).and_then(|v| v.trim().parse().ok())
-    }
-
-    pub fn flag(&self, key: &str) -> bool {
-        self.get(key).is_some_and(|v| matches!(v, "1" | "true" | "yes"))
     }
 }
 
@@ -586,21 +624,6 @@ impl<S: Send + Sync> FromRequestParts<S> for Params {
 }
 
 /// `X-Plex-Container-Start` / `-Size` paging, from headers or the query.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct Page {
-    pub start: usize,
-    pub size: Option<usize>,
-}
-
-impl Page {
-    /// The requested slice of `items` and the total count.
-    pub fn apply<T>(&self, items: Vec<T>) -> (Vec<T>, usize) {
-        let total = items.len();
-        let items = items.into_iter().skip(self.start).take(self.size.unwrap_or(usize::MAX)).collect();
-        (items, total)
-    }
-}
-
 impl<S: Send + Sync> FromRequestParts<S> for Page {
     type Rejection = PlexError;
 

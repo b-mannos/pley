@@ -11,6 +11,7 @@ import androidx.datastore.preferences.core.PreferencesSerializer
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
 import app.pley.android.auth.AuthGraph
+import app.pley.android.common.AppLanguage
 import app.pley.android.common.DeviceProfile
 import app.pley.android.common.Tier
 import app.pley.android.network.NetworkGraph
@@ -63,6 +64,12 @@ interface DataGraph {
     /** How Live TV was left on this device (nothing kept unless the graph keeps it). */
     val liveTvViews: LiveTvViews get() = LiveTvViews.None
 
+    /** The remote of the profile's other devices (none unless the graph has it). */
+    val remote: RemoteRepository get() = RemoteRepository.None
+
+    /** The account's language, and what decides the one shown (nothing unless the graph has it). */
+    val language: LanguageRepository get() = LanguageRepository.None
+
     companion object {
         /**
          * The data side of the app over [network] and [auth]. Making it
@@ -85,6 +92,7 @@ interface DataGraph {
                     foreground = processForeground(),
                     debuggable = (app.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0,
                     scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+                    myListTitle = { AppLanguage.resources(app).getString(R.string.data_my_list) },
                 ),
             )
         }
@@ -128,6 +136,12 @@ class DataEnvironment(
     val clock: () -> Long = { System.nanoTime() / 1_000_000 },
     /** Unix ms: when a server was last used. */
     val wallClock: () -> Long = System::currentTimeMillis,
+    /**
+     * What Home's My List is called when the app adds it, until the server,
+     * asked again, titles it in the language asked: the app's words, in the
+     * language shown.
+     */
+    val myListTitle: () -> String = { ItemPatch.MY_LIST_TITLE },
 )
 
 /**
@@ -172,7 +186,18 @@ class AppDataGraph(private val env: DataEnvironment) : DataGraph {
     }
     override val session: SessionRepository get() = sessionImpl
 
-    private val live by lazy { ServerLiveUpdates(sessionImpl, env.foreground, env.events, cache, env.scope) }
+    private val live by lazy {
+        ServerLiveUpdates(sessionImpl, env.foreground, env.events, cache, env.scope, receiverId = serversImpl::clientId, liveTv = ::liveTvOpen)
+    }
+
+    /** Whether Live TV is open to the profile and has channels, as its summary says; `null` until it does. */
+    private fun liveTvOpen(): Flow<Boolean?> = liveTv.summary().map { load ->
+        when (load) {
+            Loadable.Loading -> null
+            is Loadable.Ready -> load.value.available
+            is Loadable.Failed -> load.stale?.available == true
+        }
+    }
     override val liveUpdates: LiveUpdates get() = live
 
     override val libraries: LibrariesRepository by lazy { CachedLibraries(cache) { live.heard(it) } }
@@ -188,12 +213,18 @@ class AppDataGraph(private val env: DataEnvironment) : DataGraph {
     override val playlists: PlaylistsRepository by lazy { CachedPlaylists(cache) }
     override val history: HistoryRepository by lazy { CachedHistory(cache) }
     override val watchState: WatchStateRepository by lazy { CachedWatchState(cache) }
-    override val watchlist: WatchlistRepository by lazy { CachedWatchlist(cache) }
+    override val watchlist: WatchlistRepository by lazy { CachedWatchlist(cache, env.myListTitle) }
     override val trackDefaults: TrackDefaultsRepository by lazy { SessionTrackDefaults(sessionImpl, env.trackDefaults, cache) }
     override val playItem: PlayItem by lazy { CachedPlayItem(cache, itemsImpl) }
     override val liveTv: LiveTvRepository by lazy { CachedLiveTv(cache) }
+    override val remote: RemoteRepository by lazy {
+        ServerRemote(cache, live, env.scope, env.clock, ownReceiver = serversImpl::clientId, hasPin = { sessionImpl.meState.value?.value?.hasPin == true })
+    }
+    override val language: LanguageRepository by lazy { SessionLanguage(sessionImpl) { if (cacheLazy.isInitialized()) cache else null } }
     override val requests: RequestsRepository by lazy {
-        ServerRequests(cache, live, env.foreground, sessionImpl.session.map { it?.scopes }, preferences(ServerRequests.FILE), env.scope)
+        ServerRequests(
+            cache, live, env.foreground, sessionImpl.session.map { it?.scopes }, preferences(ServerRequests.FILE), env.scope, tv = env.profile.isTv,
+        )
     }
 
     override val settings: AppSettings by lazy {

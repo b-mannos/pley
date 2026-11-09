@@ -1,12 +1,16 @@
 import { useCallback, useMemo } from "react";
 import { queryOptions, useInfiniteQuery, useMutation, useMutationState, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { api, qs, request } from "./client";
+import { api, errorMessage, isApiError, qs, request } from "./client";
 import { reordered } from "./lists";
+import { t } from "@/i18n";
+import { received, type RemoteSession } from "@/lib/remote";
 import type {
   Activity,
   Backup,
   Backups,
+  CastRequest,
   CleanReport,
+  Control,
   Device,
   FsListing,
   HistoryPage,
@@ -16,6 +20,7 @@ import type {
   InviteCheck,
   ItemDetail,
   ItemSummary,
+  LabelUse,
   Library,
   LibraryFilters,
   LibraryItemsQuery,
@@ -25,7 +30,10 @@ import type {
   LoginResponse,
   NetworkSettings,
   PersonDetail,
+  PlayingSession,
+  RatingSystems,
   RecoveryCodes,
+  RemoteDevice,
   RequestAccess,
   Resources,
   ProfilePatch,
@@ -66,11 +74,15 @@ export const keys = {
   related: (id: Id) => ["item", id, "related"] as const,
   history: (scope: HistoryScope, pageSize: number) => ["history", scope, pageSize] as const,
   activity: ["activity"] as const,
+  sessions: ["sessions"] as const,
+  remoteDevices: ["remote", "devices"] as const,
   users: ["users"] as const,
   userDevices: (id: Id) => ["users", id, "devices"] as const,
   profiles: ["profiles"] as const,
   devices: ["devices"] as const,
   invites: ["invites"] as const,
+  ratingSystems: ["ratings", "systems"] as const,
+  labels: ["labels"] as const,
   invite: (code: string) => ["invite", code] as const,
   settings: ["settings"] as const,
   network: ["network"] as const,
@@ -237,18 +249,22 @@ export function fetchProfiles(qc: QueryClient) {
 }
 
 /**
- * Switch this device to another home profile. Everything cached belongs to
- * the previous profile, so the cache starts over with the new user.
+ * Switch this device to another home profile: with what it asks for, or
+ * with the `ticket` of a cast from it (components/CastReceiver.tsx).
+ * Everything cached belongs to the previous profile, so the cache starts
+ * over with the new user. Who is signed in changes in place: the app
+ * around the pages hears it at once, as the receiver of a cast needs,
+ * without a page change to show it.
  */
 export function useSwitchProfile() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { user_id: Id; pin?: string; password?: string; code?: string; setup_id?: string }) =>
+    mutationFn: (body: { user_id: Id; pin?: string; password?: string; code?: string; setup_id?: string; ticket?: string }) =>
       api.post<LoginResponse>("/api/auth/switch", body, { noAuthRedirect: true }),
     onSuccess: (res) => {
-      const server = qc.getQueryData<ServerStatus>(keys.server);
-      qc.clear();
-      if (server) qc.setQueryData(keys.server, server);
+      const kept = (key: readonly unknown[]) => key.length === 1 && (key[0] === keys.me[0] || key[0] === keys.server[0]);
+      qc.removeQueries({ predicate: (q) => !kept(q.queryKey) });
+      qc.getMutationCache().clear();
       qc.setQueryData(keys.me, res.user);
     },
   });
@@ -345,6 +361,24 @@ export const queries = {
   network: () => queryOptions({ queryKey: keys.network, queryFn: () => api.get<NetworkSettings>("/api/network") }),
   system: () => queryOptions({ queryKey: keys.system, queryFn: () => api.get<SystemInfo>("/api/system"), staleTime: 10_000 }),
   activity: () => queryOptions({ queryKey: keys.activity, queryFn: () => api.get<Activity>("/api/activity"), staleTime: 2_000 }),
+  /** The user's own sessions whose players are there: what a remote controls. */
+  sessions: () =>
+    queryOptions({
+      queryKey: keys.sessions,
+      queryFn: () => api.get<PlayingSession[]>("/api/sessions").then((list) => received(list, Date.now())),
+      staleTime: 2_000,
+    }),
+  /**
+   * The devices that take casts, which a remote lists: the user's own, with
+   * what they play, and those of the household's other profiles that switch
+   * to the user's for a cast (`household=1`).
+   */
+  remoteDevices: () =>
+    queryOptions({
+      queryKey: keys.remoteDevices,
+      queryFn: () => api.get<RemoteDevice[]>("/api/remote/devices?household=1"),
+      staleTime: 2_000,
+    }),
   item: (id: Id) => queryOptions({ queryKey: keys.item(id), queryFn: ({ signal }) => api.get<ItemDetail>(`/api/items/${id}`, { signal }) }),
 };
 
@@ -415,6 +449,8 @@ function libraryItemsQuery(id: Id, q: LibraryItemsQuery, enabled: boolean) {
           watched: q.watched,
           genre: q.genre,
           year: q.year,
+          resolution: q.resolution,
+          dynamic_range: q.dynamic_range,
           offset: q.offset,
           limit: q.limit ?? DEFAULT_ITEMS_LIMIT,
         })}`,
@@ -729,7 +765,8 @@ export function useHomeHubs() {
   });
 }
 
-export function useSearch(q: string, limit = 60) {
+/** Every result the server gives (up to 200 of each kind); the search page shows a few of each until asked. */
+export function useSearch(q: string, limit = 200) {
   const trimmed = q.trim();
   return useQuery({
     queryKey: keys.search(trimmed, limit),
@@ -913,9 +950,105 @@ export function useStopSession() {
       qc.setQueryData<Activity>(keys.activity, (old) =>
         old ? { ...old, sessions: old.sessions.filter((s) => s.session_id !== sessionId) } : old,
       );
+      dropSession(qc, sessionId);
       void qc.invalidateQueries({ queryKey: keys.activity });
     },
   });
+}
+
+/** A session gone from the user's own list until it is fetched again. */
+function dropSession(qc: QueryClient, sessionId: string) {
+  qc.setQueryData<RemoteSession[]>(keys.sessions, (old) => old?.filter((s) => s.session_id !== sessionId));
+  void qc.invalidateQueries({ queryKey: keys.sessions });
+}
+
+/**
+ * The user's own sessions on their devices, this tab's included (see
+ * `lib/playingHere`). Fetched again as sessions change (the event stream).
+ */
+export function usePlayingSessions() {
+  return useQuery(queries.sessions());
+}
+
+/**
+ * The devices that take casts (apps with the event stream open as a
+ * receiver): the user's own, and those their household's other profiles are
+ * on. Fetched again as they come and go, which the event stream says with
+ * `sessions_changed`.
+ */
+export function useRemoteDevices() {
+  return useQuery(queries.remoteDevices());
+}
+
+export interface SessionCommand {
+  sessionId: string;
+  command: Control;
+  /** `seek`: where to (ms). */
+  positionMs?: number;
+  /** `skip`: how far (ms), back when negative. */
+  offsetMs?: number;
+  /** `audio` and `subtitles`: the track's stream index (subtitles -1: off). */
+  streamIndex?: number;
+  /** `quality`: the id of one of the session's `qualities`. */
+  quality?: string;
+}
+
+/**
+ * Sends one of the user's own players a command. The player acts on it and
+ * reports, which brings `sessions_changed`: its new state shows from there.
+ */
+export function useSessionCommand() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionId, command, positionMs, offsetMs, streamIndex, quality }: SessionCommand) =>
+      request<void>(`/api/sessions/${encodeURIComponent(sessionId)}/command`, {
+        method: "POST",
+        body: { command, position_ms: positionMs, offset_ms: offsetMs, stream_index: streamIndex, quality },
+      }),
+    onError: (err, { sessionId }) => {
+      // Its player is gone, or no longer obeys that: the list says what is left.
+      if (isApiError(err, 404)) dropSession(qc, sessionId);
+      else if (isApiError(err, 409)) void qc.invalidateQueries({ queryKey: keys.sessions });
+    },
+  });
+}
+
+/** What a remote says when `device` didn't take a command. */
+export function sessionCommandError(err: unknown, device: string | null): string {
+  const it = device ?? t("remote.thisDevice");
+  if (isApiError(err, 404)) return t("remote.notPlaying", { device: it });
+  if (isApiError(err, 409)) return t("remote.cantDoThat", { device: it });
+  if (isApiError(err, 429)) return t("remote.tooMany");
+  return errorMessage(err);
+}
+
+/**
+ * Sends a device that takes casts something to play (`receiverId`: its
+ * `receiver_id`). It plays it as its own Play would, and its session shows
+ * in the list as it starts. One on another profile switches to the user's
+ * first: the cast names that profile, and the user's PIN when they have one.
+ * A cast isn't kept once it is done with (`gcTime: 0`, and the caller's
+ * `reset`): the PIN would stay in the mutation cache with it.
+ */
+export function useCast() {
+  const qc = useQueryClient();
+  return useMutation({
+    gcTime: 0,
+    mutationFn: ({ receiverId, cast }: { receiverId: string; cast: CastRequest }) =>
+      api.post<void>(`/api/remote/devices/${encodeURIComponent(receiverId)}/cast`, cast),
+    onError: (err) => {
+      // It went, or takes other things now: the list says what is left.
+      if (isApiError(err, 404) || isApiError(err, 409)) void qc.invalidateQueries({ queryKey: keys.remoteDevices });
+    },
+  });
+}
+
+/** What "Play on…" says when `device` didn't take a cast. */
+export function castError(err: unknown, device: string): string {
+  if (isApiError(err, 404)) return t("remote.notOn", { device });
+  if (isApiError(err, 409)) return t("remote.cantPlay", { device });
+  if (isApiError(err, 429)) return t("remote.tooMany");
+  return errorMessage(err);
 }
 
 // ---------------------------------------------------------------------------
@@ -936,6 +1069,10 @@ export interface NewUserInput {
   all_libraries?: boolean;
   library_ids?: Id[];
   max_age?: number | null;
+  max_age_system?: string | null;
+  birth_month?: string;
+  show_labels?: string[];
+  hide_labels?: string[];
   pin?: string;
   request_access?: RequestAccess;
 }
@@ -947,6 +1084,8 @@ export function useCreateUser() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: keys.users });
       void qc.invalidateQueries({ queryKey: keys.profiles });
+      // Its rules' labels are offered as labels.
+      void qc.invalidateQueries({ queryKey: keys.labels });
     },
   });
 }
@@ -961,6 +1100,10 @@ export interface UserPatch {
   all_libraries?: boolean;
   library_ids?: Id[];
   max_age?: number | null;
+  max_age_system?: string | null;
+  birth_month?: string | null;
+  show_labels?: string[];
+  hide_labels?: string[];
   pin?: string | null;
   request_access?: RequestAccess;
 }
@@ -972,6 +1115,7 @@ export function useUpdateUser() {
     onSuccess: (user) => {
       void qc.invalidateQueries({ queryKey: keys.users });
       void qc.invalidateQueries({ queryKey: keys.profiles });
+      void qc.invalidateQueries({ queryKey: keys.labels });
       qc.setQueryData<User | undefined>(keys.me, (me) => (me && me.id === user.id ? user : me));
     },
   });
@@ -1008,6 +1152,24 @@ export function useSignOutEverywhere() {
 // Invitations
 // ---------------------------------------------------------------------------
 
+/** The rating systems age limits are picked and shown in. */
+export function useRatingSystems() {
+  return useQuery({
+    queryKey: keys.ratingSystems,
+    queryFn: () => api.get<RatingSystems>("/api/ratings/systems"),
+    staleTime: 5 * 60_000,
+  });
+}
+
+/** Every label on a title, with how many carry it (administrators only). */
+export function useLabels() {
+  return useQuery({
+    queryKey: keys.labels,
+    queryFn: () => api.get<LabelUse[]>("/api/labels"),
+    staleTime: 60_000,
+  });
+}
+
 export function useInvites() {
   return useQuery(queries.invites());
 }
@@ -1018,6 +1180,9 @@ export interface NewInviteInput {
   all_libraries?: boolean;
   library_ids?: Id[];
   max_age?: number | null;
+  max_age_system?: string | null;
+  show_labels?: string[];
+  hide_labels?: string[];
   note?: string;
 }
 
@@ -1025,7 +1190,10 @@ export function useCreateInvite() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: NewInviteInput) => api.post<Invite>("/api/invites", body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.invites }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.invites });
+      void qc.invalidateQueries({ queryKey: keys.labels });
+    },
   });
 }
 
@@ -1205,7 +1373,8 @@ export function useResources(pollMs = 2_000) {
 export function useFs(path: string | null, enabled = true) {
   return useQuery({
     queryKey: keys.fs(path),
-    queryFn: () => api.get<FsListing>(`/api/fs${qs({ path })}`),
+    // A POST: over plain HTTP the server can't tell another site's GET from its own page's.
+    queryFn: () => api.post<FsListing>("/api/fs", { path }),
     enabled,
     staleTime: 5_000,
     retry: false,

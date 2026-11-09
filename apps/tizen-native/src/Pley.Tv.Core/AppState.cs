@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Pley.Tv.Core.Api;
 using Pley.Tv.Core.Auth;
 using Pley.Tv.Core.Net;
+using Pley.Tv.Core.Player;
 
 namespace Pley.Tv.Core;
 
@@ -137,6 +138,8 @@ public sealed record AppPlatform(string Name, string ClientId, IKeyValue Storage
     public ITokenVault? TokenVault { get; init; }
     /// <summary>Makes the HTTP handlers; Core's own (<see cref="Transports.DefaultHandler"/>) without.</summary>
     public HandlerFactory? Handlers { get; init; }
+    /// <summary>The TV's languages, the one it is set to first ("fr-FR"): the app's when neither the account nor the server has one.</summary>
+    public IReadOnlyList<string> Languages { get; init; } = Array.Empty<string>();
 
     /// <summary>How every request introduces the app.</summary>
     public string UserAgent => UserAgents.Of(Version, OsVersion, Model);
@@ -175,8 +178,12 @@ public sealed class AppState
     const long StateGatherMs = 300;
     /// <summary>A library's changes come in bursts during a scan: gathered this long.</summary>
     const long LibraryGatherMs = 1_500;
-    /// <summary>How long "Showing what Pley had saved. Reconnecting…" shows: as long as an error's toast.</summary>
+    /// <summary>How long "Pley is offline" shows: as long as an error's toast.</summary>
     const long OfflineNoticeMs = 6_000;
+    /// <summary>The language last shown, for the next start to show before the server answers.</summary>
+    const string LanguageKey = "pley.language";
+    /// <summary>The language picked on this TV with the globe, under the web apps' key.</summary>
+    const string DeviceLanguageKey = "pley.deviceLanguage";
 
     static readonly JsonSerializerOptions Camel = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     static readonly JsonSerializerOptions SettingsJson = new JsonSerializerOptions
@@ -213,18 +220,146 @@ public sealed class AppState
     Task orderQueue = Task.CompletedTask;
     /// <summary>When the events last brought everything up to date (<see cref="IScheduler.Elapsed"/>).</summary>
     long? lastSync;
+    /// <summary>
+    /// What each server said of its language in this launch (GET /api/server), by its address, as it
+    /// named it: a later Pley may name one this app doesn't have ("de"). Null: none, as a Pley from
+    /// before languages.
+    /// </summary>
+    readonly Dictionary<string, string?> serverLanguages = new Dictionary<string, string?>();
+    /// <summary>The servers that answered a choice of language 404 (or 405) in this launch, by their address: they have no route for it.</summary>
+    readonly HashSet<string> noLanguageRoute = new HashSet<string>();
+    IReadOnlyList<string> tvLanguages;
+    string? deviceLanguage;
 
     /// <param name="http">Sends the app's requests; Core's transport over <see cref="AppPlatform.Handlers"/> without.</param>
     public AppState(AppPlatform platform, Transport? http = null, EventConnect? connect = null, IScheduler? scheduler = null)
     {
         this.platform = platform;
-        this.http = Transports.WithUserAgent(http ?? Transports.Create(platform.Handlers), platform.UserAgent);
+        tvLanguages = platform.Languages;
+        deviceLanguage = Languages.Supported(platform.Storage.Get(DeviceLanguageKey));
+        // The last language shown, until the account's or the server's is known: the TV's meanwhile would flash.
+        Language = new Signal<string>(Languages.Supported(platform.Storage.Get(LanguageKey)) ?? Languages.Pick(null, null, tvLanguages, deviceLanguage));
+        this.http = Transports.WithLanguage(Transports.WithUserAgent(http ?? Transports.Create(platform.Handlers), platform.UserAgent), () => Language.Value);
         this.connect = connect ?? EventStream.Over(platform.Handlers);
         this.scheduler = scheduler ?? new ContextScheduler();
         store = platform.Storage;
         Settings = new Signal<Settings>(Read<Settings>(SettingsKey, SettingsJson)?.Allowed() ?? new Settings());
+        Me.Changed += _ => ChooseLanguage();
         var server = store.Get(ServerKey);
         if (!string.IsNullOrEmpty(server)) Use(server!);
+    }
+
+    /// <summary>
+    /// The language the app shows ("en", "fr", "es"): the account's own, else the one picked on
+    /// this TV, else the TV's that Pley has, else the server's, else English (<see cref="Languages.Pick"/>). It starts as the last one
+    /// shown, and changes once the account or the server says otherwise; requests ask for answers
+    /// in it (<c>Accept-Language</c>).
+    /// </summary>
+    public Signal<string> Language { get; }
+
+    /// <summary>The TV's languages, the one it is set to first.</summary>
+    public IReadOnlyList<string> TvLanguages => tvLanguages;
+
+    /// <summary>
+    /// The language of the server in use, for accounts without their own; null when it has none, names
+    /// one this app doesn't have, or hasn't said yet.
+    /// </summary>
+    public string? ServerLanguage =>
+        Server.Value != null && serverLanguages.TryGetValue(Server.Value, out var language) ? Languages.Supported(language) : null;
+
+    /// <summary>
+    /// The server in use keeps an account's language: it names one, even one this app doesn't have.
+    /// False for a Pley from before languages, whose GET /api/server names none, or one that answered
+    /// a choice 404 or 405 (<see cref="LanguageRouteMissing"/>): Settings' Language row is then this
+    /// TV's, as the globe picks it. True until the server has said.
+    /// </summary>
+    public bool KeepsLanguage =>
+        Server.Value is not { } server || (!noLanguageRoute.Contains(server) && (!serverLanguages.TryGetValue(server, out var language) || language != null));
+
+    /// <summary>The server in use answered a choice of language 404 (or 405): it has no route for it, and keeps no account's language.</summary>
+    public void LanguageRouteMissing()
+    {
+        if (Server.Value is { } server) noLanguageRoute.Add(server);
+    }
+
+    /// <summary><paramref name="url"/>'s server said what its language is (GET /api/server): the app shows it when the account has none.</summary>
+    public void HeardServer(string url, string? language)
+    {
+        var home = Addresses.Origin(url);
+        if (home == null) return;
+        serverLanguages[home] = language;
+        ChooseLanguage();
+    }
+
+    /// <summary>Asks the server in use for its language (GET /api/server, no token); out of reach, the language shown stays.</summary>
+    public async Task LoadServer()
+    {
+        var server = Server.Value;
+        if (server == null) return;
+        try
+        {
+            if (await Servers.Probe(http, server) is { } info) HeardServer(server, info.Language);
+        }
+        catch (Exception)
+        {
+            // Asked again at the next sign-in or start.
+        }
+    }
+
+    /// <summary>The TV was set to other languages: the app follows when the account has none.</summary>
+    public void TvLanguagesChanged(IReadOnlyList<string> languages)
+    {
+        tvLanguages = languages;
+        ChooseLanguage();
+    }
+
+    /// <summary>
+    /// The language picked on this TV with the globe of the screens before signing in; null for
+    /// Automatic, the TV's own. It comes after the account's and before the TV's, so an account's
+    /// Automatic is it.
+    /// </summary>
+    public string? DeviceLanguage => deviceLanguage;
+
+    /// <summary>
+    /// Picks this TV's language (null: Automatic, the TV's own again), kept on the TV. Signed out
+    /// (the globe), or on a server that keeps no account's language (<see cref="KeepsLanguage"/>),
+    /// it shows at once, Automatic as what it says it is; signed in, unless the account has its own.
+    /// </summary>
+    public void ChooseDeviceLanguage(string? language)
+    {
+        deviceLanguage = Languages.Supported(language);
+        if (deviceLanguage != null) store.Set(DeviceLanguageKey, deviceLanguage);
+        else store.Remove(DeviceLanguageKey);
+        if (tokens?.Kept == true && KeepsLanguage) ChooseLanguage();
+        else ShowLanguage(Languages.Pick(null, ServerLanguage, tvLanguages, deviceLanguage));
+    }
+
+    /// <summary>
+    /// The language to show now: the account's once who is watching is known, else the one picked
+    /// on this TV, else the TV's, else the server's once it has said. Signed in and waiting for who
+    /// is watching, or on a TV in a language Pley doesn't have waiting for the server, the language
+    /// shown stays. A change is kept for the next start.
+    /// </summary>
+    void ChooseLanguage()
+    {
+        var server = Server.Value;
+        var me = Me.Value;
+        string? next;
+        if (me != null && Languages.Supported(me.Language) is { } own) next = own;
+        else if (me == null && tokens?.Kept == true) next = null;
+        else if (deviceLanguage != null) next = deviceLanguage;
+        else if (Languages.OfDevice(tvLanguages) is { } tv) next = tv;
+        else if (server != null && serverLanguages.TryGetValue(server, out var language)) next = Languages.Pick(null, language, tvLanguages);
+        else next = null;
+        if (next != null) ShowLanguage(next);
+    }
+
+    /// <summary>The app in <paramref name="next"/> from now on, and at the next start.</summary>
+    void ShowLanguage(string next)
+    {
+        if (next == Language.Value) return;
+        Language.Value = next;
+        store.Set(LanguageKey, next);
     }
 
     public Signal<string?> Server { get; } = new Signal<string?>(null);
@@ -253,13 +388,17 @@ public sealed class AppState
     public Signal<bool> SignedOut { get; } = new Signal<bool>(false);
     /// <summary>Whether the TV shows the app (not another app, its home screen or standby).</summary>
     public Signal<bool> Visible { get; } = new Signal<bool>(true);
+    /// <summary>The server's events are connected: what changes comes as it happens, and nothing need be polled.</summary>
+    public Signal<bool> Streaming { get; } = new Signal<bool>(false);
+    /// <summary>The server's events connected (each time): nothing is replayed, so what they would have said is asked again.</summary>
+    public event Action? Connected;
     /// <summary>
     /// The server answered a screen nothing (the Android app's TvOfflineState): what shows is what
     /// was saved. Raised by a load the network failed, lowered by the server's events connecting
     /// or a screen's fresh answer after a failure. A refusal (a 502 among them) is an answer.
     /// </summary>
     public Signal<bool> Offline { get; } = new Signal<bool>(false);
-    /// <summary>"Showing what Pley had saved. Reconnecting…" shows, for 6 s from going offline; then the rail's avatar keeps a mark.</summary>
+    /// <summary>"Pley is offline" shows, for 6 s from going offline; then the rail's avatar keeps a mark.</summary>
     public Signal<bool> OfflineNotice { get; } = new Signal<bool>(false);
     /// <summary>
     /// "Who's watching?" was answered in this launch (a profile picked, a PIN checked, or a
@@ -272,7 +411,18 @@ public sealed class AppState
     public Transport Http => http;
     public AppPlatform Platform => platform;
     public Tokens? TokenStore => tokens;
+
+    /// <summary>
+    /// The reports of what plays to the server, the players' and the music's, in order: one for the
+    /// app, so a player's last report goes out after it closed, and a cast's switch waits for them
+    /// all (<see cref="SwitchForCast"/>).
+    /// </summary>
+    public SessionReporter Reporter { get; } = new SessionReporter();
+
     public bool SignedIn => tokens?.SignedIn == true;
+
+    /// <summary>The profile the app acts as: who is watching as heard, else the one it was left on; null when neither is known.</summary>
+    public long? Profile => Me.Value?.Id ?? profile;
 
     T? Read<T>(string key, JsonSerializerOptions? options = null) where T : class => Parse<T>(store.Get(key), options);
 
@@ -294,18 +444,19 @@ public sealed class AppState
     public StartPage Start() => StartOf(Server.Value != null, tokens?.Kept == true, HouseholdSize(), AlwaysStartAs(), Me.Value);
 
     /// <summary>
-    /// The first screen (the Android app's startKey): no server, Servers; no sign-in, Link; a household
-    /// of several profiles, "Who's watching?". "Always start as" skips that question and goes on as the
-    /// profile the TV was left on (<paramref name="me"/>, as last heard), but never past its PIN: its
-    /// pad comes first when it has one, and "Who's watching?" when the TV doesn't know whether it has one.
+    /// The first screen (the Android app's startKey): no server, Servers; no sign-in, Link; otherwise
+    /// Home as the profile the TV was left on (<paramref name="me"/>, as last heard), but never past its
+    /// PIN. In a household of several profiles, one with a PIN asks first: "Who's watching?", or its pad
+    /// with "Always start as"; and so does one the TV doesn't know has none.
     /// </summary>
     public static StartPage StartOf(bool server, bool signedIn, int household, long? alwaysStartAs, User? me)
     {
         if (!server) return StartPage.Servers;
         if (!signedIn) return StartPage.Link;
         if (household <= 1) return StartPage.Home;
+        if (me is { HasPin: false }) return StartPage.Home;
         if (alwaysStartAs == null || me == null) return StartPage.Profiles;
-        return me.HasPin ? StartPage.Pin : StartPage.Home;
+        return StartPage.Pin;
     }
 
     Tokens NewTokens(string issuer, Action<SignOutReason>? onSignedOut = null) =>
@@ -343,6 +494,8 @@ public sealed class AppState
         SignedOut.Value = false;
         profile = long.TryParse(store.Get($"{ProfileKey}.{home}"), out var id) ? id : null;
         ShowSaved();
+        // Another server: its own language, or its account's, as far as they are known.
+        ChooseLanguage();
     }
 
     /// <summary>The servers this TV chose, most recently used first.</summary>
@@ -442,6 +595,34 @@ public sealed class AppState
         _ = LoadHome();
     }
 
+    /// <summary>
+    /// Moves the app to <paramref name="to"/> for a cast from that profile's remote, with its
+    /// <paramref name="ticket"/> (docs/API.md, "Casting"). What plays ends first, and its last
+    /// reports go out with this profile's sign-in, for up to <see cref="Casts.SwitchWaitMs"/>: what
+    /// hasn't gone by then is dropped, never sent as the new profile, whose watch history it isn't.
+    /// Then the ticket is redeemed and the app acts as the new profile (<see cref="Switched"/>). A
+    /// refused ticket throws, and the app stays as it is, what played ended.
+    /// </summary>
+    public async Task SwitchForCast(long to, string ticket)
+    {
+        var tokens = TokenStore ?? throw new SignedOutException();
+        EndPlayback();
+        var late = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using (scheduler.After(Casts.SwitchWaitMs, () => late.TrySetResult(true)))
+            await Task.WhenAny(Reporter.Flush(), late.Task);
+        Reporter.Drop();
+        await tokens.SwitchProfile(to, null, ticket);
+        try
+        {
+            await Switched(to);
+        }
+        catch (Exception)
+        {
+            // The switch is made: who is watching failed to load after it, which the pages' Retry
+            // has, as for a switch on "Who's watching?" (ProfilesModel).
+        }
+    }
+
     // ---- what was saved, per server and profile
 
     string SavedKey(string key, string server, long id) => $"{key}.{server}.{id.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
@@ -494,6 +675,7 @@ public sealed class AppState
         store.Remove(SavedKey(HomeKey, server, id));
         store.Remove(SavedKey(MeKey, server, id));
         store.Remove(SavedKey(LibrariesKey, server, id));
+        foreach (var key in Requests.AppRequests.KeptKeys) store.Remove(SavedKey(key, server, id));
     }
 
     /// <summary>Everything saved from <paramref name="server"/>: signed out of it, or it was forgotten.</summary>
@@ -573,6 +755,8 @@ public sealed class AppState
         Me.Value = null;
         Libraries.Value = null;
         ForgetItems();
+        // Signed out: the server's language, for signing in again.
+        ChooseLanguage();
         SignedOut.Value = true;
     }
 
@@ -906,7 +1090,11 @@ public sealed class AppState
         public void Dispose() => undo();
     }
 
-    /// <summary>Follows the server's events while the app is shown and signed in; a stream the server refused starts again here.</summary>
+    /// <summary>
+    /// Follows the server's events while the app is shown and signed in; a stream the server refused
+    /// starts again here. The stream makes this TV a receiver of the profile's remotes' casts
+    /// (<see cref="Casts.ReceiverQuery"/>).
+    /// </summary>
     public void Listen(bool on)
     {
         var server = Server.Value;
@@ -917,12 +1105,34 @@ public sealed class AppState
             Scans.Value = new ScanState[0];
             return;
         }
-        events ??= new EventStream(server, tokens, HandleEvent, Reconnected, connect, scheduler, platform.UserAgent);
+        events ??= new EventStream(server, tokens, HandleEvent, Reconnected, connect, scheduler, platform.UserAgent,
+            onDrop: () => Streaming.Value = false,
+            query: () =>
+            {
+                receivesLive = liveTv;
+                return Casts.ReceiverQuery(InstallId(), receivesLive);
+            });
         events.Start();
+    }
+
+    /// <summary>Whether Live TV shows for the profile, and whether the stream last opened told the remotes this TV takes channels.</summary>
+    bool liveTv, receivesLive;
+
+    /// <summary>Live TV shows for the profile now, or no longer does: the stream opens again to tell the remotes.</summary>
+    public void TakesLive(bool live)
+    {
+        liveTv = live;
+        if (events?.Running == true && live != receivesLive)
+        {
+            events.Stop();
+            events.Start();
+        }
     }
 
     void Reconnected()
     {
+        Streaming.Value = true;
+        Connected?.Invoke();
         // Nothing is replayed: what is older than 30 s, or anything after the server was out of reach, is asked again.
         var away = Offline.Value;
         ServerAnswered();

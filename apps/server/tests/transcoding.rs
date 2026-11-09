@@ -21,11 +21,11 @@ use parking_lot::Mutex;
 use pley::disks::{Disk, Source};
 use pley::trickplay::Pace;
 use pley_transcoder_api::{
-    API_VERSION, AudioMode, AudioPlan, BitrateChanged, BitrateRequest, Capabilities, ConversionState, ConversionStatus,
-    EncoderInfo, ErrorBody, FileContainer, HoldRequest, HwAccel, JobCreated, JobRequest, JobStatus, Limits, Load,
-    MediaInfo, MediaStream, PrefetchRequest, Prefetched, ProbeRequest, SUBTITLES_COMPLETE_HEADER, StreamKind,
-    SubtitleRequest, TranscoderInfo, TranscoderStatus, TrickplayInfo, TrickplayRequest, VideoCodec, VideoMode,
-    VideoPlan,
+    API_VERSION, AudioCodec, AudioMode, AudioPlan, BitrateChanged, BitrateRequest, Capabilities, ConversionState,
+    ConversionStatus, DynamicRange, EncoderInfo, ErrorBody, FileContainer, HoldRequest, HwAccel, JobCreated,
+    JobRequest, JobStatus, Limits, Load, MediaInfo, MediaStream, OutputRange, PrefetchRequest, Prefetched,
+    ProbeRequest, SUBTITLES_COMPLETE_HEADER, SegmentFormat, StreamKind, SubtitleRequest, TranscoderInfo,
+    TranscoderStatus, TrickplayInfo, TrickplayRequest, VideoCodec, VideoMode, VideoPlan,
 };
 use serde_json::{Value, json};
 
@@ -43,6 +43,8 @@ struct Fake {
     bitrates: Arc<Mutex<Vec<(String, u32)>>>,
     /// Every job request, in order.
     created: Arc<Mutex<Vec<JobRequest>>>,
+    /// Every job request as its JSON came, in order.
+    created_json: Arc<Mutex<Vec<Value>>>,
     deleted: Arc<Mutex<Vec<String>>>,
     probes: Arc<Mutex<Vec<String>>>,
     subtitles: Arc<Mutex<Vec<SubtitleRequest>>>,
@@ -100,6 +102,10 @@ struct Fake {
     holds: Arc<Mutex<Vec<u64>>>,
     /// FFmpeg transcodes running, as `/v1/status` says.
     transcoding: Arc<AtomicU32>,
+    /// It writes jobs' multivariant playlists (`hls_master_playlist`).
+    master_playlists: Arc<AtomicBool>,
+    /// It keeps HDR in transcodes (`hdr_transcode`).
+    hdr_transcodes: Arc<AtomicBool>,
 }
 
 /// The stand-in's one conversion: running when asked for, done when looked at again.
@@ -176,7 +182,22 @@ fn probe_result(path: &str) -> Option<MediaInfo> {
         title: Some(title.into()),
         ..audio(index, codec, "eng", default)
     };
-    let streams = if path.contains("Lossless") {
+    let streams = if path.contains("Peak") {
+        // 4K HEVC Main 10 in HDR10, with TrueHD 7.1 and a stereo AAC track.
+        let hdr = MediaStream {
+            codec: "hevc".into(),
+            profile: Some("Main 10".into()),
+            level: Some(153),
+            width: Some(3840),
+            height: Some(2160),
+            bit_depth: Some(10),
+            frame_rate: Some(23.976),
+            dynamic_range: Some(DynamicRange::Hdr10),
+            ..video("hevc")
+        };
+        let truehd = MediaStream { channels: Some(8), ..audio(1, "truehd", "eng", true) };
+        vec![hdr, truehd, audio(2, "aac", "eng", false)]
+    } else if path.contains("Lossless") {
         // A film with its English sound three ways: TrueHD (the default), Dolby Digital 5.1, stereo.
         vec![
             video("h264"),
@@ -235,6 +256,16 @@ fn job_status(id: &str, req: &JobRequest, segments: u32) -> JobStatus {
         }),
         ..Default::default()
     }
+}
+
+/// A job's status as the stand-in tells it: with FFmpeg's words, which name
+/// the file, while the media can't be read.
+fn told_status(fake: &Fake, id: &str, req: &JobRequest, segments: u32) -> JobStatus {
+    let mut status = job_status(id, req, segments);
+    if fake.unreadable.load(Ordering::SeqCst) {
+        status.last_error = Some(format!("Error opening input file file:{}.", req.input));
+    }
+    status
 }
 
 /// Counts requests dropped before they were answered (pley gave up on them,
@@ -309,6 +340,9 @@ async fn start_fake() -> (Fake, String) {
                         conversions: true,
                         conversions_mp4: true,
                         live_bitrate: true,
+                        fmp4_segments: true,
+                        hls_master_playlist: fake.master_playlists.load(Ordering::SeqCst),
+                        hdr_transcode: fake.hdr_transcodes.load(Ordering::SeqCst),
                         trickplay_version: 1,
                         trickplay_runs: fake.trickplay_runs.load(Ordering::SeqCst),
                         ..Default::default()
@@ -322,7 +356,7 @@ async fn start_fake() -> (Fake, String) {
         .route(
             "/v1/status",
             get(|State(fake): State<Fake>| async move {
-                let jobs = fake.jobs.lock().iter().map(|(id, (req, n))| job_status(id, req, *n)).collect();
+                let jobs = fake.jobs.lock().iter().map(|(id, (req, n))| told_status(&fake, id, req, *n)).collect();
                 Json(TranscoderStatus {
                     version: "9.9.9".into(),
                     max_jobs: 8,
@@ -346,7 +380,9 @@ async fn start_fake() -> (Fake, String) {
         )
         .route(
             "/v1/jobs",
-            post(|State(fake): State<Fake>, Json(req): Json<JobRequest>| async move {
+            post(|State(fake): State<Fake>, Json(json): Json<Value>| async move {
+                let req: JobRequest = serde_json::from_value(json.clone()).expect("a job request");
+                fake.created_json.lock().push(json);
                 let delay = *fake.job_delay.lock();
                 if !delay.is_zero() {
                     tokio::time::sleep(delay).await;
@@ -361,6 +397,8 @@ async fn start_fake() -> (Fake, String) {
                 let id = format!("job{n}");
                 let segments = fake.layout.lock().unwrap_or(15);
                 let status = job_status(&id, &req, segments);
+                // fMP4 as asked, but for jobs without video.
+                let segment_format = if req.video.is_some() { req.segment_format } else { SegmentFormat::Ts };
                 fake.created.lock().push(req.clone());
                 fake.jobs.lock().insert(id.clone(), (req, segments));
                 Json(JobCreated {
@@ -372,6 +410,7 @@ async fn start_fake() -> (Fake, String) {
                     audio: status.audio,
                     warnings: vec![],
                     variants: 0,
+                    segment_format,
                 })
                 .into_response()
             }),
@@ -380,13 +419,7 @@ async fn start_fake() -> (Fake, String) {
             "/v1/jobs/{id}",
             get(|State(fake): State<Fake>, Path(id): Path<String>| async move {
                 match fake.jobs.lock().get(&id) {
-                    Some((req, n)) => {
-                        let mut status = job_status(&id, req, *n);
-                        if fake.unreadable.load(Ordering::SeqCst) {
-                            status.last_error = Some(format!("Error opening input file file:{}.", req.input));
-                        }
-                        Json(status).into_response()
-                    }
+                    Some((req, n)) => Json(told_status(&fake, &id, req, *n)).into_response(),
                     None => error(StatusCode::NOT_FOUND, "job_not_found"),
                 }
             })
@@ -421,9 +454,20 @@ async fn start_fake() -> (Fake, String) {
         .route(
             "/v1/jobs/{id}/{file}",
             get(|State(fake): State<Fake>, Path((id, file)): Path<(String, String)>| async move {
-                let Some(segments) = fake.jobs.lock().get(&id).map(|(_, n)| *n) else {
+                let Some((format, segments)) = fake.jobs.lock().get(&id).map(|(req, n)| (req.segment_format, *n))
+                else {
                     return error(StatusCode::NOT_FOUND, "job_not_found");
                 };
+                if file == "init.mp4" && format == SegmentFormat::Fmp4 {
+                    return ([(header::CONTENT_TYPE, "video/mp4")], format!("{id}:init")).into_response();
+                }
+                if file == "master.m3u8" && fake.master_playlists.load(Ordering::SeqCst) {
+                    let version = if format == SegmentFormat::Fmp4 { 7 } else { 3 };
+                    let playlist = format!(
+                        "#EXTM3U\n#EXT-X-VERSION:{version}\n#EXT-X-STREAM-INF:BANDWIDTH=8000000,CODECS=\"{id}\"\nindex.m3u8\n"
+                    );
+                    return ([(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")], playlist).into_response();
+                }
                 if file == "index.m3u8" {
                     let mut playlist = String::from("#EXTM3U\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-TARGETDURATION:4\n");
                     for n in 0..segments {
@@ -432,9 +476,9 @@ async fn start_fake() -> (Fake, String) {
                     playlist.push_str("#EXT-X-ENDLIST\n");
                     return ([(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")], playlist).into_response();
                 }
-                match file.strip_suffix(".ts").and_then(|n| n.parse::<u32>().ok()) {
+                match file.strip_suffix(&format!(".{}", format.extension())).and_then(|n| n.parse::<u32>().ok()) {
                     Some(n) if n < segments => {
-                        ([(header::CONTENT_TYPE, "video/mp2t")], format!("{id}:{n}")).into_response()
+                        ([(header::CONTENT_TYPE, format.content_type())], format!("{id}:{n}")).into_response()
                     }
                     _ => error(StatusCode::NOT_FOUND, "not_found"),
                 }
@@ -473,8 +517,9 @@ async fn start_fake() -> (Fake, String) {
         )
         .route(
             "/v1/subtitles/mks",
-            // An EBML header, then what was asked for. Stream 3's copy takes
-            // a while: its first look has what was copied so far.
+            // An EBML header, then what was asked for; a `.sup` next to the
+            // media, a PGS track. Stream 3's copy takes a while: its first
+            // look has what was copied so far.
             post(|State(fake): State<Fake>, Json(req): Json<SubtitleRequest>| async move {
                 let mut mks = vec![0x1A, 0x45, 0xDF, 0xA3];
                 let first =
@@ -482,6 +527,8 @@ async fn start_fake() -> (Fake, String) {
                 let slow = req.partial && req.stream_index == Some(3) && first;
                 if slow {
                     mks.extend(b"so far");
+                } else if req.stream_index.is_none() {
+                    mks = pgs_track();
                 } else {
                     mks.extend(format!("{}#{:?}", req.path, req.stream_index).into_bytes());
                 }
@@ -527,6 +574,17 @@ async fn start_fake() -> (Fake, String) {
             get(|State(fake): State<Fake>, Path(id): Path<String>| async move {
                 if id != CONVERSION {
                     return error(StatusCode::NOT_FOUND, "not_found");
+                }
+                if fake.unreadable.load(Ordering::SeqCst) {
+                    let input = fake.conversions.lock().last().map(|req| req.input.clone()).unwrap_or_default();
+                    return Json(ConversionStatus {
+                        id,
+                        state: ConversionState::Failed,
+                        duration_ms: 60_000,
+                        error: Some(format!("ffmpeg exited with exit code: 1: Error opening input file file:{input}.")),
+                        ..Default::default()
+                    })
+                    .into_response();
                 }
                 if fake.conversion_running.load(Ordering::SeqCst) {
                     return Json(ConversionStatus {
@@ -660,7 +718,14 @@ struct World {
 /// "Feature" (MKV, with an English sidecar subtitle), "Clip" (MP4) and
 /// "Broken" (ffprobe can't read it).
 async fn world() -> World {
+    world_with(|_| {}).await
+}
+
+/// [`world`] with a stand-in that `adjust` set up before Pley first asks
+/// what it can do.
+async fn world_with(adjust: impl FnOnce(&Fake)) -> World {
     let (fake, base) = start_fake().await;
+    adjust(&fake);
     let url = base.clone();
     let app = TestApp::with_config(|c| {
         c.transcoder_url = Some(url);
@@ -1019,6 +1084,94 @@ async fn a_converted_streams_bitrate_changes_as_it_plays() {
     assert_eq!(refused.status, StatusCode::BAD_REQUEST);
 }
 
+/// An Apple player: no Matroska, H.264 decoded, fMP4 segments before TS.
+fn apple() -> Value {
+    json!({
+        "caps_version": 2, "containers": ["mp4", "m4v", "mov"], "video_codecs": ["h264"], "audio_codecs": ["aac"],
+        "video": [{"codec": "h264", "hardware": true, "profiles": ["Main", "High"], "max_width": 3840,
+                   "max_height": 2160, "max_bit_depth": 8}],
+        "audio_decode": ["aac"],
+        "hls": {"master_playlist": true, "segments": ["fmp4", "ts"]}
+    })
+}
+
+#[tokio::test]
+async fn players_that_put_fmp4_first_stream_fmp4_segments() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let feature = w.movies["Feature"];
+
+    // Players that don't ask for fMP4: the request names no format, as
+    // older transcoders read it.
+    let ts = play(app, admin, json!({"item_id": feature, "caps": browser(), "client_id": "tab"})).await;
+    assert_eq!(ts.status, StatusCode::OK, "{}", ts.body);
+    assert_eq!(w.fake.last_request().segment_format, SegmentFormat::Ts);
+    let json = w.fake.created_json.lock().last().cloned().unwrap();
+    assert!(json.get("segment_format").is_none(), "{json}");
+    assert_eq!(ts.body["pts_offset_ms"], json!(1400));
+
+    let started =
+        play(app, admin, json!({"item_id": feature, "caps": apple(), "mode": "transcode", "keyed_urls": true})).await;
+    assert_eq!(started.status, StatusCode::OK, "{}", started.body);
+    assert_eq!(w.fake.last_request().segment_format, SegmentFormat::Fmp4);
+    assert_eq!(w.fake.created_json.lock().last().unwrap()["segment_format"], json!("fmp4"));
+    let info = &started.body;
+    assert_eq!(info["method"], json!("transcode"));
+    // Its bitrate stays as it began; the MP4 muxer adds nothing to the times.
+    assert_eq!((&info["live_bitrate"], &info["pts_offset_ms"]), (&json!(false), &json!(0)));
+    let session = info["session_id"].as_str().unwrap().to_owned();
+    let refused = app.put(&format!("/api/playback/{session}/bitrate"), admin, json!({"max_bitrate": 3000})).await;
+    assert_eq!(refused.status, StatusCode::BAD_REQUEST);
+    assert!(w.fake.bitrates.lock().is_empty());
+
+    let get = |file: &str| {
+        let uri = format!("/api/playback/{session}/{file}");
+        async move { app.get(&uri, admin).await }
+    };
+    let init = get("init.mp4").await;
+    assert_eq!((init.status, init.text()), (StatusCode::OK, "job2:init".to_owned()));
+    assert_eq!(init.headers[header::CONTENT_TYPE], "video/mp4");
+    let segment = get("3.m4s").await;
+    assert_eq!((segment.status, segment.text()), (StatusCode::OK, "job2:3".to_owned()));
+    assert_eq!(segment.headers[header::CONTENT_TYPE], "video/mp4");
+    // Names in the other format, or no name at all, are not found.
+    for file in ["3.ts", "init.m4s", "3.m4s.p1", "v0-init.mp4"] {
+        assert_eq!(get(file).await.status, StatusCode::NOT_FOUND, "{file}");
+    }
+
+    // Keyed URLs name the same files.
+    let url = info["url"].as_str().unwrap();
+    assert!(url.starts_with("/api/media/") && url.ends_with("/index.m3u8"), "{url}");
+    let keyed = url.trim_end_matches("index.m3u8");
+    let init = app.call(Method::GET, &format!("{keyed}init.mp4"), None, None, &[]).await;
+    assert_eq!((init.status, &init.headers[header::CONTENT_TYPE]), (StatusCode::OK, &"video/mp4".parse().unwrap()));
+    let segment = app.call(Method::GET, &format!("{keyed}4.m4s"), None, None, &[]).await;
+    assert_eq!((segment.status, segment.text()), (StatusCode::OK, "job2:4".to_owned()));
+
+    // A lost job isn't made again: the player holds the first job's init,
+    // which another encoder's wouldn't match. It starts a new session.
+    w.fake.lose_jobs();
+    let lost = get("5.m4s").await;
+    assert_eq!(lost.status, StatusCode::NOT_FOUND);
+    assert_eq!(lost.body["message"], json!("playback session expired"));
+
+    // A remux's init is the file's, the same each time: its job comes back
+    // in fMP4, with the same names.
+    let remux = play(app, admin, json!({"item_id": feature, "caps": apple(), "client_id": "phone"})).await;
+    assert_eq!(remux.body["method"], json!("remux"), "{}", remux.body);
+    let id = remux.body["session_id"].as_str().unwrap().to_owned();
+    w.fake.lose_jobs();
+    let segment = app.get(&format!("/api/playback/{id}/5.m4s"), admin).await;
+    assert!(segment.status == StatusCode::OK && segment.text().ends_with(":5"), "{}", segment.text());
+    assert_eq!(w.fake.last_request().segment_format, SegmentFormat::Fmp4);
+
+    // An MPEG-TS session has no fMP4 files.
+    let tab = ts.body["session_id"].as_str().unwrap();
+    for file in ["0.m4s", "init.mp4"] {
+        assert_eq!(app.get(&format!("/api/playback/{tab}/{file}"), admin).await.status, StatusCode::NOT_FOUND);
+    }
+}
+
 #[tokio::test]
 async fn the_transcode_limit_counts_live_hls_sessions() {
     let w = world().await;
@@ -1139,6 +1292,42 @@ async fn apps_never_see_media_paths_in_the_transcoders_words() {
     // pley's own sign-in gets the transcoder's own words.
     let own = play(app, admin, start).await;
     assert!(own.mentions(&folder), "{}", own.text());
+}
+
+#[tokio::test]
+async fn only_administrators_see_media_paths_in_the_transcoders_words() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let (bob, _) = app.user(admin, "bob", json!({})).await;
+    let movies = app.media_path("movies");
+    let folder = std::path::Path::new(&movies).parent().unwrap().file_name().unwrap().to_string_lossy().into_owned();
+    let feature = w.movies["Feature"];
+    let started = play(app, &bob, json!({"item_id": feature, "caps": browser()})).await;
+    assert_eq!(started.status, StatusCode::OK, "{}", started.text());
+    let session = started.body["session_id"].as_str().unwrap().to_owned();
+    let asked = app.post("/api/conversions", &bob, json!({"item_id": feature, "caps": phone()})).await;
+    assert_eq!(asked.status, StatusCode::OK, "{}", asked.text());
+
+    // The share holding the files goes to sleep, for a playback and a
+    // download of someone signed in on pley's own page.
+    w.fake.unreadable.store(true, Ordering::SeqCst);
+    let download = format!("/api/conversions/{CONVERSION}");
+    let replies = [
+        ("the player's details", app.get(&format!("/api/playback/{session}"), &bob).await),
+        ("the activity", app.get("/api/activity", &bob).await),
+        ("the download", app.get(&download, &bob).await),
+    ];
+    for (case, reply) in &replies {
+        assert_eq!(reply.status, StatusCode::OK, "{case}: {}", reply.text());
+        assert!(!reply.mentions(&folder), "{case}: {}", reply.text());
+    }
+    assert_eq!(replies[1].1.body["sessions"][0]["transcode"]["last_error"], "the conversion failed");
+    assert_eq!(replies[2].1.body["state"], "failed");
+    // An administrator gets them.
+    for path in ["/api/activity", download.as_str()] {
+        let reply = app.get(path, admin).await;
+        assert!(reply.mentions(&folder), "{path}: {}", reply.text());
+    }
 }
 
 #[tokio::test]
@@ -1271,6 +1460,38 @@ async fn pgs_subtitles_come_as_sup_files_for_kodi() {
         let reply = app.get(&format!("/api/files/{file}/subtitles/{missing}"), admin).await;
         assert_eq!(reply.status, StatusCode::NOT_FOUND, "{missing}");
     }
+    // Chosen for the title, it isn't copied as a stream of it starts for a
+    // player that draws it: the copy reads only this file, when asked.
+    let chosen = app
+        .put(&format!("/api/items/{feature}/streams"), admin, json!({"file_id": file, "subtitle_index": index}))
+        .await;
+    assert!(chosen.status.is_success(), "{:?}", chosen.body);
+    let started = play(app, admin, json!({"item_id": feature, "caps": web_drawing_pictures(), "client_id": "a"})).await;
+    assert_eq!(started.body["method"], json!("remux"), "{:?}", started.body);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(w.fake.tracks.lock().is_empty());
+    // Asked for, it is copied then, from that file alone: as its `.mks`, and
+    // as Roku's pictures for a keyed playback (copied again, the server's
+    // copy gone).
+    let copies = || {
+        let tracks = w.fake.tracks.lock();
+        assert!(tracks.iter().all(|r| r.stream_index.is_none() && r.path.ends_with("Feature (2021).de.sup")));
+        tracks.len()
+    };
+    let mks = app.get(&format!("/api/files/{file}/subtitles/{index}.mks?at=0"), admin).await;
+    assert_eq!(mks.status, StatusCode::OK, "{}", mks.text());
+    assert_eq!(mks.bytes, pgs_track());
+    assert_eq!(copies(), 1);
+    for cached in std::fs::read_dir(app.state.config.cache_dir().join("subtitles")).unwrap() {
+        std::fs::remove_file(cached.unwrap().path()).unwrap();
+    }
+    let keyed = json!({"item_id": feature, "caps": web_drawing_pictures(), "keyed_urls": true, "client_id": "b"});
+    let url = play(app, admin, keyed).await.body["url"].as_str().unwrap().to_owned();
+    let list = format!("{}subtitles-{index}.json?at=0", &url[..url.rfind('/').unwrap() + 1]);
+    let cues = app.call(Method::GET, &list, None, None, &[]).await;
+    assert_eq!(cues.status, StatusCode::OK, "{}", cues.text());
+    assert_eq!(cues.body["cues"][0]["start_ms"], json!(1000));
+    assert_eq!(copies(), 2);
 }
 
 #[tokio::test]
@@ -1286,6 +1507,145 @@ async fn partial_picture_subtitles_come_with_ranges() {
     assert_eq!(rest.headers[header::CONTENT_RANGE], "bytes 4-9/*");
     assert_eq!(rest.text(), "so far");
     assert_eq!(rest.headers[SUBTITLES_COMPLETE_HEADER], "0");
+}
+
+#[tokio::test]
+async fn picture_subtitles_are_asked_for_where_the_player_is() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let file = app.file_of(w.movies["Feature"]).await;
+    // To the second: a player asking again a moment later asks for the same
+    // pictures.
+    app.get(&format!("/api/files/{file}/subtitles/3.mks?at=754500"), admin).await;
+    let asked = w.fake.tracks.lock()[0].clone();
+    assert_eq!((asked.from_ms, asked.rest), (Some(754_000), false));
+    let reply = app.get(&format!("/api/files/{file}/subtitles/3.mks?at=soon"), admin).await;
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+    // Kodi reads its .sup once: all that is read so far.
+    app.get(&format!("/api/files/{file}/subtitles/3.sup"), admin).await;
+    assert!(w.fake.tracks.lock().iter().skip(1).all(|r| r.rest && r.from_ms.is_none()));
+}
+
+/// A Matroska file of a PGS track as the transcoder writes them: a 4×2
+/// white picture at 100, 900 of a 1920×1080 plane from 1 s, cleared at 3 s.
+fn pgs_track() -> Vec<u8> {
+    fn el(id: &[u8], data: &[u8]) -> Vec<u8> {
+        [id, &[0x40 | (data.len() >> 8) as u8, data.len() as u8], data].concat()
+    }
+    fn segment(kind: u8, body: &[u8]) -> Vec<u8> {
+        [&[kind][..], &(body.len() as u16).to_be_bytes(), body].concat()
+    }
+    // A composition of 1920×1080, an epoch start, with palette 0, then its
+    // objects: one, at 100, 900; or none.
+    let composition =
+        |objects: &[u8]| segment(0x16, &[&[0x07, 0x80, 0x04, 0x38, 0x10, 0, 1, 0x80, 0, 0][..], objects].concat());
+    let shown = [
+        composition(&[1, 0, 0, 0, 0, 0, 100, 0x03, 0x84]),
+        // Palette entry 1: white, opaque (Y, Cr, Cb, alpha).
+        segment(0x14, &[0, 0, 1, 235, 128, 128, 255]),
+        // Object 0, 4×2, two lines of four of entry 1.
+        segment(0x15, &[0, 0, 0, 0xC0, 0, 0, 14, 0, 4, 0, 2, 0, 0x84, 1, 0, 0, 0, 0x84, 1, 0, 0]),
+        segment(0x80, &[]),
+    ]
+    .concat();
+    let cleared = [composition(&[0]), segment(0x80, &[])].concat();
+    let cluster = |time: u16, set: &[u8]| {
+        el(
+            &[0x1F, 0x43, 0xB6, 0x75],
+            &[el(&[0xE7], &time.to_be_bytes()), el(&[0xA3], &[&[0x81, 0, 0, 0x80][..], set].concat())].concat(),
+        )
+    };
+    let info = el(&[0x15, 0x49, 0xA9, 0x66], &el(&[0x2A, 0xD7, 0xB1], &[0x0F, 0x42, 0x40]));
+    let tracks = el(&[0x16, 0x54, 0xAE, 0x6B], &el(&[0xAE], &el(&[0x86], b"S_HDMV/PGS")));
+    let segment = [info, tracks, cluster(1_000, &shown), cluster(3_000, &cleared)].concat();
+    [el(&[0x1A, 0x45, 0xDF, 0xA3], &el(&[0x42, 0x82], b"matroska")), el(&[0x18, 0x53, 0x80, 0x67], &segment)].concat()
+}
+
+#[tokio::test]
+async fn pgs_subtitles_come_as_pictures_for_a_keyed_player() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let feature = w.movies["Feature"];
+    let file = app.file_of(feature).await;
+    // The English PGS track copied already.
+    let mtime: i64 = sqlx::query_scalar("SELECT mtime FROM media_files WHERE id = ?")
+        .bind(file)
+        .fetch_one(&app.state.db.read)
+        .await
+        .unwrap();
+    let cache = app.state.config.cache_dir().join("subtitles");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::write(cache.join(format!("{file}_3_{mtime}.mks")), pgs_track()).unwrap();
+    let started =
+        play(app, admin, json!({"item_id": feature, "caps": web_drawing_pictures(), "keyed_urls": true})).await;
+    assert_eq!(started.status, StatusCode::OK, "{:?}", started.body);
+    let url = started.body["url"].as_str().unwrap();
+    let folder = &url[..url.rfind('/').unwrap() + 1];
+    assert!(folder.starts_with("/api/media/pley_mk_"), "{url}");
+    let bare = |name: &str| {
+        let uri = format!("{folder}{name}");
+        async move { app.call(Method::GET, &uri, None, None, &[]).await }
+    };
+
+    // Asked for with no token, as Roku's player asks: when and where each
+    // picture shows, and each picture beside it, from where the list was
+    // asked for (to the second).
+    let cues = bare("subtitles-3.json?at=500").await;
+    assert_eq!(cues.status, StatusCode::OK, "{}", cues.text());
+    assert_eq!(cues.headers[header::CONTENT_TYPE], "application/json");
+    assert_eq!(cues.headers[header::CACHE_CONTROL], "private, no-store");
+    assert_eq!(cues.headers[SUBTITLES_COMPLETE_HEADER], "1");
+    assert_eq!(
+        cues.body,
+        json!({"complete": true, "width": 1920, "height": 1080, "cues": [
+            {"start_ms": 1000, "end_ms": 3000, "x": 100, "y": 900, "width": 4, "height": 2, "image": "subtitles-3-1000.png?at=0"}
+        ]})
+    );
+    let picture = bare("subtitles-3-1000.png?at=0").await;
+    assert_eq!(picture.status, StatusCode::OK, "{}", picture.text());
+    assert_eq!(picture.headers[header::CONTENT_TYPE], "image/png");
+    let png = image::load_from_memory_with_format(&picture.bytes, image::ImageFormat::Png).unwrap().into_rgba8();
+    assert_eq!(png.dimensions(), (4, 2));
+    assert!(png.pixels().all(|p| p.0 == [255, 255, 255, 255]));
+    assert!(w.fake.tracks.lock().is_empty(), "from the cache");
+
+    // Text, a time no picture starts at, times no file has, other names: none.
+    for missing in [
+        "subtitles-4.json",
+        "subtitles-3-2000.png",
+        "subtitles-3--5.png",
+        "subtitles-3-9223372036854775807.png",
+        "subtitles-x.json",
+        "subtitles-3.txt",
+        "subtitles-3-a.png",
+    ] {
+        assert_eq!(bare(missing).await.status, StatusCode::NOT_FOUND, "{missing}");
+    }
+    // The key opens this session's file's only.
+    let wrong = format!("/api/media/pley_mk_{}/subtitles-3.json", "A".repeat(43));
+    assert_eq!(app.call(Method::GET, &wrong, None, None, &[]).await.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn pictures_for_a_keyed_player_are_copied_from_around_where_it_asks() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let started =
+        play(app, admin, json!({"item_id": w.movies["Feature"], "caps": web_drawing_pictures(), "keyed_urls": true}))
+            .await;
+    let url = started.body["url"].as_str().unwrap();
+    let folder = &url[..url.rfind('/').unwrap() + 1];
+    let asked = |uri: String| async move { app.call(Method::GET, &uri, None, None, &[]).await };
+    let from = || w.fake.tracks.lock().last().map(|r| (r.stream_index, r.from_ms));
+    // The list from where the player is; a picture from where its list was,
+    // which the transcoder answers with the same pictures (one around its
+    // own time could start a read of its own).
+    asked(format!("{folder}subtitles-3.json?at=5000")).await;
+    assert_eq!(from(), Some((Some(3), Some(5_000))));
+    let before = w.fake.tracks.lock().len();
+    asked(format!("{folder}subtitles-3-61000.png?at=5000")).await;
+    assert_eq!(w.fake.tracks.lock().len(), before + 1);
+    assert_eq!(from(), Some((Some(3), Some(5_000))));
 }
 
 /// The web app's report: version 1, with the picture subtitles it draws.
@@ -1554,6 +1914,146 @@ async fn frame_grabs_are_made_once_per_file() {
 }
 
 #[tokio::test]
+async fn jellyfin_clients_stream_hls_from_the_transcoder() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let feature = app.jf_item(w.movies["Feature"]);
+
+    // A device that plays MP4 only is given an HLS address, with what it asked.
+    let profile = json!({"DirectPlayProfiles": [{"Container": "mp4", "VideoCodec": "h264", "AudioCodec": "aac", "Type": "Video"}]});
+    let asked = json!({
+        "DeviceProfile": profile,
+        "MaxStreamingBitrate": 2_000_000,
+        "StartTimeTicks": 300_000_000_i64,
+        "AudioStreamIndex": 2,
+    });
+    let info = app.jf(Method::POST, &format!("/Items/{feature}/PlaybackInfo"), admin, Some(asked)).await;
+    assert_eq!(info.status, StatusCode::OK, "{}", info.text());
+    let source = &info.body["MediaSources"][0];
+    assert_eq!((&source["SupportsDirectPlay"], &source["TranscodingSubProtocol"]), (&json!(false), &json!("hls")));
+    assert!(info.body["PlaySessionId"].as_str().is_some_and(|id| id.len() == 32));
+    let url = format!("{}&MaxHeight=720", source["TranscodingUrl"].as_str().unwrap());
+    assert!(url.starts_with(&format!("/videos/{feature}/master.m3u8?")), "{url}");
+
+    let master = app.jf(Method::GET, &url, admin, None).await;
+    assert_eq!(master.status, StatusCode::OK, "{}", master.text());
+    let text = master.text();
+    let variant = text.lines().find(|l| l.starts_with("hls1/")).unwrap().to_owned();
+    let job = w.fake.last_request();
+    assert_eq!(job.start_ms, Some(30_000));
+    let video = job.video.unwrap();
+    assert_eq!((video.mode, video.max_height, video.max_bitrate_kbps), (VideoMode::Transcode, Some(720), Some(1_808)));
+    assert_eq!(job.audio.unwrap().stream_index, Some(2), "Jellyfin's stream indexes are the file's");
+    // Opened again, as players do to probe it: the same stream.
+    let jobs = w.fake.created();
+    assert_eq!(app.jf(Method::GET, &url, admin, None).await.text(), text);
+    assert_eq!(w.fake.created(), jobs);
+
+    // The session's addresses need no token.
+    let base = format!("/Videos/{feature}/{}", variant.trim_end_matches("index.m3u8"));
+    let playlist = app.jf(Method::GET, &format!("{base}index.m3u8"), "", None).await;
+    assert_eq!(playlist.status, StatusCode::OK);
+    let segment = app.jf(Method::GET, &format!("{base}0.ts"), "", None).await;
+    assert_eq!((segment.status, segment.text()), (StatusCode::OK, "job1:0".to_owned()));
+
+    // Without limits, H.264 is copied.
+    let source = source["Id"].as_str().unwrap();
+    let plain = format!("/Videos/{feature}/master.m3u8?MediaSourceId={source}&VideoCodec=h264&AudioCodec=aac");
+    assert_eq!(app.jf(Method::GET, &plain, admin, None).await.status, StatusCode::OK);
+    assert_eq!(w.fake.last_request().video.unwrap().mode, VideoMode::Copy);
+
+    // The device's streams end, and their jobs.
+    let stop = app.jf(Method::DELETE, "/Videos/ActiveEncodings?DeviceId=bench-1", admin, None).await;
+    assert_eq!(stop.status, StatusCode::NO_CONTENT);
+    eventually(|| w.fake.deleted.lock().contains(&"job1".to_owned())).await;
+    assert_eq!(app.jf(Method::GET, &format!("{base}index.m3u8"), "", None).await.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn jellyfin_apps_stream_hevc_hdr_and_surround_as_their_profiles_allow() {
+    let w = world_with(|fake| {
+        fake.master_playlists.store(true, Ordering::SeqCst);
+        fake.hdr_transcodes.store(true, Ordering::SeqCst);
+    })
+    .await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    app.media_file("uhd/Peak (2022)/Peak (2022).mkv", 5120);
+    let library = app.library(admin, "UHD", "movies", "uhd").await;
+    let peak = app.jf_item(app.ids(library, admin).await["Peak"]);
+
+    // A TV app's profile: MP4 played as it is, HLS in fMP4 with HEVC up to
+    // level 5.1, and Dolby Digital (Plus) on six channels.
+    let profile = json!({
+        "DirectPlayProfiles": [{"Container": "mp4", "VideoCodec": "h264", "AudioCodec": "aac", "Type": "Video"}],
+        "TranscodingProfiles": [{"Type": "Video", "Container": "mp4", "Protocol": "hls",
+            "VideoCodec": "hevc,h264", "AudioCodec": "aac,ac3,eac3", "MaxAudioChannels": "6"}],
+        "CodecProfiles": [{"Type": "Video", "Codec": "hevc",
+            "Conditions": [{"Condition": "LessThanEqual", "Property": "VideoLevel", "Value": "153"}]}]
+    });
+    let asked = json!({"DeviceProfile": profile, "AudioStreamIndex": 1});
+    let info = app.jf(Method::POST, &format!("/Items/{peak}/PlaybackInfo"), admin, Some(asked)).await;
+    assert_eq!(info.status, StatusCode::OK, "{}", info.text());
+    let source = &info.body["MediaSources"][0];
+    assert_eq!((&source["SupportsDirectPlay"], &source["TranscodingContainer"]), (&json!(false), &json!("mp4")));
+    let url = source["TranscodingUrl"].as_str().unwrap().to_owned();
+    for asked in ["VideoCodec=hevc%2Ch264", "AudioCodec=aac%2Cac3%2Ceac3", "SegmentContainer=mp4", "hevc-level=153"] {
+        assert!(url.contains(asked), "{asked}: {url}");
+    }
+    assert!(url.contains("TranscodingMaxAudioChannels=6"), "{url}");
+
+    // The HDR10 video copied into fMP4, TrueHD made E-AC-3 5.1.
+    let master = app.jf(Method::GET, &url, admin, None).await;
+    assert_eq!(master.status, StatusCode::OK, "{}", master.text());
+    let job = w.fake.last_request();
+    assert_eq!(job.segment_format, SegmentFormat::Fmp4);
+    assert_eq!(job.video.unwrap().mode, VideoMode::Copy);
+    let audio = job.audio.unwrap();
+    assert_eq!((audio.mode, audio.codec, audio.channels), (AudioMode::Transcode, AudioCodec::Eac3, Some(6)));
+    // The session's own multivariant playlist, which names what it carries,
+    // with its playlists beside this one; their files need no token.
+    let text = master.text();
+    assert!(text.starts_with("#EXTM3U\n#EXT-X-VERSION:7\n") && text.contains("CODECS=\"job"), "{text}");
+    let variant = text.lines().find(|l| l.starts_with("hls1/")).unwrap().to_owned();
+    let base = format!("/Videos/{peak}/{}", variant.trim_end_matches("index.m3u8"));
+    let init = app.jf(Method::GET, &format!("{base}init.mp4"), "", None).await;
+    assert_eq!(init.status, StatusCode::OK);
+    assert!(init.text().ends_with(":init"), "{}", init.text());
+    let segment = app.jf(Method::GET, &format!("{base}3.m4s"), "", None).await;
+    assert_eq!(segment.status, StatusCode::OK);
+    assert_eq!(segment.headers[header::CONTENT_TYPE], "video/mp4");
+
+    // A lower quality picked: converted, staying HDR10 in HEVC.
+    let lower = app.jf(Method::GET, &format!("{url}&MaxStreamingBitrate=2000000"), admin, None).await;
+    assert_eq!(lower.status, StatusCode::OK, "{}", lower.text());
+    let video = w.fake.last_request().video.unwrap();
+    assert_eq!(
+        (video.mode, video.codec, video.dynamic_range),
+        (VideoMode::Transcode, VideoCodec::Hevc, OutputRange::Hdr10)
+    );
+
+    // An app that asks for H.264 and AAC alone (JellyCon writes its own
+    // address): converted to SDR H.264, with stereo AAC, in MPEG-TS.
+    let source = source["Id"].as_str().unwrap();
+    let plain = format!("/Videos/{peak}/master.m3u8?MediaSourceId={source}&VideoCodec=h264&AudioCodec=aac");
+    assert_eq!(app.jf(Method::GET, &plain, admin, None).await.status, StatusCode::OK);
+    let job = w.fake.last_request();
+    let (video, audio) = (job.video.unwrap(), job.audio.unwrap());
+    assert_eq!(
+        (job.segment_format, video.mode, video.codec),
+        (SegmentFormat::Ts, VideoMode::Transcode, VideoCodec::H264)
+    );
+    assert_eq!(video.dynamic_range, OutputRange::Sdr);
+    assert_eq!((audio.codec, audio.channels), (AudioCodec::Aac, Some(2)));
+    // HEVC in MPEG-TS, the video copied, unless the app turns copies off.
+    let ts = format!("/Videos/{peak}/master.m3u8?MediaSourceId={source}&VideoCodec=hevc,h264&AudioCodec=aac");
+    app.jf(Method::GET, &ts, admin, None).await;
+    let job = w.fake.last_request();
+    assert_eq!((job.segment_format, job.video.unwrap().mode), (SegmentFormat::Ts, VideoMode::Copy));
+    app.jf(Method::GET, &format!("{ts}&AllowVideoStreamCopy=false"), admin, None).await;
+    assert_eq!(w.fake.last_request().video.unwrap().mode, VideoMode::Transcode);
+}
+
+#[tokio::test]
 async fn plex_clients_stream_through_the_universal_transcoder() {
     let w = world().await;
     let (app, admin) = (&w.app, w.admin.as_str());
@@ -1597,11 +2097,15 @@ async fn plex_clients_stream_through_the_universal_transcoder() {
     app.plex(Method::GET, &plain, admin, &[("x-plex-client-identifier", "tablet")]).await;
     assert_eq!(w.fake.last_request().video.unwrap().mode, VideoMode::Copy);
 
+    // Its token revoked, the session's addresses open nothing more.
+    let token = app.plex_token(admin).await;
+    assert!(app.state.auth.end_compatibility_token_of(&token).await.unwrap());
+    assert_eq!(app.plex(Method::GET, &format!("{base}index.m3u8"), "", &[]).await.status, StatusCode::NOT_FOUND);
+
     // Stopping by client ends that client's session and its job.
     let stop = app.plex(Method::GET, "/video/:/transcode/universal/stop?session=living-room", admin, &[]).await;
     assert_eq!(stop.status, StatusCode::OK);
     eventually(|| w.fake.deleted.lock().contains(&"job1".to_owned())).await;
-    assert_eq!(app.plex(Method::GET, &format!("{base}index.m3u8"), "", &[]).await.status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

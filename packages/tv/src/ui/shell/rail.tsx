@@ -1,8 +1,10 @@
 import { useSignal } from "@preact/signals";
-import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { Library, RequestSummary, User } from "../../api/types";
+import { t } from "../../i18n";
 import { hasRequests, mayAsk, requestsCount, requestsTitle } from "../../requests";
 import { useUi } from "../context";
+import { nudge } from "../focus";
 import { F, G } from "../kit/focusable";
 import { Icon, type IconName } from "../kit/icons";
 import type { PageKey } from "./navigator";
@@ -16,10 +18,45 @@ export interface RailEntry {
   badge?: { count: number; danger: boolean };
 }
 
-/** At most this many libraries in the rail. */
-const MAX_LIBRARIES = 3;
-/** Entries between the avatar and Settings, at most: their pitch fills the rail. */
-const MAX_ITEMS = 7;
+/** At most this many libraries in the rail; with more, Libraries lists them all. */
+const MAX_LIBRARIES = 6;
+
+/**
+ * The rail's geometry on the 960×540 canvas (theme.css): entries 40 tall
+ * and 4 apart, from y 67 under the avatar to Settings at y 473, so nine
+ * show at once; the rest scroll.
+ */
+export const RAIL_ENTRY = 40;
+export const RAIL_GAP = 4;
+const RAIL_PITCH = RAIL_ENTRY + RAIL_GAP;
+export const RAIL_FIRST = 67;
+export const RAIL_SETTINGS = 473;
+/** The entries' view: from the first entry's place to the gap above Settings. */
+const RAIL_VIEW = RAIL_SETTINGS - RAIL_GAP - RAIL_FIRST;
+/** Whole entries in the view, the last one's gap aside: nine. */
+const RAIL_FITS = Math.floor((RAIL_VIEW + RAIL_GAP) / RAIL_PITCH);
+/** The entries shown above the focused one while they scroll under it. */
+const RAIL_PIVOT = 3;
+
+/** The furthest the entries scroll: by whole entries, until the last nine show. */
+const railEnd = (count: number) => Math.max(0, count - RAIL_FITS) * RAIL_PITCH;
+
+/**
+ * How far the rail's entries are scrolled while entry `focused` of `count`
+ * has focus: by whole entries, so none is ever cut in half at either end.
+ * Going down, focus moves until it is the fourth entry shown, then stays
+ * there while the entries move under it an entry a press, until the last
+ * ones are all in view and focus goes on to the last; going up is the same
+ * backwards. Where an entry shows depends on it alone, never on the way
+ * focus came or on `scroll`, as the app's lists keep their focused row in
+ * one place. With no entry focused (the avatar, Settings: -1 or `count`),
+ * `scroll` is kept, within the ends.
+ */
+export function railScroll(scroll: number, focused: number, count: number): number {
+  const max = railEnd(count);
+  const s = focused >= 0 && focused < count ? (focused - RAIL_PIVOT) * RAIL_PITCH : scroll;
+  return Math.max(0, Math.min(max, s));
+}
 
 export interface RailEntries {
   top: RailEntry[];
@@ -34,7 +71,7 @@ export interface RailEntries {
 export function requestsEntry(s: RequestSummary | null): RailEntry | null {
   const { count, danger } = requestsCount(s);
   const badge = count > 0 ? { count, danger } : undefined;
-  if (mayAsk(s)) return { id: "discover", label: "Discover", icon: "compass", key: { name: "discover" }, badge };
+  if (mayAsk(s)) return { id: "discover", label: t("shell.rail.discover"), icon: "compass", key: { name: "discover" }, badge };
   if (hasRequests(s)) return { id: "requests", label: requestsTitle(s), icon: "inbox", key: { name: "requests" }, badge };
   return null;
 }
@@ -42,41 +79,30 @@ export function requestsEntry(s: RequestSummary | null): RailEntry | null {
 /**
  * The rail's entries (the Android app's RailItems): Search, Home,
  * Discover (or the requests), Live TV where the server has channels for
- * this profile, up to three libraries, then Libraries when there are more,
- * Playlists, and Collections when there are three or fewer; Settings at
- * the foot. While music has a queue, Now Playing comes last. Seven fit:
- * past that, Collections goes first, then the libraries from the last,
- * Libraries listing them.
+ * this profile, up to six libraries, then Libraries when there are more,
+ * Playlists, and Collections when there are six or fewer; Settings at
+ * the foot. While music has a queue, Now Playing comes last. Every entry
+ * is listed: those that don't fit scroll (`railScroll`). Their labels are
+ * in the language shown when it is called.
  */
 export function railEntries(libraries: Library[] | null, nowPlaying = false, live = false, requests: RailEntry | null = null): RailEntries {
   const libs = libraries ?? [];
   const icon = (l: Library): IconName => (l.kind === "movies" ? "clapperboard" : l.kind === "shows" ? "tv" : l.kind === "music" ? "music" : "film");
-  let shown = Math.min(libs.length, MAX_LIBRARIES);
-  let collections = libs.length > 0 && libs.length <= MAX_LIBRARIES;
-  const build = (): RailEntry[] => {
-    const top: RailEntry[] = [
-      { id: "search", label: "Search", icon: "search", key: { name: "search" } },
-      { id: "home", label: "Home", icon: "house", key: { name: "home" } },
-    ];
-    if (requests) top.push(requests);
-    if (live) top.push({ id: "live", label: "Live TV", icon: "tv-minimal", key: { name: "live" } });
-    for (const l of libs.slice(0, shown)) top.push({ id: `library:${l.id}`, label: l.name, icon: icon(l), key: { name: "library", id: l.id } });
-    if (libs.length > shown) top.push({ id: "libraries", label: "Libraries", icon: "layers", key: { name: "libraries" } });
-    top.push({ id: "playlists", label: "Playlists", icon: "list-music", key: { name: "playlists" } });
-    if (collections) {
-      const first = libs.filter((l) => l.kind !== "music")[0] ?? libs[0]!;
-      top.push({ id: "collections", label: "Collections", icon: "layers", key: { name: "collections", libraryId: first.id } });
-    }
-    if (nowPlaying) top.push({ id: "now-playing", label: "Now Playing", icon: "audio-lines", key: { name: "nowPlaying" } });
-    return top;
-  };
-  let top = build();
-  while (top.length > MAX_ITEMS && (collections || shown > 0)) {
-    if (collections) collections = false;
-    else shown--;
-    top = build();
+  const top: RailEntry[] = [
+    { id: "search", label: t("shell.rail.search"), icon: "search", key: { name: "search" } },
+    { id: "home", label: t("shell.rail.home"), icon: "house", key: { name: "home" } },
+  ];
+  if (requests) top.push(requests);
+  if (live) top.push({ id: "live", label: t("shell.rail.live"), icon: "tv-minimal", key: { name: "live" } });
+  for (const l of libs.slice(0, MAX_LIBRARIES)) top.push({ id: `library:${l.id}`, label: l.name, icon: icon(l), key: { name: "library", id: l.id } });
+  if (libs.length > MAX_LIBRARIES) top.push({ id: "libraries", label: t("shell.rail.libraries"), icon: "layers", key: { name: "libraries" } });
+  top.push({ id: "playlists", label: t("shell.rail.playlists"), icon: "list-music", key: { name: "playlists" } });
+  if (libs.length > 0 && libs.length <= MAX_LIBRARIES) {
+    const first = libs.filter((l) => l.kind !== "music")[0] ?? libs[0]!;
+    top.push({ id: "collections", label: t("shell.rail.collections"), icon: "layers", key: { name: "collections", libraryId: first.id } });
   }
-  return { top, settings: { id: "settings", label: "Settings", icon: "settings", key: { name: "settings" } } };
+  if (nowPlaying) top.push({ id: "now-playing", label: t("shell.rail.nowPlaying"), icon: "audio-lines", key: { name: "nowPlaying" } });
+  return { top, settings: { id: "settings", label: t("shell.rail.settings"), icon: "settings", key: { name: "settings" } } };
 }
 
 /**
@@ -122,11 +148,9 @@ export function initial(name: string): string {
  * The rail at the left edge: icons alone, and labels on a panel while it
  * has focus (it is open exactly then). Left from a page's first column
  * comes here, to the current entry; Right goes back to where focus was.
+ * `offline`: the avatar wears the server-off mark (once the shell's
+ * notice has had its 6 s).
  */
-/** What the TV says while the server is out of reach: the shell's notice, then the avatar's mark. */
-export const OFFLINE_TEXT = "Showing what Pley had saved. Reconnecting…";
-
-/** `offline`: the avatar wears the server-off mark (once the shell's notice has had its 6 s). */
 export function Rail(p: { entries: RailEntries; me: User | null; current: string | null; offline?: boolean; railRef: (api: RailApi) => void }) {
   const ui = useUi();
   const open = useSignal(false);
@@ -137,6 +161,35 @@ export function Rail(p: { entries: RailEntries; me: User | null; current: string
   /** The pointer has been on the open rail: moving out of it closes it (a rail opened by keys stays). */
   const pointedIn = useRef(false);
   const { top, settings } = p.entries;
+  /** How far the entries between the avatar and Settings are scrolled (`railScroll`). */
+  const [scroll, setScroll] = useState(0);
+  const entriesRef = useRef<HTMLDivElement>(null);
+  const count = useRef(top.length);
+  count.current = top.length;
+  /** The page's entry's index; -1 when it has none among the entries (Settings, Who's watching?). */
+  const page = useRef(-1);
+  page.current = top.findIndex((e) => e.id === p.current);
+  /** The focused element's place: an entry's index, -1 the avatar, `count` Settings; null outside the rail. */
+  const placeOf = (el: HTMLElement): number | null => {
+    const r = root.current;
+    if (!r || !r.contains(el)) return null;
+    const entries = entriesRef.current;
+    if (entries && entries.contains(el)) return Array.prototype.indexOf.call(entries.children, el) as number;
+    return el.classList.contains("avatar") ? -1 : count.current;
+  };
+  /**
+   * The entries scrolled for focus on `el` (`railScroll`): to its entry, or,
+   * with focus outside the rail, to the page's, so the rail opens on it
+   * without moving. The pointer only brings a cut-off entry in whole, no
+   * further: entries moving under a still pointer would move focus.
+   */
+  const follow = (el: HTMLElement | null) => {
+    const n = count.current;
+    const at = el ? placeOf(el) : null;
+    if (at === null) setScroll((s) => railScroll(s, page.current, n));
+    else if (ui.focus.byPointer && at >= 0 && at < n) setScroll((s) => nudge(s, at * RAIL_PITCH, at * RAIL_PITCH + RAIL_ENTRY, 0, RAIL_VIEW, 0, railEnd(n)));
+    else setScroll((s) => railScroll(s, at, n));
+  };
 
   /**
    * Focus back to the page: to where it was (Right), else to nothing in
@@ -212,6 +265,7 @@ export function Rail(p: { entries: RailEntries; me: User | null; current: string
           handing.current = false;
           if (ui.focus.byPointer) pointedIn.current = true;
         }
+        follow(el);
         if (r && el && !r.contains(el) && open.value) {
           open.value = false;
           handing.current = false;
@@ -221,6 +275,11 @@ export function Rail(p: { entries: RailEntries; me: User | null; current: string
       }),
     [],
   );
+
+  // Entries made again (Now Playing came, a library went) or another page's entry: the focused entry, else the page's,
+  // placed again by the same rule; on the avatar or Settings, the scroll kept within its ends.
+  const ids = top.map((e) => e.id).join(" ");
+  useLayoutEffect(() => follow(ui.focus.current), [ids, p.current]);
 
   const select = (entry: RailEntry) => {
     const nav = ui.nav;
@@ -282,8 +341,8 @@ export function Rail(p: { entries: RailEntries; me: User | null; current: string
         <G kind="col" class="rail-items">
           <F
             class={`rail-item avatar${p.current === "profile" ? " current" : ""}`}
-            label={p.offline ? `Switch profile. ${OFFLINE_TEXT}` : "Switch profile"}
-            onSelect={() => select({ id: "profile", label: "Profiles", icon: "users", key: { name: "profiles" } })}
+            label={p.offline ? `${t("shell.rail.switchProfile")}. ${t("shell.offline")}` : t("shell.rail.switchProfile")}
+            onSelect={() => select({ id: "profile", label: t("shell.rail.profiles"), icon: "users", key: { name: "profiles" } })}
             onKey={(key) => {
               if (key === "right") {
                 leave(true);
@@ -302,14 +361,19 @@ export function Rail(p: { entries: RailEntries; me: User | null; current: string
                 <Icon name="server-off" size={9} color="var(--fg)" />
               </div>
             )}
-            <span class="label" style="top:10px">
+            <span class="label" style="top:6px">
               <div class="t-label one-line">{me?.name ?? ""}</div>
               <div class="t-caption one-line" style="opacity:0.8">
-                Switch profile
+                {t("shell.rail.switchProfile")}
               </div>
             </span>
           </F>
-          {top.map(item)}
+          {/* Between the avatar and Settings, clipped there: the entries scroll when there are more than fit. */}
+          <div class="rail-view">
+            <div ref={entriesRef} class="rail-scroll" style={scroll ? `transform:translateY(${-scroll}px)` : undefined}>
+              {top.map(item)}
+            </div>
+          </div>
           <div class="rail-spacer" />
           {item(settings)}
         </G>

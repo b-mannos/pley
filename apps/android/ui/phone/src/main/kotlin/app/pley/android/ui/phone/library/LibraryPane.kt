@@ -12,8 +12,8 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.layout.LazyLayoutCacheWindow
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -22,6 +22,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -41,12 +42,14 @@ import app.pley.android.designsystem.PleyPhone
 import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.designsystem.image.ArtworkImage
 import app.pley.android.designsystem.image.rememberImagePrefetcher
+import app.pley.android.designsystem.text.formatWords
 import app.pley.android.designsystem.tile.ArtworkTileModel
 import app.pley.android.designsystem.tile.SkeletonState
 import app.pley.android.designsystem.tile.SkeletonTile
 import app.pley.android.designsystem.tile.TileKind
 import app.pley.android.designsystem.tile.TileStyle
 import app.pley.android.model.LibraryKind
+import app.pley.android.model.format.dynamicRangeFilterLabel
 import app.pley.android.screens.PleyKey
 import app.pley.android.screens.library.GridCells as Cells
 import app.pley.android.screens.library.LibraryUiState
@@ -65,7 +68,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
  * The Library tab (design spec §4.2): a toolbar of chips that stays put
- * (sort, the watched filters, genre, year, then Clear filters and Save as…
+ * (sort, the watched filters, genre, year, resolution and dynamic range
+ * where the library has them to choose, then Clear filters and Save as…
  * while filtered), and under it the grid of every title, sized from the
  * listing's total so the scroll bar is right from the first frame. Cells
  * not loaded yet are skeletons in the same shape. On the right edge, a
@@ -180,6 +184,26 @@ private fun Toolbar(state: LibraryUiState<ArtworkTileModel>, vm: LibraryViewMode
                         )
                     }
                 }
+                if (state.resolutions.isNotEmpty()) {
+                    item(key = "resolution") {
+                        PleyChip(
+                            label = params.resolution?.label ?: stringResource(R.string.library_resolution),
+                            selected = params.resolution != null,
+                            onClick = { onSheet(LibrarySheet.Resolution) },
+                            dropdown = true,
+                        )
+                    }
+                }
+                if (state.dynamicRanges.isNotEmpty()) {
+                    item(key = "dynamic_range") {
+                        PleyChip(
+                            label = params.dynamicRange?.let { dynamicRangeFilterLabel(it, formatWords()) } ?: stringResource(R.string.library_dynamic_range),
+                            selected = params.dynamicRange != null,
+                            onClick = { onSheet(LibrarySheet.DynamicRange) },
+                            dropdown = true,
+                        )
+                    }
+                }
                 if (params.filtered) {
                     item(key = "clear") {
                         PleyChip(label = stringResource(R.string.library_clear_filters), selected = false, onClick = vm::clearFilters, icon = PleyIcons.X)
@@ -235,6 +259,8 @@ private fun LibraryGrid(
     val columns = libraryColumns(state.density, kind, available, gap)
     val width = cellWidth(columns, available, gap)
     val grid = rememberLazyGridState(cacheWindow = remember { LazyLayoutCacheWindow(aheadFraction = 1f, behindFraction = 0.25f) })
+    // A tap reads the page as it is then: cards keep their handlers, and don't recompose, as the listing's pages arrive.
+    val current = rememberUpdatedState(state)
 
     // A new sort or filter starts at the top.
     val query = state.params.query()
@@ -283,7 +309,7 @@ private fun LibraryGrid(
                         MediaCard(
                             model = model,
                             kind = kind,
-                            onClick = { navigator.open(state.opens(model.id)) },
+                            onClick = { navigator.open(current.value.opens(model.id)) },
                             onLongClick = { navigator.open(PleyKey.ItemActions(model.id)) },
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -323,7 +349,7 @@ private const val FAST_SCROLL_FROM = 60
 private const val SKELETON = "skeleton"
 
 /** The sheets the toolbar opens. */
-internal enum class LibrarySheet { Sort, Genre, Year }
+internal enum class LibrarySheet { Sort, Genre, Year, Resolution, DynamicRange }
 
 /** [GridDensity]'s label. */
 internal fun densityLabel(density: GridDensity): Int = when (density) {

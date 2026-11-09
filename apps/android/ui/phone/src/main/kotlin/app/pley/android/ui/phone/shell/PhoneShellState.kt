@@ -10,8 +10,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import app.pley.android.auth.AuthEvent
-import app.pley.android.common.describe
+import app.pley.android.common.errorSentence
+import app.pley.android.common.resolve
 import app.pley.android.data.Loadable
+import app.pley.android.data.OtherDevice
+import app.pley.android.data.RemoteRepository
 import app.pley.android.data.RequestNotice
 import app.pley.android.network.ApiException
 import app.pley.android.network.OfflineException
@@ -21,6 +24,8 @@ import app.pley.android.screens.requests.RequestTexts
 import app.pley.android.screens.requests.RequestsEntry
 import app.pley.android.ui.phone.R
 import app.pley.android.ui.phone.kit.ToastHostState
+import app.pley.android.ui.phone.remote.CastTarget
+import app.pley.android.ui.phone.remote.RemoteAsk
 import app.pley.android.screens.R as ScreensR
 
 /**
@@ -62,6 +67,39 @@ class PhoneShellState internal constructor(
     var nowPlaying: NowPlaying? by mutableStateOf(null)
         internal set
 
+    /** The profile's other devices that are on, for the remote's bar; followed while the app shows. */
+    var remoteDevices: List<OtherDevice> by mutableStateOf(emptyList())
+        internal set
+
+    /** What the remote sends its commands through; `null` until after the first frame. */
+    var remote: RemoteRepository? by mutableStateOf(null)
+        internal set
+
+    /** What Play on…'s chooser sends, while it shows ([playOn]); `null` while it doesn't. */
+    internal var playingOn: CastTarget? by mutableStateOf(null)
+
+    /** What the remote was last asked: to open ([openRemote]), or to follow a cast ([castSent]). */
+    internal var remoteAsked: RemoteAsk? by mutableStateOf(null)
+        private set
+
+    /** Play on…: the chooser of the profile's other devices that play [target] shows over the page. */
+    internal fun playOn(target: CastTarget) {
+        playingOn = target
+    }
+
+    /** The remote opens on "Your devices". */
+    internal fun openRemote() {
+        remoteAsked = RemoteAsk()
+    }
+
+    /**
+     * This phone sent [deviceId] something to play (Play on…): the remote's
+     * bar says it starts there, then what plays, and opens its controls.
+     */
+    internal fun castSent(deviceId: String) {
+        remoteAsked = RemoteAsk(deviceId)
+    }
+
     /** The ways into requests and their number, for Me's tab. */
     var requests: RequestsEntry by mutableStateOf(RequestsEntry.None)
         internal set
@@ -99,9 +137,9 @@ class PhoneShellState internal constructor(
             )
             error is OfflineException -> {
                 offlineState.value = true
-                toasts.show(sentence(describe(error)), error = true)
+                toasts.show(errorSentence(error).resolve(resources), error = true)
             }
-            else -> toasts.show(sentence(describe(error)), error = true)
+            else -> toasts.show(errorSentence(error).resolve(resources), error = true)
         }
     }
 
@@ -133,7 +171,7 @@ class PhoneShellState internal constructor(
     /** The sign-in module ended a sign-in: if it was this server's, back to signing in to it, saying why. */
     internal fun on(event: AuthEvent) {
         when (event) {
-            is AuthEvent.SignedOut -> if (signedOut(event.issuer)) toasts.show(sentence(event.reason.message), error = true)
+            is AuthEvent.SignedOut -> if (signedOut(event.issuer)) toasts.show(sentence(event.reason.text.resolve(resources)), error = true)
         }
     }
 

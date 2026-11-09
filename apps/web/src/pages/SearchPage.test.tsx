@@ -1,5 +1,8 @@
 import { screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { useNavigate } from "react-router";
 import { describe, expect, it } from "vitest";
+import type { Channel } from "@/api/livetv";
 import { makeItem } from "@/test/fixtures";
 import { apiError, mockApi, renderWithProviders } from "@/test/render";
 import { makeSummary, makeTitle } from "@/test/requests";
@@ -11,7 +14,7 @@ function search(q: string) {
 }
 
 describe("SearchPage", () => {
-  it("groups the results by kind, people first", async () => {
+  it("groups the results by kind, the titles first, people last", async () => {
     const requests = mockApi({
       "GET /api/search": () => ({
         items: [
@@ -26,13 +29,13 @@ describe("SearchPage", () => {
 
     expect(await screen.findByRole("heading", { name: "Results for “heat ”" })).toBeInTheDocument();
     const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
-    expect(headings).toEqual(["People 1", "Movies 2", "Episodes 1"]);
+    expect(headings).toEqual(["Movies 2", "Episodes 1", "People 1"]);
     expect(screen.getByRole("link", { name: /Heath Ledger/ })).toHaveAttribute("href", personUrl(9));
 
     const movies = screen.getByRole("heading", { name: "Movies 2" }).closest("section") as HTMLElement;
     expect(within(movies).getByText("1995")).toBeInTheDocument();
     // The query is trimmed.
-    expect(requests.find((r) => r.path.startsWith("/api/search"))?.path).toBe("/api/search?q=heat&limit=60");
+    expect(requests.find((r) => r.path.startsWith("/api/search"))?.path).toBe("/api/search?q=heat&limit=200");
     // Without requests (here, a server without them), nothing from TMDB.
     expect(screen.queryByRole("heading", { name: "Discover" })).not.toBeInTheDocument();
     expect(requests.some((r) => r.path.startsWith("/api/discover"))).toBe(false);
@@ -120,6 +123,70 @@ describe("SearchPage", () => {
     mockApi({ "GET /api/search": () => ({ items: [] }) });
     search("zzz");
     expect(await screen.findByText("No results for “zzz”")).toBeInTheDocument();
+  });
+
+  it("shows two rows of a long group until it's opened", async () => {
+    const user = userEvent.setup();
+    const movies = Array.from({ length: 11 }, (_, i) => makeItem({ id: 100 + i, title: `Heat ${i + 1}` }));
+    mockApi({ "GET /api/search": () => ({ items: movies, people: [{ id: 9, name: "Heath Ledger" }] }) });
+    search("heat");
+
+    const heading = await screen.findByRole("heading", { name: "Movies 11" });
+    const section = heading.closest("section") as HTMLElement;
+    // Four to a row before the page is measured.
+    const cards = () => within(section).getAllByRole("button", { name: /^Play Heat/ });
+    expect(cards()).toHaveLength(8);
+    await user.click(within(section).getByRole("button", { name: "Show all 11" }));
+    expect(cards()).toHaveLength(11);
+    await user.click(within(section).getByRole("button", { name: "Show fewer" }));
+    expect(cards()).toHaveLength(8);
+    // A group that fits has nothing to open.
+    const people = screen.getByRole("heading", { name: "People 1" }).closest("section") as HTMLElement;
+    expect(within(people).queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("drops the last query's channels and people for a new one", async () => {
+    const user = userEvent.setup();
+    const channel: Channel = {
+      id: 7,
+      source_id: 1,
+      source_uid: "src",
+      name: "Heat TV",
+      number: "1",
+      group: "Films",
+      logo: null,
+      favorite: false,
+      has_guide: false,
+      now: null,
+      next: null,
+    };
+    mockApi({
+      "GET /api/search": (req) => {
+        const q = new URL(req.path, "http://pley.test").searchParams.get("q");
+        return q === "heat"
+          ? { items: [], channels: [channel], people: [{ id: 9, name: "Heath Ledger" }] }
+          : { items: [makeItem({ id: 2, title: "Heats", year: 2001 })], channels: [], people: [] };
+      },
+    });
+    function Search({ q }: { q: string }) {
+      const navigate = useNavigate();
+      return <button onClick={() => void navigate(`/search?q=${q}`)}>Search {q}</button>;
+    }
+    renderWithProviders(
+      <>
+        <Search q="heats" />
+        <SearchPage />
+      </>,
+      { route: "/search?q=heat" },
+    );
+
+    expect(await screen.findByRole("heading", { name: "Live TV 1" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "People 1" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Search heats" }));
+    expect(await screen.findByRole("heading", { name: "Movies 1" })).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent)).toEqual(["Movies 1"]);
+    expect(screen.queryByText("Heat TV")).not.toBeInTheDocument();
+    expect(screen.queryByText("Heath Ledger")).not.toBeInTheDocument();
   });
 
   it("explains failures", async () => {

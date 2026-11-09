@@ -13,8 +13,12 @@ use serde::Deserialize;
 
 /// Default HTTP port ("PLEY" on a phone keypad).
 pub const DEFAULT_PORT: u16 = 7539;
-/// Default port of the Plex-compatible API (Plex Media Server's).
+/// The port the Plex-compatible API takes when it has one of its own: Plex
+/// Media Server's.
 pub const PLEX_PORT: u16 = 32400;
+/// The port the Jellyfin-compatible API takes when it has one of its own:
+/// Jellyfin's, which its apps try for an address typed without a port.
+pub const JELLYFIN_PORT: u16 = 8096;
 /// How long requests in progress may take to finish once the server is told
 /// to stop. Streams (a film playing directly) are cut after that. Short
 /// enough to leave time for stopping the transcoder and closing the database
@@ -50,10 +54,15 @@ pub struct Cli {
     #[arg(long, env = "PLEY_BIND", global = true)]
     pub bind: Option<String>,
 
-    /// Where the Plex-compatible API listens: `web` (default) answers on Pley's own port, `off`
-    /// turns it off, or addresses of its own (`0.0.0.0:32400`), several separated by commas
+    /// Where the Plex-compatible API listens: `web` (default) on Pley's own port, `off`, or
+    /// addresses of its own (`0.0.0.0:32400`), several separated by commas
     #[arg(long, env = "PLEY_PLEX_BIND", global = true)]
     pub plex_bind: Option<String>,
+
+    /// Where the Jellyfin-compatible API listens: `off` (default), `web` on Pley's own port, or
+    /// addresses of its own (`0.0.0.0:8096`), several separated by commas
+    #[arg(long, env = "PLEY_JELLYFIN_BIND", global = true)]
+    pub jellyfin_bind: Option<String>,
 
     /// Path to the ffmpeg binary
     #[arg(long, env = "PLEY_FFMPEG", global = true)]
@@ -87,9 +96,15 @@ pub struct Cli {
     #[arg(long, env = "PLEY_NO_TRAY", global = true)]
     pub no_tray: bool,
 
-    /// Don't answer the Pley apps looking for servers on the local network
+    /// Don't answer the Pley apps looking for servers on the local network, nor announce Pley
+    /// there by Bonjour
     #[arg(long, env = "PLEY_NO_DISCOVERY", global = true)]
     pub no_discovery: bool,
+
+    /// Keep Bonjour off, whatever Settings → Network says (Apple's apps then need the server's
+    /// address typed in)
+    #[arg(long, env = "PLEY_NO_BONJOUR", global = true)]
+    pub no_bonjour: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -109,8 +124,9 @@ pub enum Command {
     },
     /// Exit with status 0 when the server on this machine answers (for container health checks)
     Health,
-    /// Save the options given before it (--bind, --plex-bind, --transcode-dir, --ffmpeg,
-    /// --ffprobe, --no-discovery) in pley.toml in the data folder, for every later start
+    /// Save the options given before it (--bind, --plex-bind, --jellyfin-bind, --transcode-dir,
+    /// --ffmpeg, --ffprobe, --no-discovery, --no-bonjour) in pley.toml in the data folder, for every
+    /// later start
     SaveConfig {
         /// Whether to answer the Pley apps looking for servers on the local network
         #[arg(long, value_name = "true|false")]
@@ -128,6 +144,7 @@ pub enum Command {
 struct FileConfig {
     bind: Option<String>,
     plex_bind: Option<String>,
+    jellyfin_bind: Option<String>,
     data_dir: Option<PathBuf>,
     transcode_dir: Option<PathBuf>,
     ffmpeg: Option<PathBuf>,
@@ -138,6 +155,11 @@ struct FileConfig {
     transcoder_token: Option<String>,
     transcoder_max_jobs: Option<u32>,
     discovery: Option<bool>,
+    /// Off when left out: Bonjour tells every device on the local network
+    /// about the server, so an administrator turns it on.
+    bonjour: Option<bool>,
+    bonjour_adapters: Option<Vec<String>>,
+    bonjour_host_name: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -147,13 +169,23 @@ pub struct Config {
     /// Where it listens too, once it can: a network adapter's address may
     /// come after pley (Wi-Fi, a VPN like Tailscale).
     pub extra_binds: Vec<SocketAddr>,
-    /// Plex-compatible API listener (`None`: disabled).
+    /// Plex-compatible API listener on a port of its own (`None`: none).
     pub plex_bind: Option<SocketAddr>,
     /// Where that API listens too, as [`Config::extra_binds`].
     pub plex_extra_binds: Vec<SocketAddr>,
-    /// That API answers on pley's own port instead (`plex_bind = "web"`, see
-    /// [`crate::plex::on_web_port`]).
+    /// That API answers on pley's own port (`plex_bind = "web"`, the
+    /// default; see [`crate::plex::on_web_port`]).
     pub plex_on_web: bool,
+    /// Jellyfin-compatible API listener on a port of its own (`None`: none).
+    pub jellyfin_bind: Option<SocketAddr>,
+    /// Where that API listens too, as [`Config::extra_binds`].
+    pub jellyfin_extra_binds: Vec<SocketAddr>,
+    /// That API answers on pley's own port (`jellyfin_bind = "web"`, see
+    /// [`crate::jellyfin::on_web_port`]).
+    pub jellyfin_on_web: bool,
+    /// What Pley left out of `pley.toml` as it read it, said once in the log
+    /// (which starts after the file is read).
+    pub file_warnings: Vec<String>,
     pub data_dir: PathBuf,
     /// Work directory handed to the managed transcoder (segments, caches):
     /// the one chosen, or [`Config::default_transcode_dir`] when it can't
@@ -177,8 +209,15 @@ pub struct Config {
     pub metadata_endpoints: Option<crate::providers::Endpoints>,
     /// See [`SHUTDOWN_GRACE`] (tests shorten it).
     pub shutdown_grace: Duration,
-    /// Answer apps looking for servers on the local network (see [`crate::discovery`]).
+    /// Answer apps looking for servers on the local network (see
+    /// [`crate::discovery`]).
     pub discovery: bool,
+    /// Announce pley on the local network by Bonjour (see [`crate::bonjour`]).
+    pub bonjour: bool,
+    /// The adapters Bonjour announces from, by name: any when empty.
+    pub bonjour_adapters: Vec<String>,
+    /// Bonjour's host name, a DNS label: the generated one when empty.
+    pub bonjour_host_name: String,
     /// See [`EVENT_RECHECK`] (tests shorten it).
     pub event_recheck: Duration,
     /// See [`EXTRA_BIND_RETRY`] (tests shorten it).
@@ -220,14 +259,24 @@ impl Config {
             None => vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), DEFAULT_PORT)],
             Some(value) => parse_binds(&value)?,
         };
-        let plex_bind = cli.plex_bind.clone().or(file.plex_bind);
         // By default on pley's own port: wherever pley is reached, through
         // its reverse proxy's HTTPS too.
+        let plex_bind = cli.plex_bind.clone().or(file.plex_bind);
         let plex_on_web = plex_bind.as_deref().is_none_or(is_web);
         let plex_binds = match plex_bind {
             Some(value) if !is_off(&value) && !is_web(&value) => parse_binds(&value)?,
             _ => Vec::new(),
         };
+        // Off unless an administrator turns it on.
+        let jellyfin_bind = cli.jellyfin_bind.clone().or(file.jellyfin_bind);
+        let jellyfin_on_web = jellyfin_bind.as_deref().is_some_and(is_web);
+        let jellyfin_binds = match jellyfin_bind {
+            Some(value) if !is_off(&value) && !is_web(&value) => parse_binds(&value)?,
+            _ => Vec::new(),
+        };
+        let mut file_warnings = Vec::new();
+        let bonjour_adapters = bonjour_adapters(file.bonjour_adapters.unwrap_or_default(), &mut file_warnings);
+        let bonjour_host_name = bonjour_host_name(&file.bonjour_host_name.unwrap_or_default(), &mut file_warnings);
         let transcode_dir = cli
             .transcode_dir
             .clone()
@@ -241,6 +290,10 @@ impl Config {
             plex_bind: plex_binds.first().copied(),
             plex_extra_binds: plex_binds.iter().skip(1).copied().collect(),
             plex_on_web,
+            jellyfin_bind: jellyfin_binds.first().copied(),
+            jellyfin_extra_binds: jellyfin_binds.iter().skip(1).copied().collect(),
+            jellyfin_on_web,
+            file_warnings,
             ffmpeg: cli.ffmpeg.clone().or(file.ffmpeg).unwrap_or_else(|| PathBuf::from("ffmpeg")),
             ffprobe: cli.ffprobe.clone().or(file.ffprobe).unwrap_or_else(|| PathBuf::from("ffprobe")),
             web_dir: cli.web_dir.clone().or(file.web_dir),
@@ -251,6 +304,9 @@ impl Config {
             metadata_endpoints: Some(crate::providers::Endpoints::default()),
             shutdown_grace: SHUTDOWN_GRACE,
             discovery: !cli.no_discovery && file.discovery.unwrap_or(true),
+            bonjour: !cli.no_discovery && !cli.no_bonjour && file.bonjour.unwrap_or(false),
+            bonjour_adapters,
+            bonjour_host_name,
             event_recheck: EVENT_RECHECK,
             extra_bind_retry: EXTRA_BIND_RETRY,
             client_documents: crate::oauth::fetch::Source::Internet,
@@ -259,7 +315,9 @@ impl Config {
             network_fixed: crate::network::Fixed {
                 web: cli.bind.is_some(),
                 plex: cli.plex_bind.is_some(),
+                jellyfin: cli.jellyfin_bind.is_some(),
                 discovery: cli.no_discovery,
+                bonjour: cli.no_discovery || cli.no_bonjour,
             },
             config_file,
             data_dir,
@@ -278,6 +336,10 @@ impl Config {
             plex_bind: None,
             plex_extra_binds: Vec::new(),
             plex_on_web: true,
+            jellyfin_bind: None,
+            jellyfin_extra_binds: Vec::new(),
+            jellyfin_on_web: false,
+            file_warnings: Vec::new(),
             data_dir: data_dir.to_path_buf(),
             transcode_dir: data_dir.join("transcode"),
             transcode_dir_problem: None,
@@ -292,6 +354,9 @@ impl Config {
             metadata_endpoints: None,
             shutdown_grace: SHUTDOWN_GRACE,
             discovery: false,
+            bonjour: false,
+            bonjour_adapters: Vec::new(),
+            bonjour_host_name: String::new(),
             event_recheck: EVENT_RECHECK,
             extra_bind_retry: EXTRA_BIND_RETRY,
             client_documents: crate::oauth::fetch::Source::Off,
@@ -364,6 +429,45 @@ impl Config {
     }
 }
 
+/// Bonjour's host name as `pley.toml` has it, as Settings → Network saves
+/// it. One that can't be a host name is left out, for the generated one,
+/// and said in `warnings`, rather than stop Pley from starting.
+fn bonjour_host_name(typed: &str, warnings: &mut Vec<String>) -> String {
+    let label = crate::bonjour::host_label(typed);
+    if crate::bonjour::host_label_ok(&label) {
+        return label;
+    }
+    warnings.push(format!(
+        "bonjour_host_name: {typed:?} can't be a host name (letters, digits and hyphens), and the generated one is used"
+    ));
+    String::new()
+}
+
+/// The Bonjour adapters `pley.toml` lists, as Settings → Network saves
+/// them: trimmed, sorted, each once, 32 at most. One written by hand that no
+/// adapter could have (blank, control characters) is left out, and said in
+/// `warnings`, rather than stop Pley from starting.
+fn bonjour_adapters(listed: Vec<String>, warnings: &mut Vec<String>) -> Vec<String> {
+    let mut adapters: Vec<String> = listed
+        .into_iter()
+        .map(|name| name.trim().to_owned())
+        .filter(|name| {
+            let ok = crate::bonjour::adapter_name_ok(name);
+            if !ok {
+                warnings.push(format!("bonjour_adapters: {name:?} isn't a network adapter's name, and is left out"));
+            }
+            ok
+        })
+        .collect();
+    adapters.sort();
+    adapters.dedup();
+    if adapters.len() > crate::network::MAX_ADDRESSES {
+        warnings.push(format!("bonjour_adapters: {} at most, the rest left out", crate::network::MAX_ADDRESSES));
+        adapters.truncate(crate::network::MAX_ADDRESSES);
+    }
+    adapters
+}
+
 impl Cli {
     /// The data directory of the command line, or the default one.
     pub fn data_dir_or_default(&self) -> PathBuf {
@@ -373,18 +477,21 @@ impl Cli {
 
 /// `pley save-config`: the options given (on the command line or in the
 /// environment) written into the config file `path`, whose other lines and
-/// comments stay. `discovery` overrides `--no-discovery`.
+/// comments stay. `discovery` overrides `--no-discovery`. `--no-bonjour`,
+/// or `--no-discovery` given by hand, saves Bonjour off.
 pub fn save_config(cli: &Cli, path: &Path, discovery: Option<bool>) -> anyhow::Result<()> {
     let mut values: Vec<(&str, toml::Value)> = Vec::new();
     if let Some(bind) = &cli.bind {
         parse_binds(bind)?;
         values.push(("bind", bind.trim().into()));
     }
-    if let Some(plex_bind) = &cli.plex_bind {
-        if !is_off(plex_bind) && !is_web(plex_bind) {
-            parse_binds(plex_bind)?;
+    for (key, value) in [("plex_bind", &cli.plex_bind), ("jellyfin_bind", &cli.jellyfin_bind)] {
+        if let Some(value) = value {
+            if !is_off(value) && !is_web(value) {
+                parse_binds(value)?;
+            }
+            values.push((key, value.trim().into()));
         }
-        values.push(("plex_bind", plex_bind.trim().into()));
     }
     for (key, path) in [("transcode_dir", &cli.transcode_dir), ("ffmpeg", &cli.ffmpeg), ("ffprobe", &cli.ffprobe)] {
         if let Some(path) = path {
@@ -393,6 +500,12 @@ pub fn save_config(cli: &Cli, path: &Path, discovery: Option<bool>) -> anyhow::R
     }
     if let Some(discovery) = discovery.or(cli.no_discovery.then_some(false)) {
         values.push(("discovery", discovery.into()));
+    }
+    // Bonjour is off unless turned on in Settings → Network, which Setup's
+    // discovery checkbox (`discovery`), saved again on every update, leaves
+    // alone; `--no-discovery` itself means no Bonjour either.
+    if cli.no_bonjour || (discovery.is_none() && cli.no_discovery) {
+        values.push(("bonjour", false.into()));
     }
     write_keys(path, &values)
 }
@@ -406,19 +519,30 @@ pub fn save_listen(path: &Path, listen: &crate::network::Listen, fixed: crate::n
     if !fixed.web {
         values.push(("bind", list(&listen.web).into()));
     }
-    if !fixed.plex {
-        let plex = if listen.plex_on_web {
+    let api = |on_web: bool, addrs: &[SocketAddr]| {
+        if on_web {
             "web".to_owned()
-        } else if listen.plex.is_empty() {
+        } else if addrs.is_empty() {
             "off".to_owned()
         } else {
-            list(&listen.plex)
-        };
-        values.push(("plex_bind", plex.into()));
+            list(addrs)
+        }
+    };
+    if !fixed.plex {
+        values.push(("plex_bind", api(listen.plex_on_web, &listen.plex).into()));
+    }
+    if !fixed.jellyfin {
+        values.push(("jellyfin_bind", api(listen.jellyfin_on_web, &listen.jellyfin).into()));
     }
     if !fixed.discovery {
         values.push(("discovery", listen.discovery.into()));
     }
+    if !fixed.bonjour {
+        values.push(("bonjour", listen.bonjour.into()));
+    }
+    let adapters: Vec<toml::Value> = listen.bonjour_adapters.iter().map(|name| name.as_str().into()).collect();
+    values.push(("bonjour_adapters", adapters.into()));
+    values.push(("bonjour_host_name", listen.bonjour_host_name.as_str().into()));
     write_keys(path, &values)
 }
 
@@ -489,11 +613,18 @@ fn set_keys(text: &str, values: &[(&str, toml::Value)]) -> String {
     for (key, value) in values {
         let line = format!("{key} = {value}");
         let mut found = false;
+        // The lines an array written by hand goes on over, after its key's.
+        let mut open = 0;
         // A second line for the key would make the file invalid.
         lines.retain_mut(|existing| {
+            if open > 0 {
+                open += brackets(existing);
+                return false;
+            }
             if !defines(existing, key) {
                 return true;
             }
+            open = brackets(existing).max(0);
             if found {
                 return false;
             }
@@ -510,6 +641,35 @@ fn set_keys(text: &str, values: &[(&str, toml::Value)]) -> String {
     text
 }
 
+/// How many more brackets `line` opens than it closes, outside strings and
+/// comments: an array that goes on over the next lines.
+fn brackets(line: &str) -> i32 {
+    let mut depth = 0;
+    let mut quote = None;
+    let mut escaped = false;
+    for c in line.chars() {
+        match quote {
+            Some(q) => {
+                if escaped {
+                    escaped = false;
+                } else if c == '\\' && q == '"' {
+                    escaped = true;
+                } else if c == q {
+                    quote = None;
+                }
+            }
+            None => match c {
+                '"' | '\'' => quote = Some(c),
+                '[' => depth += 1,
+                ']' => depth -= 1,
+                '#' => break,
+                _ => {}
+            },
+        }
+    }
+    depth
+}
+
 /// Whether `line` gives `key` a value (`key = …`, not `# key = …` nor `key2 = …`).
 fn defines(line: &str, key: &str) -> bool {
     line.trim_start().strip_prefix(key).is_some_and(|rest| rest.trim_start().starts_with('='))
@@ -520,7 +680,7 @@ fn is_off(value: &str) -> bool {
     matches!(value.trim(), "" | "off" | "none" | "false" | "0")
 }
 
-/// A Plex-compatible API address that puts it on pley's own port.
+/// A compatibility API's address that puts it on pley's own port.
 fn is_web(value: &str) -> bool {
     value.trim().eq_ignore_ascii_case("web")
 }
@@ -584,16 +744,98 @@ mod tests {
     }
 
     #[test]
-    fn several_addresses_listen_and_the_plex_api_follows() {
+    fn several_addresses_listen_and_the_jellyfin_api_follows() {
         let dir = tempfile::tempdir().unwrap();
         let mut args = cli(dir.path());
         args.bind = Some("127.0.0.1:7539,100.64.0.7:7539".into());
-        args.plex_bind = Some("127.0.0.1:32400, 100.64.0.7:32400".into());
+        args.jellyfin_bind = Some("127.0.0.1:8096, 100.64.0.7:8096".into());
         let config = Config::load(&args).unwrap();
         assert_eq!(config.bind, "127.0.0.1:7539".parse().unwrap());
         assert_eq!(config.extra_binds, ["100.64.0.7:7539".parse::<SocketAddr>().unwrap()]);
-        assert_eq!(config.plex_bind, Some("127.0.0.1:32400".parse().unwrap()));
-        assert_eq!(config.plex_extra_binds, ["100.64.0.7:32400".parse::<SocketAddr>().unwrap()]);
+        assert_eq!(config.jellyfin_bind, Some("127.0.0.1:8096".parse().unwrap()));
+        assert_eq!(config.jellyfin_extra_binds, ["100.64.0.7:8096".parse::<SocketAddr>().unwrap()]);
+    }
+
+    #[test]
+    fn the_jellyfin_api_is_off_unless_turned_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut args = cli(dir.path());
+        let config = Config::load(&args).unwrap();
+        assert!(!config.jellyfin_on_web, "off by default");
+        assert_eq!(config.jellyfin_bind, None);
+        for (value, on_web, bind) in [
+            ("web", true, None),
+            (" Web ", true, None),
+            ("off", false, None),
+            ("0.0.0.0:8096", false, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), JELLYFIN_PORT))),
+        ] {
+            args.jellyfin_bind = Some(value.into());
+            let config = Config::load(&args).unwrap();
+            assert_eq!((config.jellyfin_on_web, config.jellyfin_bind), (on_web, bind), "{value}");
+        }
+    }
+
+    #[test]
+    fn bonjour_is_off_until_turned_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("pley.toml");
+        let config = Config::load(&cli(dir.path())).unwrap();
+        assert!(!config.bonjour && config.discovery && config.bonjour_adapters.is_empty());
+
+        // A switch of its own, apart from discovery's.
+        std::fs::write(&file, "bonjour = true\n").unwrap();
+        assert!(Config::load(&cli(dir.path())).unwrap().bonjour);
+        std::fs::write(&file, "discovery = false\nbonjour = true\n").unwrap();
+        let config = Config::load(&cli(dir.path())).unwrap();
+        assert!(config.bonjour && !config.discovery);
+
+        // --no-bonjour, or --no-discovery, turns it off for good.
+        std::fs::write(&file, "bonjour = true\n").unwrap();
+        for (no_discovery, no_bonjour) in [(false, true), (true, false)] {
+            let mut args = cli(dir.path());
+            (args.no_discovery, args.no_bonjour) = (no_discovery, no_bonjour);
+            let config = Config::load(&args).unwrap();
+            assert!(!config.bonjour && config.network_fixed.bonjour);
+            assert_eq!(config.discovery, !no_discovery);
+        }
+
+        // Adapters written by hand: a blank or odd one is left out, not
+        // a reason to stop, each is kept once, and 32 at most.
+        std::fs::write(&file, "bonjour_adapters = [\" Wi-Fi \", \"\", \"eth\\u0007\", \"Ethernet\", \"Wi-Fi\"]\n")
+            .unwrap();
+        let config = Config::load(&cli(dir.path())).unwrap();
+        assert_eq!(config.bonjour_adapters, ["Ethernet", "Wi-Fi"]);
+        assert_eq!(config.file_warnings.len(), 2, "{:?}", config.file_warnings);
+        let many: Vec<String> = (0..40).map(|i| format!("\"eth{i:02}\"")).collect();
+        std::fs::write(&file, format!("bonjour_adapters = [{}]\n", many.join(", "))).unwrap();
+        assert_eq!(Config::load(&cli(dir.path())).unwrap().bonjour_adapters.len(), 32);
+
+        // A host name as typed is kept as its label; one that can't be a
+        // host name leaves the generated one.
+        std::fs::write(&file, "bonjour_host_name = \" Media.local \"\n").unwrap();
+        assert_eq!(Config::load(&cli(dir.path())).unwrap().bonjour_host_name, "media");
+        std::fs::write(&file, "bonjour_host_name = \"my media\"\n").unwrap();
+        let config = Config::load(&cli(dir.path())).unwrap();
+        assert_eq!(config.bonjour_host_name, "");
+        assert_eq!(config.file_warnings.len(), 1, "{:?}", config.file_warnings);
+
+        let mut args = cli(dir.path());
+        args.no_bonjour = true;
+        std::fs::write(&file, "").unwrap();
+        save_config(&args, &file, None).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "bonjour = false\n");
+        // Setup saves its discovery checkbox on every update, and leaves
+        // Bonjour as Settings → Network has it either way.
+        save_config(&cli(dir.path()), &file, Some(true)).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "bonjour = false\ndiscovery = true\n");
+        std::fs::write(&file, "bonjour = true\n").unwrap();
+        save_config(&cli(dir.path()), &file, Some(false)).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "bonjour = true\ndiscovery = false\n");
+        // `pley --no-discovery save-config` by hand saves both off.
+        let mut args = cli(dir.path());
+        args.no_discovery = true;
+        save_config(&args, &file, None).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "bonjour = false\ndiscovery = false\n");
     }
 
     #[test]
@@ -601,11 +843,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut args = cli(dir.path());
         let config = Config::load(&args).unwrap();
-        assert!(config.plex_on_web, "on by default, on pley's port");
+        assert!(config.plex_on_web, "on by default, on Pley's port");
         assert_eq!(config.plex_bind, None);
         for (value, on_web, bind) in [
             ("web", true, None),
-            (" Web ", true, None),
             ("off", false, None),
             ("0.0.0.0:32400", false, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), PLEX_PORT))),
         ] {
@@ -613,6 +854,14 @@ mod tests {
             let config = Config::load(&args).unwrap();
             assert_eq!((config.plex_on_web, config.plex_bind), (on_web, bind), "{value}");
         }
+
+        // Each API is saved under its own key.
+        std::fs::write(dir.path().join("pley.toml"), "plex_bind = \"0.0.0.0:32400\"\n").unwrap();
+        let config = Config::load(&cli(dir.path())).unwrap();
+        assert_eq!((config.plex_bind, config.jellyfin_on_web), (Some("0.0.0.0:32400".parse().unwrap()), false));
+        save_listen(&config.config_file, &crate::network::Listen::of(&config), config.network_fixed).unwrap();
+        let text = std::fs::read_to_string(&config.config_file).unwrap();
+        assert!(text.contains("plex_bind = \"0.0.0.0:32400\"") && text.contains("jellyfin_bind = \"off\""), "{text}");
     }
 
     /// Command line options as if none were given (built directly, so the
@@ -624,6 +873,7 @@ mod tests {
             data_dir: Some(data_dir.to_path_buf()),
             transcode_dir: None,
             bind: None,
+            jellyfin_bind: None,
             plex_bind: None,
             ffmpeg: None,
             ffprobe: None,
@@ -634,6 +884,7 @@ mod tests {
             log: "info".into(),
             no_tray: false,
             no_discovery: false,
+            no_bonjour: false,
         }
     }
 
@@ -643,6 +894,7 @@ mod tests {
         let config = Config::load(&cli(dir.path())).unwrap();
         assert_eq!(config.bind, SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), DEFAULT_PORT));
         assert_eq!((config.plex_bind, config.plex_on_web), (None, true));
+        assert_eq!((config.jellyfin_bind, config.jellyfin_on_web), (None, false));
         assert_eq!(config.data_dir, dir.path());
         assert_eq!(config.transcode_dir, dir.path().join("transcode"));
         assert_eq!(config.db_path(), dir.path().join("pley.db"));
@@ -658,7 +910,7 @@ mod tests {
         std::fs::write(
             dir.path().join("pley.toml"),
             format!(
-                "bind = \"127.0.0.1:8000\"\nplex_bind = \"off\"\nffmpeg = \"/opt/ff/ffmpeg\"\n\
+                "bind = \"127.0.0.1:8000\"\njellyfin_bind = \"web\"\nffmpeg = \"/opt/ff/ffmpeg\"\n\
                  transcode_dir = {:?}\ntranscoder_url = \"  \"\ntranscoder_max_jobs = 0\n",
                 transcode.to_string_lossy()
             ),
@@ -666,7 +918,7 @@ mod tests {
         .unwrap();
         let config = Config::load(&cli(dir.path())).unwrap();
         assert_eq!(config.bind, "127.0.0.1:8000".parse().unwrap());
-        assert_eq!(config.plex_bind, None, "`off` disables the Plex-compatible API");
+        assert!(config.jellyfin_on_web, "`web` puts the Jellyfin-compatible API on Pley's port");
         assert_eq!(config.ffmpeg, PathBuf::from("/opt/ff/ffmpeg"));
         assert_eq!(config.transcode_dir, transcode);
         assert_eq!(config.transcoder_url, None, "a blank URL means: spawn the transcoder");
@@ -674,11 +926,11 @@ mod tests {
 
         let mut args = cli(dir.path());
         args.bind = Some("9000".into());
-        args.plex_bind = Some("127.0.0.1:32401".into());
+        args.jellyfin_bind = Some("127.0.0.1:8097".into());
         args.ffmpeg = Some("ffmpeg7".into());
         let config = Config::load(&args).unwrap();
         assert_eq!(config.bind, SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 9000));
-        assert_eq!(config.plex_bind, Some("127.0.0.1:32401".parse().unwrap()));
+        assert_eq!((config.jellyfin_bind, config.jellyfin_on_web), (Some("127.0.0.1:8097".parse().unwrap()), false));
         assert_eq!(config.ffmpeg, PathBuf::from("ffmpeg7"));
     }
 
@@ -733,13 +985,23 @@ mod tests {
 
     #[test]
     fn set_keys_replaces_lines_keeps_the_rest_and_appends_new_keys() {
-        let text = "# pley\nbind = \"0.0.0.0:7539\"\n# plex_bind = \"off\"\nbind_extra = 1\nbind=\"x\"\n";
-        let out = set_keys(text, &[("bind", "127.0.0.1:7539".into()), ("plex_bind", "off".into())]);
+        let text = "# pley\nbind = \"0.0.0.0:7539\"\n# jellyfin_bind = \"off\"\nbind_extra = 1\nbind=\"x\"\n";
+        let out = set_keys(text, &[("bind", "127.0.0.1:7539".into()), ("jellyfin_bind", "off".into())]);
         assert_eq!(
             out,
-            "# pley\nbind = \"127.0.0.1:7539\"\n# plex_bind = \"off\"\nbind_extra = 1\nplex_bind = \"off\"\n"
+            "# pley\nbind = \"127.0.0.1:7539\"\n# jellyfin_bind = \"off\"\nbind_extra = 1\njellyfin_bind = \"off\"\n"
         );
         assert_eq!(set_keys("", &[("discovery", false.into())]), "discovery = false\n");
+
+        // An array written by hand over several lines is replaced whole,
+        // brackets in its strings and comments notwithstanding.
+        let text = "bonjour_adapters = [\n  \"Ethernet\", # wired [main]\n  \"vEthernet [x]\",\n]\nbind = \"9000\"\n";
+        let adapters: Vec<toml::Value> = vec!["Wi-Fi".into()];
+        let out = set_keys(text, &[("bonjour_adapters", adapters.into())]);
+        assert_eq!(out, "bonjour_adapters = [\"Wi-Fi\"]\nbind = \"9000\"\n");
+        assert!(toml::from_str::<FileConfig>(&out).is_ok());
+        assert_eq!(brackets("x = [\"a]\", 'b[' # ] ["), 1);
+        assert_eq!(brackets("x = [1, [2]]"), 0);
     }
 
     #[test]
@@ -749,7 +1011,7 @@ mod tests {
         std::fs::write(&file, "# mine\ntranscoder_max_jobs = 3\nbind = \"9000\"\n").unwrap();
         let mut args = cli(dir.path());
         args.bind = Some("127.0.0.1:7540".into());
-        args.plex_bind = Some("off".into());
+        args.jellyfin_bind = Some("web".into());
         args.ffmpeg = Some(PathBuf::from(r"C:\Program Files\pley\ffmpeg\ffmpeg.exe"));
         save_config(&args, &file, Some(false)).unwrap();
         let text = std::fs::read_to_string(&file).unwrap();
@@ -757,7 +1019,7 @@ mod tests {
 
         let config = Config::load(&cli(dir.path())).unwrap();
         assert_eq!(config.bind, "127.0.0.1:7540".parse().unwrap());
-        assert_eq!(config.plex_bind, None);
+        assert!(config.jellyfin_on_web);
         assert_eq!(config.ffmpeg, PathBuf::from(r"C:\Program Files\pley\ffmpeg\ffmpeg.exe"));
         assert!(!config.discovery);
         assert_eq!(config.transcoder_max_jobs, 3);
@@ -778,7 +1040,12 @@ mod tests {
             web: vec!["127.0.0.1:7540".parse().unwrap(), "192.168.1.10:7540".parse().unwrap()],
             plex: Vec::new(),
             plex_on_web: false,
+            jellyfin: Vec::new(),
+            jellyfin_on_web: true,
             discovery: false,
+            bonjour: true,
+            bonjour_adapters: vec!["Ethernet".into(), "vEthernet (Default Switch)".into()],
+            bonjour_host_name: "media".into(),
         };
         save_listen(&config.config_file, &listen, config.network_fixed).unwrap();
         let config = Config::load(&cli(dir.path())).unwrap();
@@ -788,13 +1055,19 @@ mod tests {
         let mut args = cli(dir.path());
         args.bind = Some("0.0.0.0:7539".into());
         let fixed = Config::load(&args).unwrap();
-        assert_eq!(fixed.network_fixed, crate::network::Fixed { web: true, plex: false, discovery: false });
+        assert_eq!(
+            fixed.network_fixed,
+            crate::network::Fixed { web: true, plex: false, jellyfin: false, discovery: false, bonjour: false }
+        );
         let mut changed = crate::network::Listen::of(&fixed);
         changed.plex = vec!["127.0.0.1:32400".parse().unwrap()];
+        changed.jellyfin_on_web = false;
+        changed.jellyfin = vec!["127.0.0.1:8096".parse().unwrap()];
         save_listen(&fixed.config_file, &changed, fixed.network_fixed).unwrap();
         let text = std::fs::read_to_string(&fixed.config_file).unwrap();
         assert!(text.contains("bind = \"127.0.0.1:7540, 192.168.1.10:7540\""), "{text}");
         assert!(text.contains("plex_bind = \"127.0.0.1:32400\""), "{text}");
+        assert!(text.contains("jellyfin_bind = \"127.0.0.1:8096\""), "{text}");
         assert!(!dir.path().join("pley.toml.new").exists());
     }
 
@@ -805,7 +1078,7 @@ mod tests {
         let err = Config::load(&cli(dir.path())).unwrap_err();
         assert!(format!("{err:#}").contains("pley.toml"), "{err:#}");
 
-        std::fs::write(dir.path().join("pley.toml"), "plex_bind = \"somewhere\"\n").unwrap();
+        std::fs::write(dir.path().join("pley.toml"), "jellyfin_bind = \"somewhere\"\n").unwrap();
         assert!(Config::load(&cli(dir.path())).is_err(), "an unreadable address is an error, not a silent default");
 
         let mut args = cli(dir.path());

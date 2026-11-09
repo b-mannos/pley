@@ -15,12 +15,14 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import app.pley.android.common.formatWords
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.TvSafeArea
@@ -29,8 +31,8 @@ import app.pley.android.model.StreamAction
 import app.pley.android.model.format.audioFormatLabel
 import app.pley.android.model.format.bitDepthLabel
 import app.pley.android.model.format.codecLabel
-import app.pley.android.model.format.frameRateLabel
 import app.pley.android.model.format.formatBitrate
+import app.pley.android.model.format.frameRateLabel
 import app.pley.android.model.format.hdrFormatLabel
 import app.pley.android.model.format.levelLabel
 import app.pley.android.model.format.sampleRateLabel
@@ -44,8 +46,10 @@ import app.pley.android.ui.tv.item.FactLine
 import app.pley.android.ui.tv.item.MediaFact
 import app.pley.android.ui.tv.item.MediaFactText
 import app.pley.android.ui.tv.item.MediaFacts
+import java.text.DecimalFormatSymbols
 import kotlinx.coroutines.delay
-import java.util.Locale
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** The display's mode now, and the HDR types it takes in it (Display.HdrCapabilities.HDR_TYPE_*). */
 @Immutable
@@ -65,6 +69,9 @@ internal data class ReadoutInput(
 /**
  * The playback's details, the engine's stats, the buffer and the display,
  * sampled once a second while shown: the readout never recomposes faster.
+ * Until the details come (they are asked for as it opens), it samples
+ * again as soon as they do, so "Asking the server…" shows only while a
+ * stream's live numbers are on their way, not for a second whatever comes.
  */
 @Composable
 internal fun rememberReadout(state: State<PlayerUiState>, engine: State<EngineState?>): State<ReadoutInput> {
@@ -79,7 +86,11 @@ internal fun rememberReadout(state: State<PlayerUiState>, engine: State<EngineSt
                 quality = s.quality,
                 display = displayNow(view),
             )
-            delay(READOUT_MS)
+            if (s.details == null) {
+                withTimeoutOrNull(READOUT_MS) { snapshotFlow { state.value.details }.first { it != null } }
+            } else {
+                delay(READOUT_MS)
+            }
         }
     }
 }
@@ -140,6 +151,7 @@ internal object TvReadout {
     fun compact(r: Resources, input: ReadoutInput): List<MediaFact> {
         val d = input.details
         val stats = input.stats
+        val words = formatWords(r)
         return buildList {
             if (d != null) {
                 add(MediaFact(r.getString(R.string.tv_readout_playback), d.method + (d.pipeline?.let { " · $it" } ?: "")))
@@ -147,8 +159,8 @@ internal object TvReadout {
                     val line = listOfNotNull(
                         codecLabel(v.codec) + (v.profile?.let { " $it" } ?: "") + (levelLabel(v.codec, v.level)?.let { " L$it" } ?: ""),
                         if ((v.width ?: 0) > 0 && (v.height ?: 0) > 0) "${v.width}×${v.height}" else null,
-                        frameRateLabel(v.frameRate),
-                        bitDepthLabel(v).ifEmpty { null },
+                        frameRateLabel(v.frameRate, words),
+                        bitDepthLabel(v, words).ifEmpty { null },
                         hdrFormatLabel(v),
                     )
                     add(MediaFact(r.getString(R.string.tv_readout_video), line.joinToString(" · ")))
@@ -156,9 +168,9 @@ internal object TvReadout {
                 transcodeTarget(d)?.let { add(MediaFact(r.getString(R.string.tv_readout_target), it)) }
                 d.audio?.let { a ->
                     val line = listOfNotNull(
-                        audioFormatLabel(a).ifEmpty { null },
-                        sampleRateLabel(a.sampleRate),
-                        MediaFactText.language(a),
+                        audioFormatLabel(a, words).ifEmpty { null },
+                        sampleRateLabel(a.sampleRate, words),
+                        MediaFactText.language(a, words),
                         stats?.let { audioOutput(r, it) },
                     )
                     add(MediaFact(r.getString(R.string.tv_readout_audio), line.joinToString(" · ")))
@@ -167,10 +179,10 @@ internal object TvReadout {
                 add(
                     MediaFact(
                         r.getString(R.string.tv_readout_subtitles),
-                        if (sub == null) r.getString(R.string.tv_readout_off) else listOfNotNull(MediaFactText.language(sub), MediaFactText.format(r, sub)).joinToString(" · "),
+                        if (sub == null) r.getString(R.string.tv_readout_off) else listOfNotNull(MediaFactText.language(sub, words), MediaFactText.format(r, sub)).joinToString(" · "),
                     ),
                 )
-                val bitrate = listOf(formatBitrate(d.file?.bitrate), currentBitrate(r, d, stats).orEmpty()).filter { it.isNotEmpty() }.distinct()
+                val bitrate = listOf(formatBitrate(d.file?.bitrate, words), currentBitrate(r, d, stats).orEmpty()).filter { it.isNotEmpty() }.distinct()
                 if (bitrate.isNotEmpty()) add(MediaFact(r.getString(R.string.tv_readout_bitrate), bitrate.joinToString(" → ")))
             }
             if (stats != null) {
@@ -178,7 +190,7 @@ internal object TvReadout {
                 input.display?.let { add(MediaFact(r.getString(R.string.tv_player_info_display), displayMode(r, it) + " · " + (hdrShown(stats, it, carriesHdr10Plus(input)) ?: "SDR"))) }
                 add(MediaFact(r.getString(R.string.tv_readout_dropped_short), r.getString(R.string.tv_player_info_dropped_value, stats.droppedFrames, stats.renderedFrames + stats.droppedFrames)))
                 val buffer = r.getString(R.string.tv_readout_buffer_compact, (input.bufferedMs / 1000).toInt())
-                add(MediaFact(r.getString(R.string.tv_readout_buffer_short), buffer + (stats.bandwidth?.let { " · " + formatBitrate(it) } ?: "")))
+                add(MediaFact(r.getString(R.string.tv_readout_buffer_short), buffer + (stats.bandwidth?.let { " · " + formatBitrate(it, words) } ?: "")))
             }
         }
     }
@@ -203,11 +215,12 @@ internal object TvReadout {
     }
 
     private fun device(r: Resources, stats: PlaybackStats, input: ReadoutInput): List<MediaFact> = buildList {
+        val words = formatWords(r)
         stats.videoDecoder?.let { add(MediaFact(r.getString(R.string.tv_player_info_video_decoder), it + hardware(r, stats.videoDecoderHardware))) }
         val picture = listOfNotNull(
             if (stats.width != null && stats.height != null) "${stats.width}×${stats.height}" else null,
-            stats.frameRate?.let { frameRateLabel(it.toDouble()) },
-            stats.bitDepth?.let { "$it-bit" },
+            stats.frameRate?.let { frameRateLabel(it.toDouble(), words) },
+            stats.bitDepth?.let { r.getString(R.string.tv_player_info_bit_depth, it) },
             stats.dynamicRange,
             // The decoder's codec: HEVC for Dolby Vision played as its base layer.
             (stats.videoDecoderMime ?: stats.videoCodec?.substringBefore(' '))?.let(::codecName),
@@ -224,7 +237,7 @@ internal object TvReadout {
         stats.audioDecoder?.takeIf { !stats.passthrough }?.let { add(MediaFact(r.getString(R.string.tv_player_info_audio_decoder), it)) }
         add(MediaFact(r.getString(R.string.tv_player_info_dropped), r.getString(R.string.tv_player_info_dropped_value, stats.droppedFrames, stats.renderedFrames + stats.droppedFrames)))
         add(MediaFact(r.getString(R.string.tv_player_info_buffer), r.getString(R.string.tv_player_info_buffer_value, (input.bufferedMs / 1000).toInt())))
-        stats.bandwidth?.let { add(MediaFact(r.getString(R.string.tv_readout_network), formatBitrate(it))) }
+        stats.bandwidth?.let { add(MediaFact(r.getString(R.string.tv_readout_network), formatBitrate(it, words))) }
         add(MediaFact(r.getString(R.string.tv_player_info_rebuffers), stats.rebuffers.toString()))
         stats.firstFrameMs?.let { add(MediaFact(r.getString(R.string.tv_player_info_first_frame), r.getString(R.string.tv_player_info_first_frame_value, it.toInt()))) }
     }
@@ -241,8 +254,9 @@ internal object TvReadout {
 
     /** The bitrate arriving now: an HLS variant's or the transcode's aim; in direct play the file's own. */
     private fun currentBitrate(r: Resources, d: PlaybackDetailsUi, stats: PlaybackStats?): String? {
-        stats?.videoBitrate?.let { return formatBitrate(it.toLong() + (stats.audioBitrate ?: 0)) }
-        d.transcode?.bitrateOut?.let { return formatBitrate(it) }
+        val words = formatWords(r)
+        stats?.videoBitrate?.let { return formatBitrate(it.toLong() + (stats.audioBitrate ?: 0), words) }
+        d.transcode?.bitrateOut?.let { return formatBitrate(it, words) }
         return if (d.playbackMethod == PlaybackMethod.Direct) r.getString(R.string.tv_readout_as_file) else null
     }
 
@@ -256,9 +270,13 @@ internal object TvReadout {
         }
     }
 
-    /** "3840×2160 at 23.976 Hz". */
-    private fun displayMode(r: Resources, d: DisplayNow): String =
-        r.getString(R.string.tv_readout_display_mode, d.width, d.height, String.format(Locale.ROOT, "%.3f", d.refreshRate).trimEnd('0').trimEnd('.'))
+    /** "3840×2160 at 23.976 Hz", the rate in the digits of the language shown ("23,976" in French). */
+    private fun displayMode(r: Resources, d: DisplayNow): String {
+        val locale = r.configuration.locales[0]
+        val separator = DecimalFormatSymbols.getInstance(locale).decimalSeparator
+        val rate = String.format(locale, "%.3f", d.refreshRate).trimEnd('0').trimEnd(separator)
+        return r.getString(R.string.tv_readout_display_mode, d.width, d.height, rate)
+    }
 
     /**
      * Whether the display takes the video's HDR in its mode: "On (HDR10)",

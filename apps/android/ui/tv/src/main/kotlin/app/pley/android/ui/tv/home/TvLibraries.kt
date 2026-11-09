@@ -43,6 +43,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -71,6 +72,7 @@ import app.pley.android.designsystem.TvSafeArea
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcon
 import app.pley.android.designsystem.icon.PleyIcons
+import app.pley.android.designsystem.text.asString
 import app.pley.android.model.LibraryKind
 import app.pley.android.screens.PleyKey
 import app.pley.android.screens.home.LibrariesEvent
@@ -80,8 +82,11 @@ import app.pley.android.screens.home.LibraryEntry
 import app.pley.android.ui.tv.R
 import app.pley.android.ui.tv.item.TvToastHost
 import app.pley.android.ui.tv.item.TvToastState
+import app.pley.android.ui.tv.kit.HeldEnds
+import app.pley.android.ui.tv.kit.OverlayShowing
 import app.pley.android.ui.tv.kit.TvPillButton
 import app.pley.android.ui.tv.kit.TvSidePanel
+import app.pley.android.ui.tv.kit.heldKeyStaysIn
 import app.pley.android.ui.tv.kit.menuKey
 import app.pley.android.ui.tv.kit.rememberFocusMemory
 import app.pley.android.ui.tv.kit.rememberedFocus
@@ -94,7 +99,7 @@ import app.pley.android.ui.tv.shell.failedTitle
 import kotlinx.coroutines.launch
 
 /**
- * Every library (design spec §2.1): the rail shows the first three, and
+ * Every library (design spec §2.1): the rail shows the first six, and
  * "Libraries" opens this page. The page title, then a card per library in
  * the server's order: its kind's icon, its name, how much it holds, and
  * "Scanning…" while the server scans it. Initial focus on the first card,
@@ -134,7 +139,7 @@ internal fun TvLibrariesScreen(vm: LibrariesViewModel = viewModel(factory = Libr
             is LibrariesState.Ready -> if (s.libraries.isEmpty()) {
                 TvHomeNotice(stringResource(R.string.tv_home_no_libraries), stringResource(R.string.tv_home_no_libraries_body))
             } else {
-                LibrariesGrid(s, vm, open = { navigator.open(PleyKey.Library(it)) })
+                LibrariesGrid(s, vm, open = navigator::open)
             }
         }
         TvToastHost(toasts)
@@ -142,7 +147,7 @@ internal fun TvLibrariesScreen(vm: LibrariesViewModel = viewModel(factory = Libr
 }
 
 @Composable
-private fun LibrariesGrid(state: LibrariesState.Ready, vm: LibrariesViewModel, open: (Long) -> Unit) {
+private fun LibrariesGrid(state: LibrariesState.Ready, vm: LibrariesViewModel, open: (PleyKey) -> Unit) {
     val memory = rememberFocusMemory()
     val scope = rememberCoroutineScope()
     var sorting by remember { mutableStateOf(false) }
@@ -164,6 +169,8 @@ private fun LibrariesGrid(state: LibrariesState.Ready, vm: LibrariesViewModel, o
         moving = null
     }
     BackHandler(enabled = inSort && moving == null) { sorting = false }
+    // While sorting, the keys are the cards': requests' news waits.
+    OverlayShowing(inSort)
 
     Column(Modifier.fillMaxSize().padding(top = TvSafeArea.Vertical)) {
         Row(
@@ -213,7 +220,7 @@ private fun LibrariesGrid(state: LibrariesState.Ready, vm: LibrariesViewModel, o
             contentPadding = PaddingValues(start = PleyTv.Gutter, end = TvSafeArea.Horizontal, top = 8.dp, bottom = TvSafeArea.Vertical),
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().heldKeyStaysIn(HeldEnds.UpDown),
         ) {
             itemsIndexed(state.libraries, key = { _, entry -> entry.library.id }, contentType = { _, _ -> "library" }) { index, entry ->
                 val id = entry.library.id
@@ -228,7 +235,7 @@ private fun LibrariesGrid(state: LibrariesState.Ready, vm: LibrariesViewModel, o
                         when {
                             moving != null -> Unit
                             inSort -> moving = id
-                            else -> open(id)
+                            else -> open(PleyKey.Library(id))
                         }
                     },
                     onLongClick = { if (moving == null) actionsFor = entry },
@@ -264,7 +271,7 @@ private fun LibrariesGrid(state: LibrariesState.Ready, vm: LibrariesViewModel, o
                 sortable = state.sortable,
                 onOpen = {
                     actionsFor = null
-                    open(shown.library.id)
+                    open(PleyKey.Library(shown.library.id))
                 },
                 onMove = {
                     actionsFor = null
@@ -355,42 +362,62 @@ private fun LibraryCard(
                 pressedContentColor = PleyColors.Fg,
             )
         } else {
-            ClickableSurfaceDefaults.colors(
-                containerColor = PleyColors.Surface2,
-                contentColor = PleyColors.Fg,
-                focusedContainerColor = PleyColors.Accent,
-                focusedContentColor = PleyColors.OnAccent,
-                pressedContainerColor = PleyColors.AccentBright,
-                pressedContentColor = PleyColors.OnAccent,
-            )
+            cardColors()
         },
         // Lifted, it keeps its size: the ring is drawn around it as it is.
         scale = ClickableSurfaceDefaults.scale(focusedScale = if (moving) 1f else 1.05f, pressedScale = 1f),
     ) {
         val content = LocalContentColor.current
-        Row(Modifier.fillMaxSize().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier.size(PleyTv.ButtonHeight).drawBehind { drawRoundRect(content.copy(alpha = 0.12f), cornerRadius = CornerRadius(PleyShape.ControlRadius.toPx())) },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(kindIcon(entry.library.kind), contentDescription = null, size = PleyTv.IconSize, tint = content)
-            }
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                BasicText(
-                    entry.library.name,
-                    style = PleyType.Tv.Title.copy(color = content),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(2.dp))
-                val line = if (entry.scanning) "${entry.count} · ${stringResource(R.string.tv_libraries_scanning)}" else entry.count
-                BasicText(line, style = PleyType.Tv.Caption.copy(color = content.copy(alpha = 0.75f)), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            if (sorting) {
-                Spacer(Modifier.width(12.dp))
-                Icon(PleyIcons.GripVertical, contentDescription = null, size = PleyTv.IconSize, tint = if (moving) PleyColors.AccentBright else content.copy(alpha = 0.6f))
-            }
+        val count = entry.countText.asString()
+        val line = if (entry.scanning) "$count · ${stringResource(R.string.tv_libraries_scanning)}" else count
+        CardBody(
+            kindIcon(entry.library.kind),
+            entry.library.name,
+            line,
+            grip = if (!sorting) null else if (moving) PleyColors.AccentBright else content.copy(alpha = 0.6f),
+        )
+    }
+}
+
+/** A card's colours: focused, the accent fill with [onAccent][PleyColors.OnAccent] content. */
+@Composable
+private fun cardColors() = ClickableSurfaceDefaults.colors(
+    containerColor = PleyColors.Surface2,
+    contentColor = PleyColors.Fg,
+    focusedContainerColor = PleyColors.Accent,
+    focusedContentColor = PleyColors.OnAccent,
+    pressedContainerColor = PleyColors.AccentBright,
+    pressedContentColor = PleyColors.OnAccent,
+)
+
+/**
+ * A card's inside, in its content colour: the icon on a tint, the name,
+ * the [line] under it, and while sorting a handle in [grip]'s colour.
+ */
+@Composable
+private fun CardBody(icon: PleyIcon, name: String, line: String, grip: Color? = null) {
+    val content = LocalContentColor.current
+    Row(Modifier.fillMaxSize().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier.size(PleyTv.ButtonHeight).drawBehind { drawRoundRect(content.copy(alpha = 0.12f), cornerRadius = CornerRadius(PleyShape.ControlRadius.toPx())) },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = null, size = PleyTv.IconSize, tint = content)
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            BasicText(
+                name,
+                style = PleyType.Tv.Title.copy(color = content),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(2.dp))
+            BasicText(line, style = PleyType.Tv.Caption.copy(color = content.copy(alpha = 0.75f)), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (grip != null) {
+            Spacer(Modifier.width(12.dp))
+            Icon(PleyIcons.GripVertical, contentDescription = null, size = PleyTv.IconSize, tint = grip)
         }
     }
 }
@@ -405,7 +432,7 @@ private fun CardActions(entry: LibraryEntry, sortable: Boolean, onOpen: () -> Un
         runCatching { first.requestFocus() }
     }
     Column(Modifier.focusProperties { onExit = { cancelFocusChange() } }.focusGroup()) {
-        TvPanelTitle(entry.library.name, entry.count)
+        TvPanelTitle(entry.library.name, entry.countText.asString())
         TvPanelRow(stringResource(R.string.tv_libraries_open), onClick = onOpen, icon = PleyIcons.ArrowRight, focusRequester = first)
         if (sortable) {
             TvPanelRow(stringResource(R.string.tv_libraries_move), onClick = onMove, icon = PleyIcons.ArrowUpDown)

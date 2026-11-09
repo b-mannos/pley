@@ -1,13 +1,14 @@
 package app.pley.android.ui.phone.player
 
-import androidx.compose.runtime.State
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import app.pley.android.model.PlaybackMethod
 import app.pley.android.player.ChapterMark
 import app.pley.android.player.PlaybackController
 import app.pley.android.player.PlayerPhase
@@ -42,9 +43,11 @@ class PlayerScreenState(
     // ---------------------------------------------------------------- the controller's state, by part
 
     val phase: PlayerPhase by derivedStateOf { ui.value.phase }
+    val itemId: Long by derivedStateOf { ui.value.itemId }
     val title: String by derivedStateOf { ui.value.title }
     val subtitle: String? by derivedStateOf { ui.value.subtitle }
     val method: String? by derivedStateOf { ui.value.method }
+    val playbackMethod: PlaybackMethod? by derivedStateOf { ui.value.playbackMethod }
     val skipLabel: String? by derivedStateOf { ui.value.skipLabel }
     val upNext: UpNextUi? by derivedStateOf { ui.value.upNextCard }
     val chapters: List<ChapterMark> by derivedStateOf { ui.value.chapters }
@@ -54,10 +57,16 @@ class PlayerScreenState(
     val quality: String by derivedStateOf { ui.value.quality }
     val hasThumbnails: Boolean by derivedStateOf { ui.value.hasThumbnails }
     val notice: String? by derivedStateOf { ui.value.notice }
+    val remoteNotice: String? by derivedStateOf { ui.value.remoteNotice }
+    val remoteNoticeId: Int by derivedStateOf { ui.value.remoteNoticeId }
+
+    /** Paused by the remote, on another device: the controls don't come up for it. */
+    val pausedByRemote: Boolean by derivedStateOf { ui.value.pausedByRemote }
     val canPlayOriginal: Boolean by derivedStateOf { ui.value.canPlayOriginal }
     val suggestLowerQuality: Boolean by derivedStateOf { ui.value.suggestLowerQuality }
     val details by derivedStateOf { ui.value.details }
     val subtitleSync: Boolean by derivedStateOf { ui.value.subtitleSync }
+    val subtitleStyled: Boolean by derivedStateOf { ui.value.subtitleStyled }
     val subtitleOffsetMs: Long by derivedStateOf { ui.value.subtitleOffsetMs }
     val sleep: SleepState by derivedStateOf { ui.value.sleep }
     val stoppedByServer: Boolean by derivedStateOf { ui.value.stoppedByServer }
@@ -69,6 +78,13 @@ class PlayerScreenState(
 
     /** An episode: Next episode is offered. */
     val episode: Boolean by derivedStateOf { ui.value.subtitle != null }
+
+    /**
+     * The server has said how the item plays, or it plays from a download
+     * or a drive: the bottom row's choices are known (a drive's own tracks
+     * join them once Media3 has read the file).
+     */
+    val answered: Boolean by derivedStateOf { ui.value.method != null }
 
     /** The subtitles chosen are drawn into the picture by the server. */
     val burnedSubtitles: Boolean by derivedStateOf { ui.value.subtitles.any { it.selected && it.burnIn } }
@@ -111,6 +127,13 @@ class PlayerScreenState(
     /** Where the knob is while the seek bar is dragged; `null` otherwise. */
     var scrubMs by mutableStateOf<Long?>(null)
 
+    /**
+     * The seek bar is being dragged. What only looks different during a
+     * drag reads this: [scrubMs] changes with every move of the finger, and
+     * is read only where the knob and the preview are drawn and placed.
+     */
+    val scrubbing: Boolean by derivedStateOf { scrubMs != null }
+
     /** Touches only show the unlock button. */
     var locked by mutableStateOf(false)
         private set
@@ -141,14 +164,28 @@ class PlayerScreenState(
      */
     val playhead = mutableLongStateOf(0L)
 
-    /** The controls stay: paused, waiting, a menu open, the seek bar held, an error. */
+    /** A touch came during the remote's pause: the pause is the person's own, until it plays again. */
+    private var pauseOwned by mutableStateOf(false)
+
+    /**
+     * The controls stay: paused, waiting, a menu open, the seek bar held, an
+     * error. Not for the remote's pause until a touch here makes it the
+     * person's: someone elsewhere paused, not someone here using them.
+     */
     val keepControls: Boolean by derivedStateOf {
         val p = ui.value.phase
-        p == PlayerPhase.Paused || p is PlayerPhase.Error || waiting || sheet != null || scrubMs != null
+        val paused = p == PlayerPhase.Paused && (!pausedByRemote || pauseOwned)
+        paused || p is PlayerPhase.Error || waiting || sheet != null || scrubMs != null
     }
 
     fun touched() {
         touches++
+        if (pausedByRemote) pauseOwned = true
+    }
+
+    /** Played again: the next pause from the remote is the remote's until touched. */
+    fun remotePauseEnded() {
+        pauseOwned = false
     }
 
     fun toggleControls() {

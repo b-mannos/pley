@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -58,14 +57,14 @@ internal fun BoxScope.DetailsReadout(state: PlayerScreenState, enabled: Boolean)
 private fun Readout(details: PlaybackDetailsUi) {
     Column(
         Modifier
-            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .windowInsetsPadding(WindowInsets.player)
             .padding(16.dp)
             .widthIn(max = READOUT_WIDTH)
             .background(Color.Black.copy(alpha = 0.6f), PleyShape.Card)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        Text(details.method, style = MaterialTheme.typography.labelMedium, color = PlayerLook.badgeColors(details.method).text)
+        Text(details.method, style = MaterialTheme.typography.labelMedium, color = methodColors(details.playbackMethod).text)
         details.rows.take(READOUT_ROWS).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(row.label, style = MaterialTheme.typography.bodySmall, color = PleyColors.Muted, maxLines = 1, modifier = Modifier.width(LABEL_WIDTH))

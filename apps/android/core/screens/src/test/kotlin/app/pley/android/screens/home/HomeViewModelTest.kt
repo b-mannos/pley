@@ -5,8 +5,11 @@ package app.pley.android.screens.home
 import app.pley.android.data.Loadable
 import app.pley.android.data.PlayTarget
 import app.pley.android.data.ScanState
+import app.pley.android.model.Hub
+import app.pley.android.model.Hubs
 import app.pley.android.model.ItemDetail
 import app.pley.android.model.ItemKind
+import app.pley.android.model.ItemSummary
 import app.pley.android.network.OfflineException
 import app.pley.android.player.PlayRequest
 import app.pley.android.screens.PleyKey
@@ -42,6 +45,7 @@ class HomeViewModelTest {
     private fun TestScope.home(): HomeViewModel = HomeViewModel(sources, dispatcher).also { vm ->
         // Something on screen keeps the state flowing.
         backgroundScope.launch { vm.state.collect { } }
+        backgroundScope.launch { vm.status.collect { } }
         backgroundScope.launch { vm.info.collect { } }
     }
 
@@ -49,9 +53,10 @@ class HomeViewModelTest {
     fun homeIsDrawnFromTheSnapshotWithoutTheNetwork() = runTest(dispatcher) {
         val vm = home()
         assertSame(HomeState.Loading, vm.state.value)
+        assertNull(vm.status.value)
         sources.home.value = Loadable.Ready(HOME, fresh = false)
         val saved = vm.state.value as HomeState.Ready
-        assertFalse(saved.fresh)
+        assertEquals(Loadable.Ready(Unit, fresh = false), vm.status.value)
         assertEquals(listOf("continue_watching", "recently_added:1", "recently_added:2", "recently_added:3"), saved.rows.map { it.key })
         assertEquals(GLASSHOUSE, saved.hero?.item)
         assertEquals(FakeHomeSources.ORIGIN, saved.origin)
@@ -60,8 +65,24 @@ class HomeViewModelTest {
         val offline = OfflineException(java.net.ConnectException("refused"))
         sources.home.value = Loadable.Failed(offline, HOME)
         val stale = vm.state.value as HomeState.Ready
-        assertSame(offline, stale.error)
+        assertEquals(Loadable.Failed(offline, Unit), vm.status.value)
         assertEquals(4, stale.rows.size)
+    }
+
+    @Test
+    fun theServerSayingWhatWasSavedRedrawsNothing() = runTest(dispatcher) {
+        val vm = home()
+        var shapings = 0
+        val shaped = vm.present { _: HomeState -> ++shapings }
+        backgroundScope.launch { shaped.collect { } }
+        sources.home.value = Loadable.Ready(HOME, fresh = false)
+        val saved = vm.state.value
+        val shaped0 = shapings
+        // Coming back to Home, the server is asked again and says the same: only the status moves.
+        sources.home.value = Loadable.Ready(HOME, fresh = true)
+        assertSame(saved, vm.state.value)
+        assertEquals(shaped0, shapings)
+        assertEquals(Loadable.Ready(Unit, fresh = true), vm.status.value)
     }
 
     @Test
@@ -75,9 +96,9 @@ class HomeViewModelTest {
         sources.detail(GLASSHOUSE.id).value = Loadable.Ready(detail, fresh = true)
         assertEquals("TV-14", (vm.state.value as HomeState.Ready).hero?.meta?.contentRating)
         // A fresh answer for the rows: the hero is never drawn without what was known of it.
-        sources.home.value = Loadable.Ready(HOME, fresh = true)
+        sources.home.value = Loadable.Ready(HOME.copy(hubs = HOME.hubs.reversed()), fresh = true)
         val ready = vm.state.value as HomeState.Ready
-        assertTrue(ready.fresh)
+        assertEquals(Loadable.Ready(Unit, fresh = true), vm.status.value)
         assertEquals("TV-14", ready.hero?.meta?.contentRating)
     }
 
@@ -181,7 +202,7 @@ class HomeViewModelTest {
         advanceUntilIdle()
         assertEquals(1, sources.hubRefreshes)
         assertEquals(1, sources.libraryRefreshes)
-        assertFalse((vm.state.value as HomeState.Ready).refreshing)
+        assertFalse(vm.refreshing.value)
     }
 
     @Test
@@ -206,5 +227,29 @@ class HomeViewModelTest {
         val profile = vm.profile.value!!
         assertEquals("Anna", profile.name)
         assertEquals("${FakeHomeSources.ORIGIN}/api/users/2/avatar?v=1", profile.pictureUrl)
+    }
+
+    @Test
+    fun theBannerComesWithItsDetailsAndPutsTitlesOnMyList() = runTest(dispatcher) {
+        val vm = home()
+        val film = ItemSummary(id = 501, libraryId = 1, kind = ItemKind.Movie, title = "Lantern", backdropUrl = "/api/items/501/images/backdrop")
+        sources.libraryList.value = Loadable.Ready(listOf(MOVIES), fresh = true)
+        sources.home.value = Loadable.Ready(Hubs(listOf(Hub("recently_added:1", "Recently Added in Movies", 1, listOf(film)))), fresh = true)
+        val before = (vm.state.value as HomeState.Ready).featured.single().info
+        assertEquals("Lantern", before.title)
+        assertFalse(before.complete)
+
+        sources.detail(501).value = Loadable.Ready(
+            ItemDetail(id = 501, libraryId = 1, kind = ItemKind.Movie, title = "Lantern", summary = "A light that never goes out.", genres = listOf("Drama")),
+            fresh = true,
+        )
+        val told = (vm.state.value as HomeState.Ready).featured.single().info
+        assertEquals("A light that never goes out.", told.summary)
+        assertEquals(listOf("Drama"), told.genres)
+        assertFalse(told.inList)
+
+        vm.setInList(told.item, true)
+        assertEquals(listOf(501L to true), sources.listed)
+        assertTrue((vm.state.value as HomeState.Ready).featured.single().info.inList)
     }
 }

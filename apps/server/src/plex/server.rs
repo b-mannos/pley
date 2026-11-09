@@ -113,9 +113,10 @@ struct UserRow {
     username: String,
 }
 
-/// `/accounts`: pley users (administrators see everyone).
+/// `/accounts`: pley users (an administrator's token with `activity` sees
+/// everyone).
 pub async fn accounts(State(state): State<AppState>, PlexUser(user): PlexUser) -> PlexResult<Node> {
-    let users: Vec<UserRow> = if user.is_admin {
+    let users: Vec<UserRow> = if super::sees_everyone(&user) {
         sqlx::query_as("SELECT id, username FROM users ORDER BY id").fetch_all(&state.db.read).await?
     } else {
         vec![UserRow { id: user.id, username: user.username.clone() }]
@@ -196,6 +197,12 @@ pub async fn accepted(PlexUser(_user): PlexUser) -> StatusCode {
     StatusCode::OK
 }
 
+/// `PUT /:/prefs`: the server's settings, which no token changes, whatever
+/// its scopes: they are an administrator's, in Pley.
+pub async fn settings_refused(PlexUser(_user): PlexUser) -> PlexError {
+    PlexError::Forbidden
+}
+
 /// `/prefs`: the few server preferences that map onto pley settings.
 pub async fn prefs(
     State(state): State<AppState>,
@@ -274,8 +281,9 @@ pub async fn media_providers(State(state): State<AppState>, PlexUser(user): Plex
     Ok(Node::container().attr("size", 1).child(provider))
 }
 
-/// `/status/sessions/history/all`: plays, newest first. Administrators see
-/// everyone's (or one account's with `accountID`), others their own.
+/// `/status/sessions/history/all`: plays, newest first. An administrator's
+/// token with `activity` sees everyone's (or one account's with
+/// `accountID`), others their own.
 pub async fn history(
     State(state): State<AppState>,
     PlexUser(user): PlexUser,
@@ -285,7 +293,7 @@ pub async fn history(
 ) -> PlexResult<Node> {
     let account = params.parse::<i64>("accountID");
     let filter = history::Filter {
-        user_id: if user.is_admin { account } else { Some(user.id) },
+        user_id: if super::sees_everyone(&user) { account } else { Some(user.id) },
         item_id: params.parse::<i64>("metadataItemID"),
         library_id: params.parse::<i64>("librarySectionID"),
         // `viewedAt>=…` arrives as the key `viewedAt>`.
@@ -296,7 +304,7 @@ pub async fn history(
     let (records, total) = history::list(&state.db, user.id, &filter).await?;
     let libraries = visible_libraries(&state, &user).await?;
     let rows: Vec<_> = records.iter().map(|r| r.item.clone()).collect();
-    let detail = Detail { guids: false, full: false, media: false, markers: false };
+    let detail = Detail { guids: false, full: false, media: false, markers: false, labels: false };
     let nodes = item_nodes(&state, &rows, &Sections::new(&libraries), detail).await?;
     let nodes = nodes
         .into_iter()
@@ -311,14 +319,14 @@ pub async fn history(
     Ok(list_container(None, &info, nodes, total as usize, &page))
 }
 
+/// `DELETE /status/sessions/history/{id}`: one's own plays, and with
+/// `manage` anyone's (deleting changes their history, which seeing it
+/// with `activity` doesn't).
 pub async fn delete_history(
     State(state): State<AppState>,
     PlexUser(user): PlexUser,
     Path(id): Path<i64>,
 ) -> PlexResult<StatusCode> {
-    if history::delete(&state.db, user.id, user.is_admin, id).await? {
-        Ok(StatusCode::OK)
-    } else {
-        Err(PlexError::NotFound)
-    }
+    let anyones = user.compatibility_allows(crate::auth::compatibility::Scope::Manage);
+    if history::delete(&state.db, user.id, anyones, id).await? { Ok(StatusCode::OK) } else { Err(PlexError::NotFound) }
 }

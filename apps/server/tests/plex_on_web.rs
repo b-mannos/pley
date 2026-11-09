@@ -46,6 +46,37 @@ async fn its_clients_and_browsers_share_pleys_port() {
 }
 
 #[tokio::test]
+async fn it_shares_pleys_port_with_the_jellyfin_api() {
+    let app = TestApp::with_config(|config| config.jellyfin_on_web = true).await;
+    let admin = app.setup_admin().await;
+    let plex = app.plex_token(&admin).await;
+    let jellyfin = app.jellyfin_token(&admin).await;
+    let mediabrowser =
+        format!(r#"MediaBrowser Client="Tool", Device="Box", DeviceId="1", Version="1", Token="{jellyfin}""#);
+
+    // Where their paths meet, each client gets its own API.
+    for path in ["/library/sections", "/system", "/devices"] {
+        let reply =
+            app.call(Method::GET, path, None, None, &[("x-plex-token", &plex), ("accept", "application/json")]).await;
+        assert_eq!(reply.status, StatusCode::OK, "{path}: {}", reply.text());
+        assert!(reply.body.get("MediaContainer").is_some(), "{path}: {}", reply.text());
+    }
+    let hints =
+        app.call(Method::GET, "/Search/Hints?SearchTerm=x", None, None, &[("authorization", &mediabrowser)]).await;
+    assert_eq!(hints.status, StatusCode::OK, "{}", hints.text());
+    assert!(hints.body["SearchHints"].is_array(), "{}", hints.text());
+    // Without a header, a path only Jellyfin's apps ask for this way is its.
+    let info = app.call(Method::GET, "/System/Info/Public", None, None, &[]).await;
+    assert_eq!(info.body["ProductName"], "Jellyfin Server", "{}", info.text());
+    // And Plex's own paths are Plex's.
+    let identity = app.call(Method::GET, "/identity", None, None, &[]).await;
+    assert!(identity.text().contains("machineIdentifier"), "{}", identity.text());
+    // A token of either works on both.
+    let sections = app.call(Method::GET, "/library/sections", None, None, &[("x-plex-token", &jellyfin)]).await;
+    assert_eq!(sections.status, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn off_it_answers_nowhere_on_pleys_port() {
     let app = TestApp::with_config(|config| config.plex_on_web = false).await;
     let identity = app.call(Method::GET, "/identity", None, None, &[]).await;

@@ -24,6 +24,8 @@ sealed class HomeScreen : ShellPage
     /// <summary>The first row's header at rest: y = 384, under the hero.</summary>
     const float FirstRowTop = 384;
     const float HeroTop = 52, TitleBox = 72;
+    /// <summary>How long each featured title stays in the hero while nothing is pressed: the Android app's and the web's.</summary>
+    const long TurnMs = 9_000;
 
     readonly HomeModel model;
     readonly Images images;
@@ -33,16 +35,31 @@ sealed class HomeScreen : ShellPage
     readonly BackdropView backdrop;
     readonly ScrimView scrim;
     readonly View hero = new View();
-    readonly View heroText = new View();
+    readonly Redrawn heroText;
+    /// <summary>What the hero says, as last drawn: the same again isn't drawn again.</summary>
+    (string, string, HomeMeta, string, bool, string, bool, bool, string?) heroShown;
     readonly ButtonRow heroButtons;
     readonly ButtonView resume;
     readonly RoundButton fromStart;
     readonly RoundButton info;
     readonly RoundButton watched;
+    readonly RoundButton list;
+    /// <summary>The hero's dashes, one per featured title, beside its buttons.</summary>
+    readonly View turns = new View();
+    /// <summary>The titles the hero takes turns showing, and which is on; empty when it shows Continue Watching's first.</summary>
+    IReadOnlyList<Featured> featured = Array.Empty<Featured>();
+    int turn;
+    long turnFrom;
+    long lastKey;
+    readonly Timer turnClock = new Timer(500);
+    IDisposable? keys;
+    static readonly System.Diagnostics.Stopwatch Clock = System.Diagnostics.Stopwatch.StartNew();
     readonly View infoBlock = new View { Opacity = 0 };
     readonly View body = new View { WidthResizePolicy = ResizePolicyType.FillToParent, HeightResizePolicy = ResizePolicyType.FillToParent };
     readonly List<IDisposable> watches = new List<IDisposable>();
     RowColumnView? column;
+    /// <summary>The rows drawn, in order.</summary>
+    readonly List<RowView> rowViews = new List<RowView>();
     IReadOnlyList<HomeRow> shownRows = Array.Empty<HomeRow>();
     readonly Dictionary<(string Row, long Id), ItemSummary> itemsByTile = new Dictionary<(string, long), ItemSummary>();
     HomeInfo? heroInfo;
@@ -52,8 +69,9 @@ sealed class HomeScreen : ShellPage
     Animation? reveal;
     string shownKind = "";
 
+    /// <param name="input">The remote's keys: each press starts the hero's time over.</param>
     /// <param name="open">Opens an item's page.</param>
-    public HomeScreen(TvShell shell, HomeModel model, Images images, KeyRepeatGate gate, Action<ItemSummary> open) : base(shell, new PageKey.Home(), "home")
+    public HomeScreen(TvShell shell, HomeModel model, Images images, KeyRepeatGate gate, Input input, Action<ItemSummary> open) : base(shell, new PageKey.Home(), "home")
     {
         this.model = model;
         this.images = images;
@@ -68,24 +86,47 @@ sealed class HomeScreen : ShellPage
         View.Add(scrim);
         View.Add(infoBlock);
         hero.Position = new Position(Ui.Dp(PleyTv.Gutter), Ui.Dp(HeroTop));
-        hero.Add(heroText);
+        heroText = new Redrawn(hero);
         heroButtons = new ButtonRow();
-        resume = heroButtons.Add(new ButtonView("Resume", ButtonKind.Pill, () => Play(false), iconName: "play"));
-        fromStart = new RoundButton("From start", "rotate-ccw", () => Play(true));
-        info = new RoundButton("Info", "info", () =>
+        resume = heroButtons.Add(new ButtonView(ItemText.Resume, ButtonKind.Pill, () => Play(false), iconName: "play"));
+        fromStart = new RoundButton(ItemText.FromStart, "rotate-ccw", () => Play(true));
+        info = new RoundButton(Strings.T("home.hero.info"), "info", () =>
         {
             if (heroInfo != null) open(heroInfo.Item);
         });
-        watched = new RoundButton("Mark as watched", "circle-check", () =>
+        watched = new RoundButton(ItemText.MarkWatched, "circle-check", () =>
         {
             if (heroInfo != null) model.SetWatched(heroInfo.Item, !heroInfo.Watched);
         });
+        list = new RoundButton(ItemText.AddToMyList, "plus", () =>
+        {
+            if (heroInfo != null) model.SetInList(heroInfo.Item, !heroInfo.InList);
+        });
         hero.Add(heroButtons);
+        hero.Add(turns);
         View.Add(hero);
         View.Add(body);
 
         page.ChildFocused += i => SetInRows(page.Children[i] != heroButtons.Group);
-        heroButtons.Group.Exit = d => d == Direction.Left && Scrolling.Left(gate, Shell.FocusRail);
+        // Right from the last button: the next featured title, as along a row (Left still opens the rail).
+        heroButtons.Group.Exit = d => d == Direction.Left ? Scrolling.Left(gate, Shell.FocusRail) : d == Direction.Right && featured.Count > 1 && Turn(focusPlay: true);
+
+        // The hero turns every TurnMs while no key is pressed: each press starts the time over, so it
+        // never changes as OK is pressed. Only while focus rests on it (not in the rows, nor under
+        // another page), and not with Reduce motion.
+        keys = input.Push((key, down) =>
+        {
+            lastKey = Clock.ElapsedMilliseconds;
+            return false;
+        });
+        turnClock.Tick += (_, _) =>
+        {
+            var quiet = Clock.ElapsedMilliseconds - Math.Max(lastKey, turnFrom);
+            if (!inRows && featured.Count > 1 && !Shell.ReduceMotion && quiet >= TurnMs && Tree.Current is { } at && heroButtons.Group.Children.Contains(at))
+                Turn(focusPlay: true);
+            return true;
+        };
+        turnClock.Start();
 
         watches.Add(model.State.Watch(Show));
         watches.Add(model.Info.Watch(_ => FollowFocus()));
@@ -96,6 +137,9 @@ sealed class HomeScreen : ShellPage
         foreach (var w in watches) w.Dispose();
         model.Dispose();
         skeletonTimer?.Stop();
+        turnClock.Stop();
+        keys?.Dispose();
+        heroText.Stop();
     }
 
     /// <summary>Focus back on Home: on the tile it left from, or Resume.</summary>
@@ -156,15 +200,15 @@ sealed class HomeScreen : ShellPage
                 skeletonTimer.Start();
                 break;
             case HomeState.Failed f:
-                Notice(Errors.Unreachable(f.Error) ? Errors.OfflineTitle : "Couldn't load your home screen",
+                Notice(Errors.Unreachable(f.Error) ? Errors.OfflineTitle : Strings.T("home.states.failed"),
                     Errors.Unreachable(f.Error) ? Errors.OfflineBody(f.Error) : Errors.Message(f.Error), retry: true);
                 break;
             case HomeState.NoLibraries:
-                Notice("No libraries yet", "Ask the server owner to add a library.", retry: false);
+                Notice(Strings.T("home.states.noLibraries"), Strings.T("home.states.noLibrariesBody"), retry: false);
                 break;
             case HomeState.Empty e:
-                Notice(e.Scanning ? "Scanning your libraries…" : "Nothing here yet",
-                    e.Scanning ? "New items will show up here as soon as they're found." : "Your libraries are empty. Add media to the library folders and run a scan.", retry: false);
+                Notice(e.Scanning ? Strings.T("home.states.scanning") : Strings.T("home.states.empty"),
+                    e.Scanning ? Strings.T("home.states.scanningBody") : Strings.T("home.states.emptyBody"), retry: false);
                 break;
         }
     }
@@ -179,6 +223,7 @@ sealed class HomeScreen : ShellPage
             child.Dispose();
         }
         column = null;
+        rowViews.Clear();
         shownRows = Array.Empty<HomeRow>();
         itemsByTile.Clear();
     }
@@ -202,7 +247,7 @@ sealed class HomeScreen : ShellPage
         if (retry)
         {
             var row = new ButtonRow();
-            row.Add(new ButtonView("Retry", ButtonKind.Pill, model.Refresh, iconName: "refresh-cw"));
+            row.Add(new ButtonView(ItemText.Retry, ButtonKind.Pill, model.Refresh, iconName: "refresh-cw"));
             row.Position = new Position(Ui.Dp(left + (width - row.WidthDp) / 2), Ui.Dp(top + PleyType.PageTitle.Line + 12 + PleyType.Body.Line * 3 + 24));
             body.Add(row);
             page.Add(row.Group);
@@ -234,9 +279,35 @@ sealed class HomeScreen : ShellPage
 
     void ShowReady(HomeState.Ready s)
     {
-        if (s.Hero != null) ShowHero(s.Hero);
-        if (!SameRows(s.Rows, shownRows)) ShowRows(s);
+        // The featured titles take turns in the hero; without any, it shows Continue Watching's first.
+        if (featured.Count != s.Featured.Count) turnFrom = Clock.ElapsedMilliseconds;
+        featured = s.Featured;
+        if (featured.Count > 0) ShowHero(featured[turn % featured.Count].Info, featured[turn % featured.Count].Label);
+        else if (s.Hero != null) ShowHero(s.Hero, null);
+        if (SameRows(s.Rows, shownRows)) { }
+        else if (SameItems(s.Rows, shownRows) && rowViews.Count == s.Rows.Count) UpdateRows(s);
+        else ShowRows(s);
         FollowFocus();
+    }
+
+    /// <summary>The same rows of the same items, in the same order: only what the tiles say may differ.</summary>
+    static bool SameItems(IReadOnlyList<HomeRow> a, IReadOnlyList<HomeRow> b) =>
+        a.Count == b.Count && a.Zip(b, (x, y) => x.Key == y.Key && x.Title == y.Title && x.Items.Select(i => i.Id).SequenceEqual(y.Items.Select(i => i.Id))).All(same => same);
+
+    /// <summary>
+    /// The tiles take their new look (the progress a film just played left, a badge), in the rows
+    /// they are in: Home drawn again whole as the player closed held the UI 190 to 470 ms, as the
+    /// TV's player was let go.
+    /// </summary>
+    void UpdateRows(HomeState.Ready s)
+    {
+        shownRows = s.Rows;
+        for (var r = 0; r < s.Rows.Count; r++)
+        {
+            var row = s.Rows[r];
+            foreach (var item in row.Items) itemsByTile[(row.Key, item.Id)] = item;
+            rowViews[r].Update(row.Items.Select(i => TileModel.Of(i, row.Kind, s.Origin)).ToList());
+        }
     }
 
     static bool SameRows(IReadOnlyList<HomeRow> a, IReadOnlyList<HomeRow> b) =>
@@ -253,6 +324,7 @@ sealed class HomeScreen : ShellPage
         }
         page.Clear();
         itemsByTile.Clear();
+        rowViews.Clear();
         shownRows = s.Rows;
         page.Add(heroButtons.Group);
         hero.Show();
@@ -264,7 +336,7 @@ sealed class HomeScreen : ShellPage
             var models = row.Items.Select(i => TileModel.Of(i, kind, s.Origin)).ToList();
             foreach (var item in row.Items) itemsByTile[(row.Key, item.Id)] = item;
             var rowKey = row.Key;
-            column.Add(new RowView(row.Title, models, kind, gate, images,
+            var view = new RowView(row.Title, models, kind, gate, images,
                 m =>
                 {
                     if (itemsByTile.TryGetValue((rowKey, m.Id), out var item)) open(item);
@@ -281,8 +353,10 @@ sealed class HomeScreen : ShellPage
                 Tree.Focus,
                 row.SeeAll is { } more ? (LibraryText.SeeAll, () =>
                 {
-                    if (!Shell.Open(new PageKey.Library(more.LibraryId, LibraryTab.Library, more.View))) Shell.Toast("That page comes next in the native app.");
-                }) : null));
+                    if (!Shell.Open(new PageKey.Library(more.LibraryId, LibraryTab.Library, more.View))) Shell.Toast(Strings.T("home.comesNext"));
+                }) : null);
+            column.Add(view);
+            rowViews.Add(view);
         }
         page.Add(column.Group);
         body.Add(column);
@@ -303,31 +377,58 @@ sealed class HomeScreen : ShellPage
         return null;
     }
 
-    /// <summary>
-    /// The hero's stack at x = 96: the title, an episode's "S2 · E5 · The Long Night", the
-    /// metadata line, the time left, three lines of summary, then Resume (or Play) and the round
-    /// buttons From start, Info and Watched. A missing piece closes its gap.
-    /// </summary>
-    void ShowHero(HomeInfo h)
+    /// <summary>The next featured title in the hero, focus on its Play when <paramref name="focusPlay"/>.</summary>
+    bool Turn(bool focusPlay)
     {
-        if (heroInfo == h) return;
+        if (featured.Count < 2) return false;
+        turn = (turn + 1) % featured.Count;
+        turnFrom = Clock.ElapsedMilliseconds;
+        ShowHero(featured[turn].Info, featured[turn].Label);
+        FollowFocus();
+        // Its buttons may not be the last one's (From start): focus starts again on Play.
+        if (focusPlay) Tree.Focus(resume.Item);
+        return true;
+    }
+
+    /// <summary>
+    /// The hero's stack at x = 96: for a featured title why it is there (<paramref name="label"/>,
+    /// "New in Movies"), the title, an episode's "S2 · E5 · The Long Night", the metadata line, the
+    /// time left, three lines of summary, then Resume (or Play) and the round buttons From start,
+    /// Info, and My List for movies and shows (Watched for the rest), the dashes beside them while
+    /// titles take turns. A missing piece closes its gap.
+    /// </summary>
+    void ShowHero(HomeInfo h, string? label)
+    {
+        if (heroInfo == h && heroShown.Item9 == label) return;
+        var said = (h.Title, h.Context, h.Meta, h.Summary, h.InProgress, h.TimeLeft, h.Watched, h.InList, label);
+        var same = heroInfo != null && said.Equals(heroShown);
         heroInfo = h;
-        foreach (var child in heroText.Children.ToList())
+        if (same)
         {
-            heroText.Remove(child);
-            child.Dispose();
+            ShowTurns();
+            return;
         }
+        heroShown = said;
+        var text = heroText.Next();
         var title = Text.Label(h.Title, PleyType.HeroTitle, PleyColors.Fg, maxLines: 2, width: TextColumn);
         title.VerticalAlignment = VerticalAlignment.Bottom;
         title.SizeHeight = Ui.Dp(TitleBox);
-        heroText.Add(title);
+        text.Add(title);
+        if (label != null)
+        {
+            // Why it is there, 12 dp above the title's first line (one line or two).
+            var lines = Math.Min(Ui.Dp(TitleBox), title.GetHeightForWidth(Ui.Dp(TextColumn)));
+            var why = Text.Label(label.ToUpperInvariant(), PleyType.Label, new Color(PleyColors.Fg.R, PleyColors.Fg.G, PleyColors.Fg.B, 0.85f), width: TextColumn);
+            why.PositionY = Ui.Dp(TitleBox - 12 - PleyType.Label.Line) - lines;
+            text.Add(why);
+        }
         float y = TitleBox;
         if (h.Context.Length > 0)
         {
             y += 10;
             var context = Text.Label(h.Context, PleyType.Title, PleyColors.Fg, width: TextColumn);
             context.PositionY = Ui.Dp(y);
-            heroText.Add(context);
+            text.Add(context);
             y += PleyType.Title.Line;
         }
         if (!h.Meta.IsEmpty)
@@ -335,7 +436,7 @@ sealed class HomeScreen : ShellPage
             y += 8;
             var meta = MetaLine.Of(h.Meta);
             meta.PositionY = Ui.Dp(y);
-            heroText.Add(meta);
+            text.Add(meta);
             y += 18;
         }
         if (h.InProgress && h.TimeLeft.Length > 0)
@@ -343,7 +444,7 @@ sealed class HomeScreen : ShellPage
             y += 10;
             var left = Text.Label(h.TimeLeft, PleyType.Caption, PleyColors.Fg, width: TextColumn);
             left.PositionY = Ui.Dp(y);
-            heroText.Add(left);
+            text.Add(left);
             y += PleyType.Caption.Line;
         }
         if (h.Summary.Length > 0)
@@ -352,21 +453,55 @@ sealed class HomeScreen : ShellPage
             var summary = Text.Label(h.Summary, PleyType.BodyLarge, Summary, maxLines: 3, width: TextColumn);
             summary.VerticalAlignment = VerticalAlignment.Top;
             summary.PositionY = Ui.Dp(y);
-            heroText.Add(summary);
+            text.Add(summary);
             y += PleyType.BodyLarge.Line * 3;
         }
         y += 20;
         heroButtons.PositionY = Ui.Dp(y);
-        resume.SetText(h.InProgress ? "Resume" : "Play");
-        watched.SetText(h.Watched ? "Mark as unwatched" : "Mark as watched");
-        LayoutHeroButtons(h.InProgress);
+        resume.SetText(h.InProgress ? ItemText.Resume : ItemText.Play);
+        watched.SetText(h.Watched ? ItemText.MarkUnwatched : ItemText.MarkWatched);
+        list.SetText(h.InList ? Strings.T("item.actions.removeFromMyList") : ItemText.AddToMyList);
+        list.SetIcon(h.InList ? "check" : "plus");
+        LayoutHeroButtons(h.InProgress, h.Listable);
+        ShowTurns();
     }
 
-    void LayoutHeroButtons(bool inProgress)
+    /// <summary>The dashes beside the hero's buttons: one per featured title, the one on longer and white.</summary>
+    void ShowTurns()
     {
-        // The round buttons sit after Resume, a button's gap apart; From start only while in progress.
+        foreach (var child in turns.Children.ToList())
+        {
+            turns.Remove(child);
+            child.Dispose();
+        }
+        if (featured.Count < 2)
+        {
+            turns.Hide();
+            return;
+        }
+        turns.Show();
+        turns.Position = new Position(heroButtons.PositionX + heroButtons.SizeWidth + Ui.Dp(24), heroButtons.PositionY + Ui.Dp(PleyTv.ButtonHeight / 2 - 2));
+        float x = 0;
+        for (var i = 0; i < featured.Count; i++)
+        {
+            var on = i == turn % featured.Count;
+            turns.Add(new View
+            {
+                Size = new Size(Ui.Dp(on ? 36 : 14), Ui.Dp(4)),
+                Position = new Position(Ui.Dp(x), 0),
+                BackgroundColor = on ? PleyColors.Fg : new Color(PleyColors.Fg.R, PleyColors.Fg.G, PleyColors.Fg.B, 0.3f),
+                CornerRadius = Ui.Dp(2),
+            });
+            x += (on ? 36 : 14) + 8;
+        }
+    }
+
+    void LayoutHeroButtons(bool inProgress, bool listable)
+    {
+        // The round buttons sit after Resume, a button's gap apart; From start only while in progress;
+        // My List for movies and shows, Watched for the rest.
         var focusedRound = Tree.Current;
-        foreach (var b in new View[] { fromStart, info, watched })
+        foreach (var b in new View[] { fromStart, info, watched, list })
             if (b.GetParent() != null) heroButtons.Remove(b);
         heroButtons.Group.Clear();
         heroButtons.Group.Add(resume.Item);
@@ -381,9 +516,10 @@ sealed class HomeScreen : ShellPage
         }
         if (inProgress) AddRound(fromStart);
         AddRound(info);
-        AddRound(watched);
+        AddRound(listable ? list : watched);
         heroButtons.SizeWidth = Ui.Dp(x);
-        if (focusedRound == fromStart.Item && !inProgress) Tree.Focus(resume.Item);
+        var gone = (focusedRound == fromStart.Item && !inProgress) || (focusedRound == list.Item && !listable) || (focusedRound == watched.Item && listable);
+        if (gone) Tree.Focus(resume.Item);
     }
 
     void SetInRows(bool on)
@@ -400,6 +536,7 @@ sealed class HomeScreen : ShellPage
         reveal = new Animation(PleyMotion.RevealMs) { DefaultAlphaFunction = new AlphaFunction(AlphaFunction.BuiltinFunctions.EaseOut) };
         reveal.AnimateTo(hero, "Opacity", on ? 0f : 1f);
         reveal.AnimateTo(infoBlock, "Opacity", on ? 1f : 0f);
+        Profile.Slowed(reveal);
         reveal.Play();
         scrim.Set(on ? ScrimView.Rows : ScrimView.Hero);
         FollowFocus();
@@ -606,6 +743,7 @@ sealed class BackdropView : View
             before.Unparent();
             before.Dispose();
         };
+        Profile.Slowed(fade);
         fade.PlayHeld();
     }
 }
@@ -632,7 +770,8 @@ sealed class ScrimView : View
         Size = new Size(Ui.Dp(PleyTv.CanvasWidth), Ui.Dp(PleyTv.CanvasHeight));
         var offsets = new PropertyArray();
         var colors = new PropertyArray();
-        foreach (var (at, alpha) in new[] { (0f, 1f), (300f / 800, 0.92f), (560f / 800, 0.85f), (1f, 0f) })
+        // Dark behind the text (80 % at its end), then a long, gentle fall that leaves the far edge lightly shaded: no edge shows.
+        foreach (var (at, alpha) in new[] { (0f, 1f), (300f / 960, 0.9f), (520f / 960, 0.8f), (620f / 960, 0.68f), (720f / 960, 0.53f), (820f / 960, 0.38f), (1f, 0.2f) })
         {
             offsets.Add(new PropertyValue(at));
             colors.Add(new PropertyValue(new Color(PleyColors.Bg.R, PleyColors.Bg.G, PleyColors.Bg.B, alpha)));
@@ -643,7 +782,7 @@ sealed class ScrimView : View
         left.Add(GradientVisualProperty.EndPosition, new PropertyValue(new Vector2(0.5f, 0)));
         left.Add(GradientVisualProperty.StopOffset, new PropertyValue(offsets));
         left.Add(GradientVisualProperty.StopColor, new PropertyValue(colors));
-        Add(new View { Size = new Size(Ui.Dp(800), Ui.Dp(PleyTv.CanvasHeight)), Background = left });
+        Add(new View { Size = new Size(Ui.Dp(960), Ui.Dp(PleyTv.CanvasHeight)), Background = left });
 
         var top = new PropertyMap();
         var topOffsets = new PropertyArray();
@@ -678,6 +817,7 @@ sealed class ScrimView : View
         }
         move = new Animation(PleyMotion.RevealMs) { DefaultAlphaFunction = new AlphaFunction(AlphaFunction.BuiltinFunctions.EaseOut) };
         move.AnimateTo(solid, "PositionY", Ui.Dp(where.To));
+        Profile.Slowed(move);
         move.Play();
     }
 }

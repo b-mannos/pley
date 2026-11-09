@@ -73,8 +73,8 @@ pub struct PlaylistDto {
     pub duration_ms: i64,
     /// Artwork of the first entries, for a mosaic.
     pub artwork: Vec<String>,
-    /// A smart playlist's filter: a listing of `library_id` in Plex's syntax
-    /// (see `crate::plex::smart_items`). `None` for playlists of entries.
+    /// A smart playlist's filter: a listing of `library_id` as a query string
+    /// (see `crate::listing::smart_items`). `None` for playlists of entries.
     pub smart_filter: Option<String>,
     pub library_id: Option<i64>,
     pub created_at: i64,
@@ -136,7 +136,7 @@ async fn owned(db: &Db, user: &AuthUser, id: i64) -> sqlx::Result<Option<Playlis
 async fn smart_entries(db: &Db, user: &AuthUser, row: &PlaylistRow) -> sqlx::Result<Vec<(i64, ItemRow)>> {
     let (Some(library_id), Some(filter)) = (row.library_id, row.smart_filter.as_deref()) else { return Ok(Vec::new()) };
     let Some(lib) = crate::library::get_library(db, library_id).await? else { return Ok(Vec::new()) };
-    let found = crate::plex::smart_items(db, user.id, &lib, filter).await?;
+    let found = crate::listing::smart_items(db, user.id, &lib, filter).await?;
     let mut leaves = Vec::new();
     for item in found {
         if leaves.len() as i64 >= MAX_ENTRIES {
@@ -150,6 +150,12 @@ async fn smart_entries(db: &Db, user: &AuthUser, row: &PlaylistRow) -> sqlx::Res
     }
     leaves.truncate(usize::try_from(MAX_ENTRIES).unwrap_or(usize::MAX));
     Ok(leaves.into_iter().map(|item| (item.id, item)).collect())
+}
+
+/// Whether playlist `id` is the user's: playlists are private, so it is
+/// the only one who sees it.
+pub async fn is_theirs(db: &Db, user: &AuthUser, id: i64) -> sqlx::Result<bool> {
+    Ok(owned(db, user, id).await?.is_some())
 }
 
 /// Whether the user's playlist is a smart one (it holds no entries).
@@ -395,6 +401,60 @@ pub async fn add(db: &Db, user: &AuthUser, id: i64, item_ids: &[i64]) -> Result<
             .bind(leaf.id)
             .bind(next + offset as i64)
             .bind(now)
+            .execute(&mut *tx)
+            .await?;
+    }
+    sqlx::query("UPDATE playlists SET updated_at = ? WHERE id = ?").bind(now).bind(id).execute(&mut *tx).await?;
+    tx.commit().await?;
+    Ok(leaves.len() as u64)
+}
+
+/// Puts the leaves of `item_ids` in place of the entries the user sees, in
+/// that order, as apps that edit a playlist as a whole send it: entries the
+/// user can't see stay, after them. Refused, changing nothing, as [`add`]
+/// refuses.
+pub async fn replace(db: &Db, user: &AuthUser, id: i64, item_ids: &[i64]) -> Result<u64, AppError> {
+    let row = owned(db, user, id).await?.ok_or_else(|| AppError::not_found("playlist not found"))?;
+    if row.smart_filter.is_some() {
+        return Err(AppError::bad_request("a smart playlist is filled by its filter"));
+    }
+    let kind = Kind::parse(&row.kind).unwrap_or(Kind::Video);
+    let leaves = expand(db, user, item_ids).await?;
+    if leaves.iter().any(|l| Kind::of_item(&l.kind) != Some(kind)) {
+        return Err(AppError::bad_request(match kind {
+            Kind::Video => "only movies and episodes can go in a video playlist",
+            Kind::Audio => "only music can go in a music playlist",
+        }));
+    }
+    let seen: HashSet<i64> =
+        get_rows(db, user, id).await?.map(|(_, entries)| entries).unwrap_or_default().iter().map(|(e, _)| *e).collect();
+    let hidden: Vec<i64> = entry_order(db, id).await?.into_iter().filter(|e| !seen.contains(e)).collect();
+    if (hidden.len() + leaves.len()) as i64 > MAX_ENTRIES {
+        return Err(AppError::bad_request(format!("a playlist holds at most {MAX_ENTRIES} items")));
+    }
+    let now = now();
+    let mut tx = db.write.begin().await?;
+    for entry in &seen {
+        sqlx::query("DELETE FROM playlist_items WHERE id = ? AND playlist_id = ?")
+            .bind(entry)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    for (position, leaf) in leaves.iter().enumerate() {
+        sqlx::query("INSERT INTO playlist_items (playlist_id, item_id, position, added_at) VALUES (?, ?, ?, ?)")
+            .bind(id)
+            .bind(leaf.id)
+            .bind(position as i64)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+    }
+    for (offset, entry) in hidden.iter().enumerate() {
+        sqlx::query("UPDATE playlist_items SET position = ? WHERE id = ? AND playlist_id = ?")
+            .bind((leaves.len() + offset) as i64)
+            .bind(entry)
+            .bind(id)
             .execute(&mut *tx)
             .await?;
     }

@@ -12,13 +12,14 @@ use axum::response::{IntoResponse, Response};
 use pley_transcoder_api::LivePlan;
 use serde::{Deserialize, Serialize};
 
-use crate::auth::{AdminUser, AuthUser};
+use crate::auth::{AdminUser, AuthUser, CurrentToken};
 use crate::error::{ApiResult, AppError};
 use crate::livetv::tuner::{Tune, TunerStatus, ViewerKind, WatchAs, Watching};
 use crate::livetv::{
     AdminChannel, AdminGroup, AdminPage, Category, Channel, ChannelPage, ChannelPatch, Groups, Guide, LineupFilter,
     LiveSettings, Source, SourceInput, SourceTest,
 };
+use crate::playback::{Controls, DeviceKind};
 use crate::state::AppState;
 use crate::util::now;
 
@@ -206,6 +207,16 @@ pub struct WatchRequest {
     /// (one the `409` said may be).
     #[serde(default)]
     take_over: Option<i64>,
+    /// The commands this player obeys from a remote, as for a title's play
+    /// request ([`crate::playback::PlaybackRequest::controls`]).
+    #[serde(default, deserialize_with = "crate::playback::known_controls")]
+    controls: Controls,
+    /// What the player calls its device, as for a title's play request.
+    #[serde(default)]
+    device_name: Option<String>,
+    /// What kind of device it is, as for a title's play request.
+    #[serde(default, deserialize_with = "crate::playback::known_device_kind")]
+    device_kind: Option<DeviceKind>,
 }
 
 #[derive(Serialize)]
@@ -215,30 +226,24 @@ pub struct WatchInfo {
     channel: Channel,
 }
 
+/// Starts `user` watching channel `id` as `how` asks; whether the account
+/// is an administrator's and who is in the home are read here.
 async fn start_watching(
     state: &AppState,
     user: &AuthUser,
     id: i64,
-    client_id: Option<String>,
-    kind: ViewerKind,
-    keyed: bool,
-    take_over: Option<i64>,
+    mut how: WatchAs,
 ) -> ApiResult<(Watching, Channel)> {
     state.live.check_access(user).await?;
     // An app acts as a viewer, but whose connections it may take over goes by the account.
-    let admin = user.is_admin || state.live.account_is_admin(user.id).await;
+    how.admin = user.is_admin || state.live.account_is_admin(user.id).await;
+    // Read as the take-over is asked for: who is in the home then is told who took their connection.
+    how.home = if how.take_over.is_some() { state.live.home_now(user.id).await } else { None };
     let channel = state.live.channel(user, id).await?;
     let row = state.live.channel_row(id).await?;
     let (source_name, max_connections, user_agent) = state.live.source_of(&row).await?;
-    let watching = state
-        .live
-        .tuners
-        .watch(
-            user,
-            Tune { channel: &row, source_name, max_connections, user_agent },
-            WatchAs { client_id, kind, keyed, admin, take_over },
-        )
-        .await?;
+    let watching =
+        state.live.tuners.watch(user, Tune { channel: &row, source_name, max_connections, user_agent }, how).await?;
     state.live.watched(user.id, id).await;
     Ok((watching, channel))
 }
@@ -248,11 +253,24 @@ pub async fn watch(
     State(state): State<AppState>,
     user: AuthUser,
     Path(id): Path<i64>,
+    headers: HeaderMap,
+    CurrentToken(token): CurrentToken,
     body: Option<Json<WatchRequest>>,
 ) -> ApiResult<Json<WatchInfo>> {
     let body = body.map(|Json(b)| b).unwrap_or_default();
-    let (watching, channel) =
-        start_watching(&state, &user, id, body.client_id, ViewerKind::Hls, body.keyed_urls, body.take_over).await?;
+    let how = WatchAs {
+        client_id: body.client_id,
+        kind: ViewerKind::Hls,
+        keyed: body.keyed_urls,
+        admin: false,
+        take_over: body.take_over,
+        home: None,
+        controls: body.controls,
+        device: super::remote::device_name(body.device_name.as_deref(), &headers),
+        device_id: super::remote::device_id_of(&user, token.as_deref()),
+        device_kind: super::remote::device_kind_of(body.device_kind, &user, super::remote::user_agent(&headers)),
+    };
+    let (watching, channel) = start_watching(&state, &user, id, how).await?;
     Ok(Json(WatchInfo { watching, channel }))
 }
 
@@ -263,10 +281,32 @@ pub async fn stream(
     user: AuthUser,
     Path(id): Path<i64>,
     Query(query): Query<HashMap<String, String>>,
+    CurrentToken(token): CurrentToken,
+    parts: axum::http::request::Parts,
 ) -> ApiResult<Response> {
     let client_id = query.get("client_id").cloned();
-    let take_over = query.get("take_over").and_then(|t| t.parse().ok());
-    let (watching, _) = start_watching(&state, &user, id, client_id, ViewerKind::Stream, false, take_over).await?;
+    let device_kind = query.get("device_kind").and_then(|kind| DeviceKind::from_name(kind));
+    // Taking another channel's connection ends what others watch: not for a
+    // GET the browser's cookie signs in, which over plain HTTP may be
+    // another site's link or picture (pley's own page asks with POST …/watch).
+    let take_over =
+        query.get("take_over").and_then(|t| t.parse().ok()).filter(|_| !crate::auth::signed_in_by_cookie(&parts));
+    // Players that read the stream themselves (VLC, Kodi) take no commands:
+    // their device is named from the User-Agent, and is the kind the query
+    // says or the app is.
+    let how = WatchAs {
+        client_id,
+        kind: ViewerKind::Stream,
+        keyed: false,
+        admin: false,
+        take_over,
+        home: None,
+        controls: Controls::new(),
+        device: super::remote::device_name(None, &parts.headers),
+        device_id: super::remote::device_id_of(&user, token.as_deref()),
+        device_kind: super::remote::device_kind_of(device_kind, &user, super::remote::user_agent(&parts.headers)),
+    };
+    let (watching, _) = start_watching(&state, &user, id, how).await?;
     let body = state.live.tuners.stream(&watching.session_id, &user)?;
     Response::builder()
         .header(header::CONTENT_TYPE, "video/mp2t")
@@ -294,7 +334,10 @@ pub async fn keyed_file(
     Path((key, file)): Path<(String, String)>,
 ) -> ApiResult<Response> {
     let gone = || AppError::SessionStopped(Some("this channel isn't being watched any more".into()));
-    let (session, user_id, grant) = state.live.tuners.by_media_key(&key).ok_or_else(gone)?;
+    let Some((session, user_id, grant)) = state.live.tuners.by_media_key(&key) else {
+        // Taken over or stopped: why, as the session's own address says.
+        return Err(state.live.tuners.ended_by_key(&key).map_or_else(gone, AppError::SessionStopped));
+    };
     let mut user = AuthUser::load(&state.db, user_id).await?.ok_or_else(gone)?;
     if let Some(grant) = grant {
         // Signed out since: the key goes with the token.

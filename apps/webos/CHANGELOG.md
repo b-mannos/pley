@@ -8,12 +8,332 @@ describes how they are made.
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-11-08
+
+### Fixed
+
+- Watch history, opened while the server is out of reach, shows the plays
+  saved from last time with focus on the newest, without "Can't reach your
+  server" showing for a moment first and leaving focus on a play further
+  down.
+- Marking a title watched no longer goes back to unwatched for a moment
+  when the page was being refreshed as you marked it.
+- Use the server's order in Sort libraries no longer puts your own order
+  back when the libraries were being refreshed as you chose it, and an
+  order saved on another device while they were being refreshed shows.
+
+## [0.1.7] - 2026-11-06
+
+### Added
+
+- Pley in French and Spanish: the app shows your profile's language, else
+  the one picked on this TV, else the TV's, else the server's, and starts
+  in the last one it showed. A globe at the bottom right of Choose your
+  server and the address screen, and at the top right of the sign-in code,
+  picks the TV's language before anyone signs in: Automatic (the TV's
+  own), English, Français or Español. Settings → Profile → Language
+  chooses it for your profile on every device, or Automatic; on a server
+  from before languages, the row keeps your choice on this TV.
+- Someone on another profile of the household plays something on the TV
+  from their phone or browser: the TV switches to their profile first
+  (their own device asked for its PIN), then plays it. A switch that fails
+  says so and plays nothing.
+- What your phone or browser does to the film or episode on the TV is
+  said there for 2 s at the top right ("Paused", "+30 s", "Jumped to
+  12:34", "Audio: French"), without bringing up the player's controls; a
+  pause sent from it doesn't keep them up either.
+
+### Changed
+
+- Choose your server's logo is the size of the sign-in code's, the word
+  closer to the mark, as on the other TVs.
+- The TV starts straight into Home as the profile it was left on when it
+  has no PIN, where a household of several profiles was asked "Who's
+  watching?" each time. A profile with a PIN still asks first, and Switch
+  profile still shows every profile. Settings' Always start as
+  calls this Profile used last, where it said Ask who's watching.
+
+### Fixed
+
+- OK on a film or episode left untouched for a few seconds brings up the
+  player's controls for 5 s; they went again at once.
+- Your phone or browser changes Live TV's channel, or stops it, while the
+  channel is still starting on the TV, as it does once it plays.
+- Leaving Live TV, or the TV hiding the app, just as a channel starts lets
+  its connection go at once, not 45 s later.
+- On Requests, the first card is as far from the second as the others are
+  from each other, so its focus ring shows whole rather than under the
+  second card, and the last card of a long list scrolls up clear of the
+  screen's bottom edge.
+
+## [0.1.6] - 2026-11-05
+
+### Added
+
+- Your phone or browser changes the quality of the film or episode on
+  the TV, as the player's Quality menu does (the pick is kept for the
+  next ones), and shows which is picked. A film or episode sent from a
+  title's page plays with the audio and subtitles picked there.
+- Your phone or browser plays a film, an episode, a show, an album, an
+  artist, a track, a playlist or a Live TV channel on the TV ("Play on…"):
+  it starts as the TV's own Play would, in place of what plays, and the
+  TV says "Playing from" the device it came from.
+- Your phone or browser controls what plays on the TV: a film or episode
+  plays, pauses, seeks and skips, and goes on to the next one; music does
+  the same, and goes back a track; Live TV changes channel. Live TV
+  stopped from another device, or by the server's administrator, stops
+  on the TV and says who, with their message.
+- Your phone or browser changes the audio and subtitles of the film or
+  episode on the TV, as the player's own menu does, and shows which
+  play.
+
+### Changed
+
+- Requests: a sign-in from before the app could ask says "Sign in again to ask for movies
+  and shows" without a second line, and its button reads Sign in.
+- When the server can't be reached, the app says "Pley is offline", where
+  it said "Showing what Pley had saved. Reconnecting…". It still shows
+  what it saved and reconnects by itself.
+- A movie or show in Discover, its See all and Search's Discover row that
+  a library has whole opens its library page, where it plays, not a page
+  with only Open on it. A show partly there still opens its Discover page,
+  with Request more seasons.
+- A programme's details in Live TV have Watch and the favourite side by
+  side, the favourite a star as in the live player, where Remove from
+  favourites was a wide button under Watch. In the live player, the star
+  no longer shows its words under it, which ran under Channels; Audio
+  Guidance still reads them.
+
+### Fixed
+
+- Live TV's channel up or down, still finding the next channel when
+  another is picked from the list, Watch again is pressed or the app is
+  hidden, no longer changes channel a moment later.
+
+## [0.1.5] - 2026-11-04
+
+### Fixed
+
+- A library opens in the sort and filters it was left in, and Live TV in
+  the view it was left in, also while the server is slow to answer or
+  right after they were changed.
+
+## [0.1.4] - 2026-11-03
+
+### Added
+
+- Videos on a USB drive plugged into the TV play in Pley's player, as in
+  the Samsung app: the rail's USB drive lists the drive's folders and
+  videos, each saying where it resumes, and a video plays as it is with
+  its own tracks, chapters and subtitles and the subtitle files beside it.
+  The page's title is the drive's make and model when it says them, the
+  line under it the folder's path ("/Films/2019"), and an empty page says
+  so in the middle under an icon, with the rail closed. A video that can
+  no longer be read, the drive pulled out, says so with Try again, as the
+  Android app does, also when it stands still after playing; one whose
+  drive was pulled out while the TV showed Home says so and leaves.
+  Subtitle files saved as UTF-16 or UTF-32 ("Unicode"), or in Windows'
+  Western code page with its curly quotes and euro, read right, and a link
+  that leads off the drive isn't listed, played or read.
+- The player's Info says the TV's network speed under How it plays,
+  beside the server's Speed, as in the Samsung app: a video that stalls
+  while the server keeps up is on a network that can't carry it.
+- Live TV plays a channel from its own MPEG-TS stream, as the Samsung app
+  does, when the server sends it as it is or with sound the TV decodes
+  (AC-3, E-AC-3, MP2): it starts sooner than the server's HLS, which
+  plays it otherwise and whenever the stream fails.
+- In Live TV's guide, ◀◀ and ▶▶, Previous and Next, move it two hours
+  back or on, while music plays too, as in the Android TV app.
+- In the Live TV player, Next and Previous change channel as CH+ and CH−
+  do, once a press, as in the Android TV app.
+- A library of movies or shows filters by resolution (4K, 1080p, 720p,
+  SD) and dynamic range (Any HDR, HDR including Dolby Vision and HDR+,
+  Dolby Vision, HDR+, HLG, SDR),
+  from the Filter panel's Resolution and Dynamic range, where its titles
+  have more than one. A chip names the choice while one is chosen; Clear
+  filters, the count, the kept view and Save as… treat them as Genre and
+  Year. With most filters chosen, the chips slide to keep the focused one
+  in view, as in the Samsung and Android TV apps, and the count shows
+  only where it fits whole.
+
+### Changed
+
+- Pley for LG TV is a native app now, in place of the web app: it starts
+  and moves faster, and looks and works as the Android TV app does. It
+  installs over the web app, in Developer Mode or on a rooted TV; what the
+  web app kept doesn't carry over, so choose the server and sign in again.
+- The server lists this TV's sign-in as Pley for LG TV, with its webOS and
+  model, with a server from the same release.
+- With the TV's Audio Guidance on, the app reads each page's name, what
+  has focus, dialogs and messages aloud, in the TV's own voice.
+- Requests work in the native app as they did in the web app: Discover,
+  a title's page with its season picker, Your requests (Requests for
+  administrators), the "On TMDB" row in Search, a library title's request
+  on its page, and what is ready to watch popping up once.
+- Each frame takes less of the TV's processor to put its text and shapes
+  together, leaving more room for scrolling and animations to stay smooth.
+- Live TV's guide moves through time as the Samsung app's does: on a
+  channel without programmes each Left or Right moves it a half hour, Left
+  goes back through a long programme before it leaves the guide, and a
+  held Left stops at the guide's start. Back in the guide or the channel
+  tiles goes to the categories before the rail, and Info on a tile opens
+  what's on.
+- OK on a live channel opens the channel list at once, while it tunes too;
+  holding OK shows the controls.
+- The remote's media keys work the music from every page, not only the
+  music pages, and Stop pauses it. Music that was playing when the TV
+  hid the app plays on from there when the app is back.
+- The player's keys work as in the Samsung app: OK with the controls
+  hidden shows them rather than pausing, Down shows them on Play/Pause,
+  and Left and Right show them with the seek's preview and wait for OK
+  (5 s at most) before seeking, which Back cancels. A held key scrubs
+  smoothly faster the longer it is held, and waits for OK when let go.
+- As each title or episode begins playing, its name shows at the top of
+  the picture for a few seconds, clear of Playback details when they are
+  on, as in the Android TV app.
+- Chapters show as a row of cards over the scrubber, each with its picture,
+  name and start, in place of the Chapters panel: the Chapters button opens
+  them, and so does Up while a seek waits for OK.
+- A video the TV's Home interrupted comes back paused where it was, with
+  the controls showing, as in the Samsung and Android apps, rather than
+  playing on by itself.
+- A held arrow key moves focus as in the Samsung app: from 180 ms on, about
+  22 times a second at an even pace, rather than every other one of the
+  TV's uneven repeats.
+- Under a held arrow key, rows, pages, lists and poster grids glide
+  smoothly from tile to tile instead of jumping, and each tile grows and
+  shrinks with focus at the same pace rather than popping. A row slides
+  under one still ring at its start, as in the Samsung app, and so do the
+  rows of a library, Collections, playlists and a collection's page; the
+  pictures load once the key is let go.
+- A held arrow key stops at the end of a list instead of leaving it, as in
+  the Samsung app: a held Left no longer opens the rail (a press does), and
+  a held Up or Right stays in a library's grid, the Collections tab and
+  Live TV's categories, guide and cards. Down on a grid's last row stays.
+- The rail opens as in the Samsung app: its panel widens out of the closed
+  rail as it fades in, and the labels slide in beside the icons.
+- Search shows movies, shows and episodes first, then music, then Live
+  TV, then people, as the other apps do.
+- A tile's actions (OK held, or the menu key) open in a side panel over
+  the page, as in the Android TV and Samsung apps, rather than on a page
+  of their own. A choice closes the panel and focus is back on the tile
+  first, so Back from what it opened comes to the tile, and a tile the
+  choice takes away hands focus to its neighbour.
+- Settings draws the Android TV app's icons: a pulse for Diagnostics, a
+  speaker for each pass-through format, and their own icons for Subtitle
+  background, Subtitle position, Reduce motion and Manage your account on
+  the web.
+- On webOS 6 and later, Back in the rail asks "Exit Pley?", as LG asks of
+  apps and as the Samsung app does: Exit closes Pley, Cancel or Back
+  stays. On webOS 4 and 5 it still shows the TV's Home.
+- A person's round picture, in rows and on their page, sits on a plain
+  grey circle while it loads or when there is none, as in the Android and
+  Samsung apps, rather than on a coloured gradient.
+- A video's first picture fades in from black, as in the Android TV and
+  Samsung apps, rather than cutting in (at once with Reduce motion).
+- An empty requests list says why in the Android TV app's words: "Nothing
+  asked for yet" with where to find titles, "Nothing needs you" in Needs
+  attention, "No requests match" for a status or a filter. A Discover
+  search with no results says "Nothing on TMDB matches" it.
+- A season partly in the library says how much of it is, "4 of 10
+  episodes in library", as in the Android TV app, under its name on a
+  Discover title's page.
+- A Live TV channel whose connection someone else takes over stops at
+  once and says why, under "Live TV stopped", with Watch again, where it
+  said so only once its picture had stopped. "Live TV stopped" stays when
+  the app is hidden and shown again, until Watch again.
+- The posters of a library's grid wear their quality badges ("4K", "DV",
+  "HDR") when it is filtered by resolution or dynamic range, as when it
+  is sorted by bitrate; otherwise posters carry none.
+- The rail's entries are smaller and it lists up to six libraries before
+  Libraries takes over. Nothing leaves the rail to make room any more:
+  when its entries don't fit, they scroll between the avatar and
+  Settings, which stay in place, keeping the focused entry fourth from the
+  top, as the app's lists keep theirs and as in the Samsung and Android TV
+  apps. Opening the rail moves nothing.
+- Search shows up to 200 titles, 200 people and 200 Live TV channels,
+  where it stopped at 60 titles and 12 people and channels; each row
+  holds all it found and scrolls sideways.
+
+### Removed
+
+- The player's Back 10 seconds and Forward 10 seconds buttons, as in the
+  Samsung and Android TV apps. Left and Right still seek.
+
+### Fixed
+
+- A Live TV channel played from its own stream no longer falls back to
+  the server's HLS when something else on the TV holds connections to the
+  player's relay open without asking for a stream, and a network watch
+  that keeps failing as soon as it answers waits longer each time rather
+  than asking again every 5 seconds.
+- A programme's details in Live TV keep its description above Watch and
+  the favourite, and the guide no longer lays out the whole of a long
+  description each time focus moves onto a programme.
+- While a seek is on its way, the scrubber's blue and its times follow
+  the thumb, and seek previews and chapter pictures are letterboxed
+  rather than cropped, so a wide film's preview keeps its sides.
+- A chapter named only by where it starts ("00:06:19.212", as mkvmerge
+  names them) is called "Chapter 3" in the player.
+- An audio track whose language the file and the TV write differently
+  ("vie" and "vi", "ind" and "id") switches in place instead of starting
+  the stream again, and on the track asked for.
+- In the player, Skip Intro and a click on the bar no longer come undone
+  a few seconds later by a seek still waiting for OK.
+- While the player shows an error, the media keys other than Stop do
+  nothing, as in the Android TV and Samsung apps, rather than seeking,
+  changing a track or playing the next episode under it.
+- The Play/Pause key no longer makes a seek that waits for OK at once, as
+  in the Samsung app: it only plays or pauses, and the seek lands by
+  itself. OK still makes it at once.
+- On a Live TV channel with sound only, the logo, "Sound only" and what's
+  on rise above the bar at the foot while it shows, rather than sitting
+  among its words.
+- A server that keeps refusing the sign-in's events, or a proxy asking for
+  its own login, no longer has Pley refresh the sign-in over and over.
+- A Live TV channel that plays as HLS lets go of its stream.ts at once, as
+  in the Samsung app, so the provider's connection isn't held for up to 45
+  s.
+
+### Security
+
+- The native app sends its token to the server's address only once the
+  server has proved there that it is the one the TV signed in to, as the
+  web app did: the access token waits for a proof made on this network
+  within the half hour, the refresh token, a profile's PIN and signing out
+  for one made then. Coming back to the app, the TV's connection changing
+  and a request that gets no answer ask for a new one. Another device at
+  the address gets nothing, and the TV says "Another device answers
+  there."
+
+## [0.1.3] - 2026-11-02
+
+### Changed
+
+- Picture subtitles (PGS, VobSub, DVB) show within a few seconds of a
+  playback starting or a seek, where they could take up to a minute: the
+  TV tells the server where it plays, and the server reads those around it
+  first.
+
 ### Fixed
 
 - Settings' Always start as no longer starts the TV as a profile with a
   PIN without it: the start opens on that profile's PIN pad, and Back shows
   the other profiles. While the TV doesn't know whether the profile it was
   left on has a PIN, the start asks "Who's watching?".
+
+### Security
+
+- Before the token goes to the server's address, the server proves it is
+  the one the TV signed in to, at that address: the access token waits for
+  a proof made on this network within the half hour, the refresh token and
+  a profile's PIN for one made then. Another device at the address on
+  another network gets nothing, nor does one passing the challenge on to
+  the server from elsewhere; the TV says "Another device answers there."
+  One that takes the address on the TV's own network may get an access
+  token (an hour's) within the half hour, never the refresh token. A
+  sign-in from before starts checking within the hour, as its token is
+  renewed.
 
 ## [0.1.2] - 2026-11-02
 
@@ -127,7 +447,13 @@ describes how they are made.
 - First release with a version of its own (builds before it carried 0.2.0,
   the version every app shared).
 
-[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-02...HEAD
+[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-08...HEAD
+[0.1.8]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-08
+[0.1.7]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-06
+[0.1.6]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-05
+[0.1.5]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-04
+[0.1.4]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-03
+[0.1.3]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-02.2
 [0.1.2]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-02
 [0.1.1]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-01
 [0.1.0]: https://github.com/pley-media-server/pley/tree/94985f768f39f4a230060cb47af9498ee8779ddf

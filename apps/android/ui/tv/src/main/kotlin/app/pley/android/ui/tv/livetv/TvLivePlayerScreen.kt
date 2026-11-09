@@ -3,23 +3,16 @@ package app.pley.android.ui.tv.livetv
 import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
-import androidx.compose.runtime.snapshotFlow
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
-import app.pley.android.model.LiveCategory
-import app.pley.android.screens.livetv.LiveTv
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.first
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusGroup
@@ -31,7 +24,6 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -41,10 +33,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.rememberTextFieldState
-import app.pley.android.ui.tv.search.TvSearchField
-import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -54,6 +45,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,6 +54,8 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.nativeKeyCode
@@ -70,6 +64,8 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -85,7 +81,9 @@ import app.pley.android.designsystem.PleyType
 import app.pley.android.designsystem.TvSafeArea
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcons
+import app.pley.android.designsystem.text.asString
 import app.pley.android.model.BusyConnection
+import app.pley.android.model.LiveCategory
 import app.pley.android.model.LiveChannel
 import app.pley.android.player.engine.VideoSurface
 import app.pley.android.player.live.LivePhase
@@ -93,12 +91,18 @@ import app.pley.android.player.live.LiveState
 import app.pley.android.player.live.LiveTrouble
 import app.pley.android.screens.livetv.ChannelDigits
 import app.pley.android.screens.livetv.LivePlayerViewModel
+import app.pley.android.screens.livetv.LiveTv
 import app.pley.android.ui.tv.R
+import app.pley.android.ui.tv.kit.HeldEnds
 import app.pley.android.ui.tv.kit.TvPillButton
 import app.pley.android.ui.tv.kit.TvRoundButton
 import app.pley.android.ui.tv.kit.TvSidePanel
+import app.pley.android.ui.tv.kit.heldKeyStaysIn
 import app.pley.android.ui.tv.kit.initialFocus
+import app.pley.android.ui.tv.search.TvSearchField
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 
 /** What shows over the picture. */
 private enum class Overlay { None, Controls, Channels }
@@ -107,11 +111,11 @@ private enum class Overlay { None, Controls, Channels }
  * The TV's live player (the web's LivePlayerPage, for a remote), the
  * channel full screen. With nothing over it:
  *
- * - Up and Down, and Channel up and down, change channel (Up the next
- *   number), digits tune a number;
- * - OK shows the controls (the channel list, the favourite) over what's
- *   on; Menu or Guide shows the channel list; Back hides what shows, then
- *   leaves.
+ * - Up and Down, Channel up and down, and Previous and Next change
+ *   channel (Up the next number), digits tune a number;
+ * - OK opens the channel list, as Menu and Guide do; held, it shows the
+ *   controls (the channel list, the favourite) over what's on; Back hides
+ *   what shows, then leaves.
  *
  * Live TV is watched as it airs, as the web's: no pause, no going back,
  * so play, pause, rewind and fast forward, Left and Right do nothing.
@@ -132,6 +136,10 @@ internal fun TvLivePlayerScreen(vm: LivePlayerViewModel, onExit: () -> Unit) {
     var peek by remember { mutableIntStateOf(0) }
     var poked by remember { mutableIntStateOf(0) }
     var showInfo by remember { mutableStateOf(false) }
+    // OK went down with nothing over the picture: its release opens the channel list, unless it was held.
+    var okPressed by remember { mutableStateOf(false) }
+    // OK held showed the controls: the rest of that press is the picture's.
+    var okHeld by remember { mutableStateOf(false) }
     val root = remember { FocusRequester() }
     val playing = state.phase == LivePhase.Playing
     val failed = state.phase is LivePhase.Failed
@@ -163,18 +171,25 @@ internal fun TvLivePlayerScreen(vm: LivePlayerViewModel, onExit: () -> Unit) {
     Box(
         Modifier
             .fillMaxSize()
+            // A window of its own: UI Automator (the benchmarks' journeys) finds its tags as resource ids.
+            .semantics { testTagsAsResourceId = true }
             .background(Color.Black)
             .testTag(TV_LIVE_PLAYER)
             .onPreviewKeyEvent { event ->
                 val code = event.key.nativeKeyCode
                 val down = event.type == KeyEventType.KeyDown
+                // Or its release would press the button the controls focused.
+                if (okHeld && code in OK_KEYS) {
+                    if (!down) okHeld = false
+                    return@onPreviewKeyEvent true
+                }
                 if (overlay == Overlay.Controls) poked++
                 when {
-                    code == KeyEvent.KEYCODE_CHANNEL_UP -> {
+                    code == KeyEvent.KEYCODE_CHANNEL_UP || code == KeyEvent.KEYCODE_MEDIA_NEXT -> {
                         if (down) vm.step(1)
                         true
                     }
-                    code == KeyEvent.KEYCODE_CHANNEL_DOWN -> {
+                    code == KeyEvent.KEYCODE_CHANNEL_DOWN || code == KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
                         if (down) vm.step(-1)
                         true
                     }
@@ -203,8 +218,18 @@ internal fun TvLivePlayerScreen(vm: LivePlayerViewModel, onExit: () -> Unit) {
                             true
                         }
                         KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> true
-                        KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                            if (!down) overlay = Overlay.Controls
+                        // The channel list on the way up, as OK selects elsewhere; held, the controls, as a long press opens actions elsewhere.
+                        in OK_KEYS -> {
+                            if (down && event.nativeKeyEvent.repeatCount == 0) {
+                                okPressed = true
+                            } else if (down && okPressed) {
+                                okPressed = false
+                                okHeld = true
+                                overlay = Overlay.Controls
+                            } else if (!down && okPressed) {
+                                okPressed = false
+                                overlay = Overlay.Channels
+                            }
                             true
                         }
                         else -> false
@@ -218,7 +243,8 @@ internal fun TvLivePlayerScreen(vm: LivePlayerViewModel, onExit: () -> Unit) {
         val shown = channel
         if (state.audioOnly && playing && shown != null) SoundOnly(shown, origin, now)
         when (val phase = state.phase) {
-            LivePhase.Tuning, LivePhase.Idle -> if (shown != null) Tuning(vm, shown, origin, now)
+            // The channel not known yet (opened elsewhere than a page that had it): the spinner alone.
+            LivePhase.Tuning, LivePhase.Idle -> if (shown != null) Tuning(vm, shown, origin, now) else Spinner(Modifier.align(Alignment.Center))
             is LivePhase.Failed -> Trouble(
                 trouble = phase.trouble,
                 channel = shown,
@@ -373,10 +399,12 @@ private fun InfoBar(
                     onClick = onChannels,
                     modifier = Modifier.initialFocus().testTag(TV_LIVE_PLAYER_CHANNEL_LIST),
                 )
+                // The star alone, as in Live TV's details: its label, wider than both buttons, ran under Channels.
                 TvRoundButton(
                     stringResource(if (channel.favorite) R.string.tv_livetv_favorite_remove else R.string.tv_livetv_favorite_add),
                     if (channel.favorite) PleyIcons.Star else PleyIcons.StarOutline,
                     onClick = vm::toggleFavorite,
+                    showLabel = false,
                 )
             }
         } else {
@@ -478,9 +506,9 @@ private fun Trouble(
                         modifier = Modifier.padding(top = 6.dp),
                     )
                 }
-            } else if (trouble.message.isNotBlank()) {
+            } else if (trouble.text.asString().isNotBlank()) {
                 BasicText(
-                    trouble.message,
+                    trouble.text.asString(),
                     style = PleyType.Tv.Body.copy(color = PleyColors.Muted, textAlign = TextAlign.Center),
                     modifier = Modifier.padding(top = 10.dp),
                 )
@@ -489,7 +517,7 @@ private fun Trouble(
             Row(Modifier.focusGroup(), horizontalArrangement = Arrangement.spacedBy(PleyTv.ButtonGap)) {
                 if (onRetry != null) {
                     TvPillButton(
-                        stringResource(R.string.tv_live_player_retry),
+                        stringResource(if (trouble.kind == LiveTrouble.Kind.Stopped) R.string.tv_live_player_watch_again else R.string.tv_live_player_retry),
                         onClick = onRetry,
                         icon = PleyIcons.RefreshCw,
                         modifier = if (firstToTake == null) Modifier.initialFocus() else Modifier,
@@ -683,48 +711,56 @@ private fun CategoryChannels(
     if (pages.total == 0) {
         BasicText(stringResource(R.string.tv_livetv_no_match), style = PleyType.Tv.Label.copy(color = PleyColors.Subtle), modifier = Modifier.padding(8.dp))
     }
-    LazyColumn(state = list, contentPadding = PaddingValues(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.testTag(TV_LIVE_PLAYER_CHANNELS)) {
-        items(count = pages.total ?: 0, key = { i -> pages[i]?.id ?: -i - 1L }) { i ->
+    LazyColumn(state = list, contentPadding = PaddingValues(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.heldKeyStaysIn(HeldEnds.UpDown).testTag(TV_LIVE_PLAYER_CHANNELS)) {
+        items(count = pages.total ?: 0, key = { i -> pages[i]?.id ?: -i - 1L }, contentType = { i -> if (pages[i] == null) LOADING_ROW else CHANNEL_ROW }) { i ->
             val channel = pages[i]
             if (channel == null) {
-                Box(Modifier.fillMaxWidth().height(52.dp).clip(PleyShape.Control).background(Color.White.copy(alpha = 0.04f)))
+                Box(Modifier.fillMaxWidth().height(52.dp).background(Color.White.copy(alpha = 0.04f), PleyShape.Control))
                 return@items
             }
-            val on = channel.onAt(now)
-            val isCurrent = channel.id == current
-            Surface(
+            ChannelRow(
+                channel = channel,
+                label = listOfNotNull(channel.number, LiveTv.channelName(channel, category)).joinToString("  "),
+                // What's on, not the time: the clock's tick draws a row again only when its programme changes.
+                on = channel.onAt(now)?.title,
+                origin = origin,
+                playing = channel.id == current,
                 onClick = { onTune(channel, category) },
-                modifier = Modifier.fillMaxWidth().then(if (i == index) Modifier.initialFocus(enabled = initial).focusRequester(target) else Modifier),
-                shape = ClickableSurfaceDefaults.shape(PleyShape.Control),
-                colors = ClickableSurfaceDefaults.colors(
-                    containerColor = if (isCurrent) PleyColors.Surface3 else Color.Transparent,
-                    contentColor = PleyColors.Fg,
-                    focusedContainerColor = PleyColors.Accent,
-                    focusedContentColor = PleyColors.OnAccent,
-                    pressedContainerColor = PleyColors.AccentBright,
-                    pressedContentColor = PleyColors.OnAccent,
-                ),
-                scale = ClickableSurfaceDefaults.scale(focusedScale = 1f, pressedScale = 1f),
-                glow = ClickableSurfaceDefaults.glow(Glow.None, Glow.None, Glow.None),
-            ) {
-                val content = androidx.tv.material3.LocalContentColor.current
-                Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    ChannelTile(channel, origin, Modifier.size(width = 52.dp, height = 32.dp), well = Color.White.copy(alpha = 0.08f))
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        BasicText(
-                            listOfNotNull(channel.number, LiveTv.channelName(channel, category)).joinToString("  "),
-                            style = PleyType.Tv.Label.copy(color = content),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        if (on != null) {
-                            BasicText(on.title, style = PleyType.Tv.Caption.copy(color = content.copy(alpha = 0.75f)), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
-                    if (channel.favorite) Icon(PleyIcons.Star, contentDescription = null, size = 14.dp, tint = content)
+                modifier = if (i == index) Modifier.initialFocus(enabled = initial).focusRequester(target) else Modifier,
+            )
+        }
+    }
+}
+
+/** A channel in the list: its logo, number and name, what's on, a star for a favourite; the one [playing] marked. */
+@Composable
+private fun ChannelRow(channel: LiveChannel, label: String, on: String?, origin: String, playing: Boolean, onClick: () -> Unit, modifier: Modifier) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth(),
+        shape = ClickableSurfaceDefaults.shape(PleyShape.Control),
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = if (playing) PleyColors.Surface3 else Color.Transparent,
+            contentColor = PleyColors.Fg,
+            focusedContainerColor = PleyColors.Accent,
+            focusedContentColor = PleyColors.OnAccent,
+            pressedContainerColor = PleyColors.AccentBright,
+            pressedContentColor = PleyColors.OnAccent,
+        ),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1f, pressedScale = 1f),
+        glow = ClickableSurfaceDefaults.glow(Glow.None, Glow.None, Glow.None),
+    ) {
+        val content = androidx.tv.material3.LocalContentColor.current
+        Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            ChannelTile(channel, origin, Modifier.size(width = 52.dp, height = 32.dp), well = Color.White.copy(alpha = 0.08f))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                BasicText(label, style = PleyType.Tv.Label.copy(color = content), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (on != null) {
+                    BasicText(on, style = PleyType.Tv.Caption.copy(color = content.copy(alpha = 0.75f)), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
+            if (channel.favorite) Icon(PleyIcons.Star, contentDescription = null, size = 14.dp, tint = content)
         }
     }
 }
@@ -743,6 +779,13 @@ private const val INFO_MS = 5_000L
 
 /** The controls hide after this long untouched while playing. */
 private const val CONTROLS_MS = 6_000L
+
+/** The channel list's rows: a channel, or one whose page is still loading. */
+private const val CHANNEL_ROW = "channel"
+private const val LOADING_ROW = "loading"
+
+/** The keys that select: the remote's OK, and Enter on a keyboard or keypad. */
+private val OK_KEYS = setOf(KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER)
 
 /** Media keys that would pause, seek or skip: Live TV has none of that. */
 private val NOT_LIVE_KEYS = setOf(

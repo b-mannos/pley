@@ -3,9 +3,10 @@ package app.pley.android.player.session
 import android.graphics.Bitmap
 import androidx.media3.common.text.Cue
 import app.pley.android.caps.CapsSnapshot
-import app.pley.android.common.describe
+import app.pley.android.common.errorText
 import app.pley.android.data.LocalFile
 import app.pley.android.model.AddSubtitle
+import app.pley.android.model.Control
 import app.pley.android.model.ItemDetail
 import app.pley.android.model.ItemKind
 import app.pley.android.model.ItemSummary
@@ -16,6 +17,8 @@ import app.pley.android.model.MediaStream
 import app.pley.android.model.PlaybackInfo
 import app.pley.android.model.PlaybackMethod
 import app.pley.android.model.PlaybackMode
+import app.pley.android.model.PlaybackRequest
+import app.pley.android.model.PlayingSession
 import app.pley.android.model.ProgressState
 import app.pley.android.model.ServerEvent
 import app.pley.android.model.StreamChoice
@@ -121,11 +124,21 @@ import kotlinx.coroutines.withTimeoutOrNull
  *   one picked is added on the server and shown as any subtitle file.
  * - **Sleep timer**, and a session the server stopped: it says so and
  *   plays no more.
+ * - **The remote**, on another of the profile's devices (docs/API.md,
+ *   "Remote control"): play, pause, seek and skip, next when something
+ *   can come next, the audio and subtitles of a file that has them, and
+ *   the quality, as the web's; each reported at once ([obey]). Every report
+ *   says the tracks playing and the quality picked ([PlayedTracks]).
  * - **Downloads.** A file downloaded to the device plays from there as it
  *   is, with no session on the server; its progress goes through
  *   [PlaybackEnvironment.local], which keeps it while the server is out of
  *   reach. A quality picked by hand, or a recovery's fallback, streams
  *   from the server instead.
+ * - **A video on a drive** ([PlaybackEnvironment.drive]) plays as a download
+ *   does, with no server at all: its tracks and chapters come from Media3
+ *   as it loads ([driveTracks]), Sync moves the subtitle files beside it
+ *   only, and what only a conversion would play says so in place of a
+ *   fallback. Dolby Vision profile 7 plays as its HDR10 base layer.
  *
  * Runs on [scope]'s dispatcher (the main thread); the engine's events come there too.
  */
@@ -174,6 +187,16 @@ class SessionPlaybackController(
     private var audioPicked = false
     private var subtitle: MediaStream? = null
 
+    /**
+     * The tracks the session playing plays, as its reports say them: set as
+     * it loads and as the engine switches, not while the next session that
+     * plays a new choice gets ready beside it.
+     */
+    private var playedTracks: PlayedTracks? = null
+
+    /** A track the remote picked waits for its new session: that one reports as soon as it loads. */
+    private var reportOnLoad = false
+
     /** The quality chosen: the menu's or the remembered one, Automatic included. */
     private var picked: QualityPreset = Qualities.AUTOMATIC
 
@@ -193,10 +216,24 @@ class SessionPlaybackController(
     /** A download plays, with no session on the server. */
     private var playingLocal = false
 
+    /** The screen is stopped ([setAway]): nothing here shows or is heard, so the remote's commands are left alone. */
+    private var away = false
+
+    /** A video on a drive: the tracks asked for (its window came back), chosen once Media3 has read them. */
+    private var pendingAudio: Long? = null
+    private var pendingSubtitle: Long? = null
+
     // ---------------------------------------------------------------- the session
 
     private val sessionState = MutableStateFlow<ServerPlaybackSession?>(null)
     private val session: ServerPlaybackSession? get() = sessionState.value
+
+    /**
+     * Who holds, for the remote ([PlaybackEnvironment.here]), a session
+     * started and not playing yet: one getting ready beside the one playing,
+     * or asked again with other choices. The server lists it at once.
+     */
+    private val starting = Any()
     private var sessionJob: Job? = null
     private var startJob: Job? = null
 
@@ -215,6 +252,9 @@ class SessionPlaybackController(
 
     /** The engine shows this session's media: only then is its position the playhead. */
     private var mediaShown = false
+
+    /** Something has shown in this player, in any session: a drive's file that did is one this TV plays. */
+    private var shownOnce = false
     private val wantPlay = MutableStateFlow(true)
     private var ended = false
     private var closed = false
@@ -290,11 +330,15 @@ class SessionPlaybackController(
 
     /** Starts preparing: called once, when someone presses play. */
     fun start() {
+        // Sent from another device: the screen says where from as it opens.
+        request.castFrom?.let { notice(texts.playingFrom(it)) }
         startJob = scope.launch { prepareFirst() }
         scope.launch { ticker() }
         scope.launch { progressReports() }
         scope.launch { subtitleCues() }
-        scope.launch { serverStops() }
+        scope.launch { serverEvents() }
+        // The remote leaves out what plays here; another episode is another session.
+        scope.launch { sessionState.collect { env.here(this@SessionPlaybackController, it?.id) } }
         scope.launch { sleep.state.collect { s -> ui.update { it.copy(sleep = s) } } }
     }
 
@@ -328,6 +372,8 @@ class SessionPlaybackController(
      * remembered is Automatic (only Automatic uses it), alongside the item's details.
      */
     private fun networkLookup(): Deferred<NetworkStart.Lookup?> = scope.async {
+        // A file on a drive plays as it is: there is no network to ask about.
+        if (env.drive) return@async null
         val remembered = try {
             env.quality.remembered()
         } catch (e: CancellationException) {
@@ -361,6 +407,9 @@ class SessionPlaybackController(
         audio = PlaybackPlan.initialAudio(chosen, req.audioIndex)
         audioPicked = audio != null
         subtitle = PlaybackPlan.initialSubtitle(chosen, req.subtitleIndex)
+        // A file on a drive has its own tracks once Media3 has read them.
+        pendingAudio = req.audioIndex.takeIf { env.drive && audio == null }
+        pendingSubtitle = req.subtitleIndex.takeIf { env.drive && subtitle == null }
         val remembered = try {
             env.quality.remembered()
         } catch (e: CancellationException) {
@@ -387,7 +436,7 @@ class SessionPlaybackController(
             it.copy(
                 itemId = detail.id,
                 title = if (episode) detail.grandparentTitle ?: detail.title else if (detail.year != null) "${detail.title} (${detail.year})" else detail.title,
-                subtitle = if (episode) listOf(episodeLabel(detail.parentIndex, detail.index), detail.title).filter { s -> s.isNotEmpty() }.joinToString(" · ") else null,
+                subtitle = if (episode) listOf(episodeLabel(detail.parentIndex, detail.index, texts.format), detail.title).filter { s -> s.isNotEmpty() }.joinToString(" · ") else null,
                 durationMs = chosen?.durationMs ?: detail.durationMs ?: 0,
                 markers = markers,
                 chapters = chosen?.chapters.orEmpty().map { c -> ChapterMark(c.title, c.startMs, c.endMs, c.thumbUrl?.let { u -> env.api.url(u) }) },
@@ -434,7 +483,8 @@ class SessionPlaybackController(
     private suspend fun begin(atMs: Long, alongside: Boolean = false, refused: (() -> Unit)? = null) {
         val detail = item ?: return
         val chosen = file ?: return fail(texts.noFile, canRetry = false)
-        val local = localFile(chosen.id)?.takeIf { recovery.fallbackMode == null && !streamingPicked }
+        // A file on a drive plays as it is, always: no server streams it.
+        val local = localFile(chosen.id)?.takeIf { env.drive || (recovery.fallbackMode == null && !streamingPicked) }
         // A change while the media shows: the session playing plays on while the next one gets ready.
         val playing = session?.takeIf { alongside && local == null && link != null && mediaShown && !ended && ui.value.phase !is PlayerPhase.Error }
         if (playing != null) return beginBeside(playing, detail, chosen, atMs, refused)
@@ -505,6 +555,7 @@ class SessionPlaybackController(
                     // As when the session before ended first: it ends, and the screen says what failed.
                     lastPositionMs = livePosition()
                     endSession(lastPositionMs)
+                    env.playing(this, false)
                     throw e
                 }
                 null
@@ -519,14 +570,14 @@ class SessionPlaybackController(
             try {
                 if (started.info.hls) withTimeoutOrNull(PREPARE_MAX_MS) { env.warmer.warm(env.api.url(started.info.url), atMs + PREPARE_LEAD_MS) }
             } catch (e: CancellationException) {
-                started.discard()
+                discardStarted(started)
                 throw e
             } catch (_: Exception) {
                 // Not asked for ahead: the player moves over all the same, and waits for it there.
             }
             // The session playing ended meanwhile (its end, the server's stop): this one isn't needed.
             if (session !== playing || closed || stopped) {
-                started.discard()
+                discardStarted(started)
                 return
             }
             // From where the last one got to while this one got ready.
@@ -584,34 +635,69 @@ class SessionPlaybackController(
      */
     private suspend fun startSession(detail: ItemDetail, chosen: MediaFile, first: PlaybackPlan.Choices, keepPrevious: Boolean): ServerPlaybackSession {
         var choices = first
-        var sent = PlaybackPlan.request(detail.id, choices, env.clientId(), fileCaps, keepPrevious)
-        var started = ServerPlaybackSession.start(env.api, sent, env.reporter)
+        val controls = remoteControls(
+            nextUp.hasNext(detail.kind, current.queue),
+            audio = PlaybackPlan.audioStreams(chosen).isNotEmpty(),
+            subtitles = PlaybackPlan.subtitleStreams(chosen).isNotEmpty(),
+            quality = true,
+        )
+        var sent = PlaybackPlan.request(detail.id, choices, env.clientId(), fileCaps, keepPrevious, controls)
+        try {
+            var started = held(open(sent))
 
-        DvGuards.retryMode(started.info, chosen, fileCaps)?.let { guarded ->
-            started.discard()
-            guardMode = guarded
-            choices = choices.copy(mode = guarded, streaming = true)
-            sent = PlaybackPlan.request(detail.id, choices, env.clientId(), fileCaps, keepPrevious)
-            started = ServerPlaybackSession.start(env.api, sent, env.reporter)
+            DvGuards.retryMode(started.info, chosen, fileCaps)?.let { guarded ->
+                started.discard()
+                guardMode = guarded
+                choices = choices.copy(mode = guarded, streaming = true)
+                sent = PlaybackPlan.request(detail.id, choices, env.clientId(), fileCaps, keepPrevious, controls)
+                started = held(open(sent))
+            }
+            if (PlaybackPlan.needsIndexes(started.info, sent, choices)) {
+                started.discard()
+                choices = choices.copy(streaming = true)
+                sent = PlaybackPlan.request(detail.id, choices, env.clientId(), fileCaps, keepPrevious, controls)
+                started = held(open(sent))
+            }
+            return started
+        } catch (e: Exception) {
+            env.here(starting, null)
+            throw e
         }
-        if (PlaybackPlan.needsIndexes(started.info, sent, choices)) {
-            started.discard()
-            choices = choices.copy(streaming = true)
-            sent = PlaybackPlan.request(detail.id, choices, env.clientId(), fileCaps, keepPrevious)
-            started = ServerPlaybackSession.start(env.api, sent, env.reporter)
-        }
-        return started
+    }
+
+    /** POST /api/playback for [request]: a session whose reports say the tracks playing then, and the quality picked. */
+    private suspend fun open(request: PlaybackRequest): ServerPlaybackSession =
+        ServerPlaybackSession.start(env.api, request, env.reporter) { playedTracks?.copy(quality = picked.id) }
+
+    /** [started], left out of the remote from now: the server lists it before it plays. */
+    private fun held(started: ServerPlaybackSession): ServerPlaybackSession = started.also { env.here(starting, it.id) }
+
+    /** Ends [started], never played: the next session is not needed after all. */
+    private fun discardStarted(started: ServerPlaybackSession) {
+        started.discard()
+        env.here(starting, null)
     }
 
     /** Plays [started] from [atMs]: the session playing from now on, loaded into the engine. */
     private fun loadSession(detail: ItemDetail, chosen: MediaFile, started: ServerPlaybackSession, atMs: Long) {
+        // Held as the one playing from now on (start()'s watch of sessionState).
+        env.here(starting, null)
         sessionState.value = started
+        // From the first session to the end, the next ones included: the event stream stays open in the background for the
+        // remote. Not while the screen is stopped, which obeys none.
+        env.playing(this, !away)
         live = null
         playingLocal = false
         playingConvertedSound = serverDecodes
         val info = started.info
         // Automatic: the track the server chose plays, switched to by the engine in direct play.
         if (audio == null) audio = PlaybackPlan.playedAudio(chosen, info.audioIndex)
+        playedTracks = tracksNow()
+        // The remote's pick that needed this session: said at once, not at the next report.
+        if (reportOnLoad) {
+            reportOnLoad = false
+            report(if (wantPlay.value) ProgressState.Playing else ProgressState.Paused)
+        }
         autoQuality.jumped()
         syncAutoOriginal(info)
         if (autoNoticePending) {
@@ -621,6 +707,7 @@ class SessionPlaybackController(
         ui.update {
             it.copy(
                 method = texts.method(info),
+                playbackMethod = info.method,
                 note = noteNow(),
                 canPlayOriginal = canPlayOriginal(),
                 durationMs = info.durationMs.takeIf { d -> d > 0 } ?: it.durationMs,
@@ -656,7 +743,8 @@ class SessionPlaybackController(
      * Plays [chosen] from its download [local], as it is: a session of the
      * device's own, whose reports go through the downloads (sent at once,
      * or kept while the server is out of reach), and the subtitles saved
-     * beside the file.
+     * beside the file. A file on a drive plays the same way: its reports
+     * keep where it stopped on the device, with its length as Media3 reads it.
      */
     private fun beginLocal(detail: ItemDetail, chosen: MediaFile, local: LocalFile, atMs: Long) {
         // No server to choose the audio: the download's own choice.
@@ -682,13 +770,17 @@ class SessionPlaybackController(
                 )
             },
         )
-        sessionState.value = ServerPlaybackSession(LocalReportsApi(env.api, env.local), detail.id, info, env.reporter)
+        val length = { info.durationMs.takeIf { it > 0 } ?: link?.durationMs?.takeIf { it > 0 } }
+        sessionState.value = ServerPlaybackSession(LocalReportsApi(env.api, env.local), detail.id, info, env.reporter, length)
+        // No session on the server, nothing for the remote to reach: the stream a session before held is let go.
+        env.playing(this, false)
         live = null
         playingLocal = true
         playingConvertedSound = false
         ui.update {
             it.copy(
-                method = texts.downloaded,
+                method = if (env.drive) texts.method(info) else texts.downloaded,
+                playbackMethod = info.method,
                 note = null,
                 canPlayOriginal = false,
                 durationMs = info.durationMs.takeIf { d -> d > 0 } ?: it.durationMs,
@@ -706,6 +798,7 @@ class SessionPlaybackController(
             video = PlaybackPlan.videoStream(chosen),
             durationMs = info.durationMs.takeIf { it > 0 },
             dolbyVision = dolbyVision,
+            profile7BaseLayer = env.drive,
         )
         engineLink.prepare(source, atMs, wantPlay.value)
         engineLink.setSpeed(speed)
@@ -779,7 +872,7 @@ class SessionPlaybackController(
                     engineLink.selectText(null, null)
                     if (sideload) showPictures(sub) else hideServerSubtitles()
                 }
-                sub.external || (offset.value != 0L && !PlaybackPlan.isImage(sub)) -> {
+                sub.external || (offset.value != 0L && !PlaybackPlan.isImage(sub) && !env.drive) -> {
                     engineLink.selectText(null, null)
                     showServerSubtitles(sub)
                 }
@@ -811,12 +904,16 @@ class SessionPlaybackController(
         serverSubtitles.show(info.fileId, sub.index, if (isSavedSubtitle(path, info.url)) path else env.api.url(path))
     }
 
-    /** Pictures beside a stream: the server's .mks of the track, at the stream's own positions (the file's). */
+    /**
+     * Pictures beside a stream: the server's .mks of the track, at the stream's own positions (the file's), asked for
+     * from where the player is each time, until the track is whole.
+     */
     private fun showPictures(sub: MediaStream) {
         val info = session?.info ?: return
         val pictures = pictureSubtitles ?: return
         serverSubtitles.hide()
-        pictures.show(info.fileId, sub.index, env.api.url(PlaybackPlan.pictureSubtitlesPath(info.fileId, sub.index)))
+        val url = env.api.url(PlaybackPlan.pictureSubtitlesPath(info.fileId, sub.index))
+        pictures.show(info.fileId, sub.index) { PlaybackPlan.pictureUrlAt(url, livePosition()) }
     }
 
     private fun hideServerSubtitles() {
@@ -849,11 +946,12 @@ class SessionPlaybackController(
 
     /**
      * Where a file's subtitle offset is kept: the file's own address, so
-     * files of different servers don't mix, and the profile watching, so
-     * one profile's timing never moves another's subtitles.
+     * files of different servers don't mix (a file on a drive, its id made
+     * of its path), and the profile watching, so one profile's timing never
+     * moves another's subtitles.
      */
     private fun offsetKey(fileId: Long): String {
-        val file = env.api.url("/api/files/$fileId")
+        val file = if (env.drive) "drive:$fileId" else env.api.url("/api/files/$fileId")
         return env.profileId?.let { "$file#profile=$it" } ?: file
     }
 
@@ -867,6 +965,7 @@ class SessionPlaybackController(
             EngineStatus.Buffering -> if (!ended) phase(PlayerPhase.Buffering)
             EngineStatus.Ready -> {
                 mediaShown = true
+                shownOnce = true
                 phase(if (link?.playWhenReady == true) PlayerPhase.Playing else PlayerPhase.Paused)
             }
             EngineStatus.Ended -> if (endedShort()) onEndedShort() else onEnded()
@@ -879,14 +978,18 @@ class SessionPlaybackController(
         val was = wantPlay.value
         wantPlay.value = playWhenReady
         if (playWhenReady) sleep.resumed()
-        if (session == null) return
-        if (!playWhenReady) {
-            struggle.reset()
-            if (was && !ended) report(ProgressState.Paused)
-            if (link?.status == EngineStatus.Ready) phase(PlayerPhase.Paused)
-        } else if (link?.status == EngineStatus.Ready) {
-            phase(PlayerPhase.Playing)
+        if (session != null) {
+            if (!playWhenReady) {
+                struggle.reset()
+                if (was && !ended) report(ProgressState.Paused)
+                if (link?.status == EngineStatus.Ready) phase(PlayerPhase.Paused)
+            } else if (link?.status == EngineStatus.Ready) {
+                phase(PlayerPhase.Playing)
+            }
         }
+        // Played again, by anyone: the remote's pause is over. After the phase, so no screen sees it paused
+        // and no longer the remote's for a moment, and brings up its controls.
+        if (playWhenReady && ui.value.pausedByRemote) ui.update { it.copy(pausedByRemote = false) }
     }
 
     override fun onPlaying(playing: Boolean) {
@@ -895,6 +998,7 @@ class SessionPlaybackController(
 
     /** A video or an audio track that no decoder here takes: the server has to help, as for a decoder error. */
     override fun onTracks(tracks: EngineTracks) {
+        if (env.drive && session != null) driveTracks(tracks)
         if (tracksChecked || session == null) return
         tracksChecked = true
         val videoUnplayable = tracks.video.isNotEmpty() && tracks.video.none { it.supported }
@@ -903,6 +1007,38 @@ class SessionPlaybackController(
             val what = if (videoUnplayable) "video" else "audio"
             onError(EngineError.Unsupported(audio = !videoUnplayable, container = false, detail = "no $what track plays here"))
         }
+    }
+
+    /**
+     * A file on a drive, as Media3 read it: its streams and chapters fill
+     * the menus, the audio it plays shows as chosen, and tracks asked for
+     * before (its window came back) are chosen once they are there.
+     */
+    private fun driveTracks(tracks: EngineTracks) {
+        val detail = item ?: return
+        val chosen = file ?: return
+        val streams = DriveStreams.streams(tracks, chosen.streams.filter { it.external })
+        val known = chosen.copy(streams = streams, chapters = DriveStreams.chapters(tracks.chapters, link?.durationMs ?: 0))
+        if (known == chosen) return
+        file = known
+        item = detail.copy(files = detail.files.map { if (it.id == known.id) known else it })
+        val audios = PlaybackPlan.audioStreams(known)
+        val asked = pendingAudio?.let { wanted -> audios.firstOrNull { it.index.toLong() == wanted } }
+        val playing = audios.getOrNull(tracks.audio.indexOfFirst { it.selected })
+        audio = when {
+            asked != null -> asked
+            audioPicked -> audios.firstOrNull { it.index == audio?.index } ?: playing
+            else -> playing
+        }
+        if (asked != null) audioPicked = true
+        pendingSubtitle?.let { wanted -> PlaybackPlan.subtitleStreams(known).firstOrNull { it.index.toLong() == wanted } }?.let { subtitle = it }
+        val choose = pendingAudio != null || pendingSubtitle != null
+        pendingAudio = null
+        pendingSubtitle = null
+        ui.update { it.copy(chapters = known.chapters.map { c -> ChapterMark(c.title, c.startMs, c.endMs, null) }) }
+        publishChoices()
+        refreshDetails()
+        if (choose) applyTracks()
     }
 
     override fun onError(error: EngineError) {
@@ -919,6 +1055,14 @@ class SessionPlaybackController(
 
     /** Does what the recovery ladder says; [alongside]: a new session is made ready beside the one playing, which plays on. */
     private fun act(action: Recovery.Action, starving: Boolean, alongside: Boolean = false) {
+        // A file on a drive has no server: what only a conversion would play doesn't play, and a
+        // file that still can't be read (the drive pulled out) says so, not that a server is away.
+        if (env.drive && action is Recovery.Action.NewSession && action.mode != null) {
+            return fail(texts.driveUnplayable, canRetry = false)
+        }
+        if (env.drive && action is Recovery.Action.Fail && (action.failure == Failure.Network || action.failure == Failure.Stopped)) {
+            return fail(texts.driveUnreadable, canRetry = true)
+        }
         when (action) {
             is Recovery.Action.NewSession -> {
                 if (action.reason == FallbackReason.NotSmooth && recovery.struggleSwitched && !automatic) {
@@ -987,6 +1131,8 @@ class SessionPlaybackController(
         val duration = s?.info?.durationMs?.takeIf { it > 0 } ?: link?.durationMs?.takeIf { it > 0 } ?: lastPositionMs
         lastPositionMs = duration
         endSession(duration)
+        // No session until the next title starts, if one does: nothing for the remote to reach in the background.
+        env.playing(this, false)
         ui.update { it.copy(positionMs = duration, skipLabel = null) }
         val detail = item ?: return phase(PlayerPhase.Ended)
         if (!nextUp.hasNext(detail.kind, current.queue)) return phase(PlayerPhase.Ended)
@@ -1047,6 +1193,11 @@ class SessionPlaybackController(
             lastAdvancePos = pos
         } else if (now - lastAdvanceAt >= STALL_MS) {
             lastAdvanceAt = now
+            // A file on a drive waits for no server, and the same file again would only stand still
+            // again: one whose picture never came isn't one this TV plays; one that showed and then
+            // stood still can't be read any more (the drive pulled out), as on LG TVs. Showed in any
+            // session: a file read again after an error, which then hangs, played before.
+            if (env.drive) return fail(if (shownOnce) texts.driveUnreadable else texts.driveStuck, canRetry = true)
             val starving = engineLink.status == EngineStatus.Buffering && engineLink.bufferedMs - engineLink.positionMs < STARVING_MS
             act(recovery.onStall(s.info.method, starving), starving)
             return
@@ -1087,6 +1238,8 @@ class SessionPlaybackController(
      * down); a transcode in Automatic steps down to fewer lines.
      */
     private fun onStruggling(method: PlaybackMethod, now: Long) {
+        // A file on a drive has nothing smoother to go to: it plays on as it is.
+        if (env.drive) return
         val action = recovery.onStruggling(method)
         if (action != null) {
             if (automatic) {
@@ -1196,11 +1349,115 @@ class SessionPlaybackController(
             }
     }
 
-    /** The server's word that it stopped this playback's session (an administrator, or the profile elsewhere). */
-    private suspend fun serverStops() {
+    /**
+     * The server's word about this playback's session: stopped (an
+     * administrator, or the profile elsewhere), or a command of the
+     * profile's remote. Another session's are someone else's.
+     */
+    private suspend fun serverEvents() {
         env.events.collect { event ->
-            if (event is ServerEvent.SessionStopped && event.sessionId == session?.id) stopByServer(event.message, event.byAdmin)
+            when {
+                event is ServerEvent.SessionStopped && event.sessionId == session?.id -> stopByServer(event.message, event.byAdmin)
+                event is ServerEvent.PlayerCommand && event.sessionId == session?.id -> obey(event)
+            }
         }
+    }
+
+    /**
+     * A command of the profile's remote, as the web's player obeys it: a
+     * seek stays within the title, a skip goes from where it is now, next
+     * plays what comes next (nothing at the end, and nothing said here:
+     * whoever sent it is elsewhere), and a video has no previous. Audio,
+     * subtitles and the quality change as the player's own menus change
+     * them. What changed is reported at once, so the remote sees it (a
+     * pause reports by itself, and a new item with its new session).
+     *
+     * The screen says what changed for a moment ([PlayerUiState.remoteNotice]),
+     * never by its controls: whoever watches here learns why it paused or
+     * jumped, and the picture stays clear. A command that changes nothing
+     * says nothing; the next item shows its title as it begins.
+     */
+    private fun obey(command: ServerEvent.PlayerCommand) {
+        if (closed || stopped || away || ui.value.phase is PlayerPhase.Error) return
+        when (command.command) {
+            Control.Play -> {
+                // Playing already: said again, so a remote a little behind settles.
+                if (!wantPlay.value || ended) {
+                    play()
+                    remoteNotice(texts.remotePlaying)
+                }
+                if (!ended) report(ProgressState.Playing)
+            }
+            // A pause reports by itself; paused already, it is said again.
+            Control.Pause -> if (wantPlay.value) {
+                // Before the engine pauses: the screens see the pause as the remote's from its first moment.
+                // Only with an engine to pause: a pause that never came would make the next one the remote's.
+                if (link != null) ui.update { it.copy(pausedByRemote = true) }
+                pause()
+                remoteNotice(texts.remotePaused)
+            } else {
+                report(ProgressState.Paused)
+            }
+            Control.Seek -> command.positionMs?.let { seekNow(it)?.let { at -> remoteNotice(texts.remoteJumped(at)) } }
+            // As far as it asked, as the TV's seek badge says it, even where the start or the end cut it short.
+            Control.Skip -> command.offsetMs?.let { by -> seekNow(livePosition() + by)?.let { remoteNotice(texts.remoteSkipped(by)) } }
+            Control.Next -> if (item?.let { nextUp.hasNext(it.kind, current.queue) } == true) advance(fromRemote = true)
+            Control.Audio -> command.streamIndex?.let {
+                val change = changeAudio(it.toLong())
+                if (change != TrackChange.Unchanged) audio?.let { a -> remoteNotice(texts.remoteAudio(streamLabel(a, texts.format))) }
+                reportPicked(change)
+            }
+            Control.Subtitles -> command.streamIndex?.let { index ->
+                val change = changeSubtitle(index.takeIf { it != PlayingSession.SUBTITLES_OFF }?.toLong())
+                if (change != TrackChange.Unchanged) remoteNotice(texts.remoteSubtitles(subtitle?.let { streamLabel(it, texts.format) }))
+                reportPicked(change)
+            }
+            Control.Quality -> command.quality?.let { id ->
+                val change = changeQuality(id)
+                if (change != TrackChange.Unchanged) remoteNotice(texts.remoteQuality(label(picked)))
+                // The pick is said at once, by the session playing; one that needs a new session says it again as
+                // that one starts.
+                if (change == TrackChange.NewSession) reportOnLoad = true
+                if (!ended) report(if (wantPlay.value) ProgressState.Playing else ProgressState.Paused)
+            }
+            Control.Previous, Control.Unknown -> Unit
+        }
+    }
+
+    private fun remoteNotice(text: String) = ui.update { it.copy(remoteNotice = text, remoteNoticeId = it.remoteNoticeId + 1) }
+
+    /**
+     * After a track the remote picked: what plays is said at once, the pick
+     * or what played already (as a play or pause that changes nothing), so
+     * the remote settles; a pick that needs a new session is said by that
+     * session as it starts.
+     */
+    private fun reportPicked(change: TrackChange) {
+        if (change == TrackChange.NewSession) {
+            reportOnLoad = true
+        } else if (!ended) {
+            report(if (wantPlay.value) ProgressState.Playing else ProgressState.Paused)
+        }
+    }
+
+    /** The tracks playing now, as reports say them. */
+    private fun tracksNow(): PlayedTracks = PlayedTracks(audio?.index, subtitle?.index ?: PlayingSession.SUBTITLES_OFF)
+
+    /**
+     * Seeks to [positionMs] and reports where it went straight away, not a
+     * second later as after the screen's seeks. Where it went, within the
+     * title; `null` when nothing plays to seek in.
+     */
+    private fun seekNow(positionMs: Long): Long? {
+        if (closed || stopped) return null
+        seekTo(positionMs)
+        // Nothing to say without an engine to seek, but the report still goes.
+        val at = ui.value.positionMs.takeIf { link != null }
+        // Seeking past the end starts a new session, which reports itself.
+        if (ended || session == null) return at
+        seekReport?.cancel()
+        report(if (wantPlay.value) ProgressState.Playing else ProgressState.Paused)
+        return at
     }
 
     /**
@@ -1211,6 +1468,7 @@ class SessionPlaybackController(
     private fun stopByServer(message: String?, byAdmin: Boolean) {
         if (closed || stopped) return
         stopped = true
+        env.playing(this, false)
         val position = livePosition()
         lastPositionMs = position
         session?.let { s ->
@@ -1274,6 +1532,15 @@ class SessionPlaybackController(
         link?.pause()
     }
 
+    override fun setAway(away: Boolean) {
+        if (closed || this.away == away) return
+        this.away = away
+        // A stopped engine would say it plays and play nothing, and a next
+        // title would sound with no screen: the remote is not obeyed
+        // meanwhile, nor the event stream held for it; shown again, both are.
+        if (!stopped && !ended && session != null && !playingLocal) env.playing(this, !away)
+    }
+
     override fun seekTo(positionMs: Long) {
         val engineLink = link ?: return
         if (closed || stopped) return
@@ -1283,12 +1550,15 @@ class SessionPlaybackController(
         if (ended || session == null) {
             lastPositionMs = target
             ui.update { it.copy(positionMs = target) }
+            pictureSubtitles?.jumped()
             restart(target)
             return
         }
         engineLink.seekTo(target)
         lastPositionMs = target
         startedAtMs = target
+        // Pictures the server is still copying out of the file are asked for from here at once.
+        pictureSubtitles?.jumped()
         recovery.onJump()
         autoQuality.jumped()
         struggle.reset()
@@ -1303,34 +1573,57 @@ class SessionPlaybackController(
     }
 
     override fun selectAudio(index: Long) {
-        val chosen = PlaybackPlan.audioStreams(file).firstOrNull { it.index.toLong() == index } ?: return
-        if (chosen.index == audio?.index) return
+        changeAudio(index)
+    }
+
+    /** What a track choice did: nothing (what played already, or no such track), played at once, or a new session it waits for. */
+    private enum class TrackChange { Unchanged, Now, NewSession }
+
+    /** The menu's audio choice, and the remote's: the engine switches in direct play, a stream starts a new session. */
+    private fun changeAudio(index: Long): TrackChange {
+        val chosen = PlaybackPlan.audioStreams(file).firstOrNull { it.index.toLong() == index } ?: return TrackChange.Unchanged
+        if (chosen.index == audio?.index) return TrackChange.Unchanged
         audio = chosen
         audioPicked = true
         saveStreams()
         publishChoices()
         // A download's other track may be one this device decodes: its speed can be tried again.
         if (playingLocal && ui.value.speedNote != null) ui.update { it.copy(speedNote = null) }
-        val s = session ?: return
+        val s = session ?: return TrackChange.NewSession
         val engineLink = link
-        if (!s.info.hls && engineLink != null && PlaybackPlan.audioPlaysHere(chosen, caps)) {
+        return if (!s.info.hls && engineLink != null && PlaybackPlan.audioPlaysHere(chosen, caps)) {
             // The engine loads the other track: its wait is no play issue.
             autoQuality.jumped()
             engineLink.selectAudio(PlaybackPlan.audioStreams(file).indexOf(chosen), chosen.language)
+            playedTracks = tracksNow()
+            TrackChange.Now
         } else {
             restart(livePosition(), alongside = true)
+            TrackChange.NewSession
         }
     }
 
     override fun selectSubtitle(index: Long?) {
-        val chosen = index?.let { i -> PlaybackPlan.subtitleStreams(file).firstOrNull { it.index.toLong() == i } ?: return }
-        if (chosen?.index == subtitle?.index) return
+        changeSubtitle(index)
+    }
+
+    /** The menu's subtitle choice, and the remote's (`null`: off): a new session only to burn pictures in, or stop. */
+    private fun changeSubtitle(index: Long?): TrackChange {
+        val chosen = index?.let { i -> PlaybackPlan.subtitleStreams(file).firstOrNull { it.index.toLong() == i } ?: return TrackChange.Unchanged }
+        if (chosen?.index == subtitle?.index) return TrackChange.Unchanged
         subtitle = chosen
         saveStreams()
         publishChoices()
-        val info = session?.info ?: return
+        val info = session?.info ?: return TrackChange.NewSession
         val burn = info.hls && PlaybackPlan.isImage(chosen) && !sideload
-        if (burn != info.burnSubtitles || (burn && info.subtitleIndex != chosen?.index)) restart(livePosition(), alongside = true) else applyTracks()
+        return if (burn != info.burnSubtitles || (burn && info.subtitleIndex != chosen?.index)) {
+            restart(livePosition(), alongside = true)
+            TrackChange.NewSession
+        } else {
+            applyTracks()
+            playedTracks = tracksNow()
+            TrackChange.Now
+        }
     }
 
     override fun setSubtitleOffset(offsetMs: Long) {
@@ -1417,7 +1710,7 @@ class SessionPlaybackController(
     private fun soundUndecodable() {
         if (speed == 1f) return
         when {
-            playingLocal -> speedBack(texts.speedUndecodable)
+            playingLocal -> speedBack(if (env.drive) texts.driveSpeedUndecodable else texts.speedUndecodable)
             // Until the session asked for so plays, the one before still passes its sound through.
             serverDecodes -> if (playingConvertedSound) speedBack(texts.speedUnconverted)
             else -> {
@@ -1512,15 +1805,15 @@ class SessionPlaybackController(
     /** A result as the list shows it: the release, then its language, whether it fits this very file, and downloads. */
     private fun foundSubtitle(r: SubtitleResult): FoundSubtitle = FoundSubtitle(
         id = r.id,
-        label = r.name.ifBlank { languageName(r.language) ?: r.id },
-        hint = texts.foundHint(languageName(r.language), r.matched == "hash", r.hearingImpaired, r.downloads).ifEmpty { null },
+        label = r.name.ifBlank { languageName(r.language, texts.format) ?: r.id },
+        hint = texts.foundHint(languageName(r.language, texts.format), r.matched == "hash", r.hearingImpaired, r.downloads).ifEmpty { null },
     )
 
     /** Why searching or adding failed, in a sentence: an older server has no search at all. */
     private fun searchFailure(e: Exception): String = when {
         e is ApiException && (e.status == 404 || e.status == 405) -> texts.searchUnsupported
         e is ApiException && e.status == 503 -> texts.searchNotSetUp
-        else -> texts.searchFailed(describe(e))
+        else -> texts.searchFailed(errorText(e))
     }
 
     override fun setSleep(choice: SleepChoice) {
@@ -1537,9 +1830,14 @@ class SessionPlaybackController(
     }
 
     override fun selectQuality(name: String) {
+        changeQuality(name)
+    }
+
+    /** The menu's quality choice, and the remote's: kept as the pick, and played from where it is when it plays otherwise. */
+    private fun changeQuality(name: String): TrackChange {
         val wanted = Qualities.byIdOrLabel(name)
-        val choice = Qualities.forFile(file).firstOrNull { it.id == wanted.id } ?: return
-        if (choice.id == picked.id) return
+        val choice = Qualities.forFile(file).firstOrNull { it.id == wanted.id } ?: return TrackChange.Unchanged
+        if (choice.id == picked.id) return TrackChange.Unchanged
         val before = quality
         picked = choice
         streamingPicked = !choice.original && !choice.automatic
@@ -1567,7 +1865,9 @@ class SessionPlaybackController(
         }
         publishChoices()
         refreshDetails()
-        if (item != null && !same) restart(livePosition(), alongside = true)
+        if (item == null || same) return TrackChange.Now
+        restart(livePosition(), alongside = true)
+        return TrackChange.NewSession
     }
 
     override fun skip() {
@@ -1576,7 +1876,10 @@ class SessionPlaybackController(
         seekTo(if (duration > 0) minOf(Markers.skipTarget(marker), duration) else Markers.skipTarget(marker))
     }
 
-    override fun playNext() {
+    override fun playNext() = advance(fromRemote = false)
+
+    /** What comes next plays; at the end, the screen says so, unless the remote asked ([fromRemote]). */
+    private fun advance(fromRemote: Boolean) {
         if (closed || stopped) return
         val known = next
         if (known != null) {
@@ -1584,10 +1887,10 @@ class SessionPlaybackController(
             return
         }
         lookUpNext { found ->
-            if (found == null) {
-                notice(if (current.queue != null) texts.lastInQueue else texts.lastEpisode)
-            } else {
+            if (found != null) {
                 switchTo(found)
+            } else if (!fromRemote) {
+                notice(if (current.queue != null) texts.lastInQueue else texts.lastEpisode)
             }
         }
     }
@@ -1642,11 +1945,13 @@ class SessionPlaybackController(
             live = live,
             engine = link?.stats().orEmpty(),
             subtitle = subtitle,
-        ).let { if (info.url.startsWith("file:")) it.copy(method = texts.downloaded) else it }
+        ).let { if (info.url.startsWith("file:") && !env.drive) it.copy(method = texts.downloaded) else it }
         ui.update { it.copy(details = details) }
     }
 
     override fun dismissNotice() = ui.update { it.copy(notice = null) }
+
+    override fun dismissRemoteNotice() = ui.update { it.copy(remoteNotice = null) }
 
     override suspend fun thumbnail(positionMs: Long): Bitmap? = trickplay?.thumbnail(positionMs)
 
@@ -1659,6 +1964,7 @@ class SessionPlaybackController(
         subtitleIndex = subtitle?.index?.toLong(),
         quality = picked.id,
         queue = current.queue,
+        drivePath = current.drivePath,
     )
 
     override fun retry() {
@@ -1678,6 +1984,9 @@ class SessionPlaybackController(
         val position = livePosition()
         closed = true
         endSession(position)
+        env.playing(this, false)
+        env.here(this, null)
+        env.here(starting, null)
         sleep.cancel()
         hideServerSubtitles()
         dropTrickplay()
@@ -1735,7 +2044,7 @@ class SessionPlaybackController(
         val card = UpNextUi(
             itemId = found.id,
             title = found.title,
-            heading = texts.upNext(NextUp.labelOf(found)),
+            heading = texts.upNext(NextUp.labelOf(found, texts.format)),
             // A download's picture is a file here.
             imageUrl = (found.thumbUrl ?: found.backdropUrl)?.let { if (it.startsWith("file:")) it else env.api.url(it, UP_NEXT_IMAGE_WIDTH) },
             secondsLeft = null,
@@ -1804,6 +2113,9 @@ class SessionPlaybackController(
                 title = it.title,
                 positionMs = req.startMs ?: 0,
                 sleep = it.sleep,
+                // The next title starts paused when this one is: the remote's pause stays the remote's.
+                pausedByRemote = it.pausedByRemote,
+                remoteNoticeId = it.remoteNoticeId,
             )
         }
         sessionJob?.cancel()
@@ -1831,21 +2143,25 @@ class SessionPlaybackController(
         val chosenFile = file
         val streaming = session?.info?.hls ?: false
         val info = session?.info
-        val audioChoices = PlaybackPlan.audioStreams(chosenFile).map { TrackChoice(it.index.toLong(), streamLabel(it), it.index == audio?.index) }
+        val audioChoices = PlaybackPlan.audioStreams(chosenFile).map { TrackChoice(it.index.toLong(), streamLabel(it, texts.format), it.index == audio?.index) }
         val subs = PlaybackPlan.subtitleStreams(chosenFile)
         val subtitleChoices = if (subs.isEmpty()) {
             emptyList()
         } else {
             listOf(TrackChoice(null, texts.subtitlesOff, subtitle == null)) +
-                subs.map { TrackChoice(it.index.toLong(), streamLabel(it), it.index == subtitle?.index, burnIn = streaming && PlaybackPlan.isImage(it) && !sideload) }
+                subs.map { TrackChoice(it.index.toLong(), streamLabel(it, texts.format), it.index == subtitle?.index, burnIn = streaming && PlaybackPlan.isImage(it) && !sideload) }
         }
         val sub = subtitle
-        // Text moves always; pictures only when drawn here from the server's .mks.
-        val syncable = sub != null && (!PlaybackPlan.isImage(sub) || (streaming && sideload && info?.burnSubtitles != true))
+        // Text moves always; pictures only when drawn here from the server's .mks. On a drive, the
+        // files beside it only: the server's WebVTT moves a file's own tracks, and a drive has no server.
+        val syncable = sub != null &&
+            (if (env.drive) sub.external else !PlaybackPlan.isImage(sub) || (streaming && sideload && info?.burnSubtitles != true))
+        // The style is for text: pictures, drawn here or burned in, keep their own look.
+        val styled = sub != null && !PlaybackPlan.isImage(sub)
         val auto = serverQuality(info)
         val playing = label(auto ?: quality)
         val fileHint = chosenFile?.let { f ->
-            listOfNotNull(resolutionLabel(f.width, f.height), formatBitrate(f.bitrate).ifEmpty { null }).joinToString(" · ").ifEmpty { null }
+            listOfNotNull(resolutionLabel(f.width, f.height), formatBitrate(f.bitrate, texts.format).ifEmpty { null }).joinToString(" · ").ifEmpty { null }
         }
         // A download plays as it is: there is nothing to convert, and the server may be away.
         val downloaded = info?.url?.startsWith("file:") == true
@@ -1868,6 +2184,7 @@ class SessionPlaybackController(
                 qualities = qualities,
                 quality = if (automatic) texts.automatic(playing) else label(quality),
                 subtitleSync = syncable,
+                subtitleStyled = styled,
                 subtitleOffsetMs = offset.value,
             )
         }
@@ -1879,6 +2196,8 @@ class SessionPlaybackController(
      * the audio chosen before stays, as subtitles alone were picked.
      */
     private fun saveStreams() {
+        // A file on a drive keeps its tracks for this viewing: there is no server to save them.
+        if (env.drive) return
         val itemId = item?.id ?: return
         val choice = StreamChoice(fileId = file?.id, audioIndex = audio?.takeIf { audioPicked }?.index, subtitleIndex = subtitle?.index)
         env.reporter.send { env.api.setStreams(itemId, choice) }
@@ -1907,6 +2226,8 @@ class SessionPlaybackController(
     }
 
     private fun failWith(error: Exception) {
+        // A file on a drive asks nothing of a server: what fails is reading it.
+        if (env.drive) return fail(texts.driveUnreadable, canRetry = true)
         val downloaded = file?.let { localFile(it.id) } != null
         if (error is OfflineException && downloaded && recovery.fallbackReason == FallbackReason.NotSmooth) {
             // A download that dropped frames went to the server for a smoother copy, which is out
@@ -1919,9 +2240,9 @@ class SessionPlaybackController(
         // A download that didn't play here as it is went to the server, which is out of reach.
         val leftDownload = recovery.fallbackMode != null && downloaded
         if (error is OfflineException && !leftDownload) {
-            return fail(if (error.blocked) describe(error) else texts.unreachable(describe(error)), canRetry = true, offline = true)
+            return fail(if (error.blocked) texts.words(errorText(error)) else texts.unreachable(errorText(error)), canRetry = true, offline = true)
         }
-        val message = if (leftDownload && error is OfflineException) texts.downloadNeedsServer else describe(error)
+        val message = if (leftDownload && error is OfflineException) texts.downloadNeedsServer else texts.words(errorText(error))
         val canRetry = !(error is ApiException && (error.status == 403 || error.status == 404 || error.signedOut))
         fail(message, canRetry)
     }
@@ -1966,6 +2287,24 @@ class SessionPlaybackController(
 
         /** Seeks stop this short of the end, so the end isn't reached by a seek. */
         const val SEEK_END_MARGIN_MS = 250L
+
+        /**
+         * What a video obeys from the remote (the web's): Next too when
+         * something can come next ([hasNext]: an episode, a queue), Audio
+         * and Subtitles when its file has such tracks to pick from, and
+         * Quality when it has the Quality menu.
+         */
+        fun remoteControls(hasNext: Boolean, audio: Boolean = false, subtitles: Boolean = false, quality: Boolean = false): List<Control> =
+            VIDEO_CONTROLS + listOfNotNull(
+                Control.Next.takeIf { hasNext },
+                Control.Audio.takeIf { audio },
+                Control.Subtitles.takeIf { subtitles },
+                Control.Quality.takeIf { quality },
+            )
+
+        /** What every video obeys from the remote. */
+        private val VIDEO_CONTROLS = listOf(Control.Play, Control.Pause, Control.Seek, Control.Skip)
+
         const val UP_NEXT_IMAGE_WIDTH = 480
         private const val CUE_MIN_MS = 20L
         private const val CUE_MAX_MS = 250L

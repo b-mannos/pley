@@ -4,8 +4,10 @@
 //!
 //! Apps signed in through pley's own page hold app tokens instead
 //! ([`grants`]): they act without administrator rights, and only on the
-//! routes their [`scopes`] open.
+//! routes their [`scopes`] open. Other apps and tools hold
+//! [`compatibility`] tokens, which work on the compatibility APIs only.
 
+pub mod compatibility;
 pub mod grants;
 pub mod scopes;
 
@@ -41,7 +43,8 @@ pub struct AuthUser {
     pub id: i64,
     pub username: String,
     /// Administrator rights for this request: the account's role for pley's
-    /// own sign-in, never for an app's token.
+    /// own sign-in, never for an app's token, and for a compatibility token
+    /// only to see everyone's (with `activity`).
     pub is_admin: bool,
     /// The account is an administrator, whatever the token: what requests
     /// go by (an administrator's own are approved as made, and pley's apps
@@ -53,6 +56,16 @@ pub struct AuthUser {
     pub max_age: Option<i64>,
     /// The app acting for the user (an app token); `None`: pley's own sign-in.
     pub app: Option<Arc<AppAccess>>,
+    /// The compatibility token of the request (the compatibility API's
+    /// callers); `None`: a session or an app.
+    pub compatibility: Option<CompatibilityAccess>,
+}
+
+/// What a compatibility token allows (see [`compatibility`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CompatibilityAccess {
+    pub token_id: i64,
+    pub scopes: compatibility::Scopes,
 }
 
 /// What an app's token was allowed (see [`grants`]).
@@ -84,6 +97,7 @@ impl AuthUser {
             all_libraries,
             max_age: if is_admin { None } else { max_age },
             app: None,
+            compatibility: None,
         }))
     }
 
@@ -104,10 +118,47 @@ impl AuthUser {
         }
     }
 
+    /// Whether this request sees and stops everyone's playback, as the
+    /// dashboard does: an administrator's own sign-in (and a compatibility
+    /// token that sees everyone's, by its own rules), or one of pley's own
+    /// apps on an administrator's account allowed `activity` (no other app
+    /// can be: it sees and stops only its profile's own). Remote control and
+    /// casting stay the user's own whatever this says.
+    pub fn oversees_playback(&self) -> bool {
+        match &self.app {
+            None => self.is_admin,
+            Some(app) => self.account_admin && app.scopes.contains(Scope::Activity) && self.first_party(),
+        }
+    }
+
     /// Whether this request may use what `scope` allows: pley's own sign-in
     /// always, an app when its token has it.
     pub fn allowed(&self, scope: Scope) -> bool {
         self.app.as_ref().is_none_or(|app| app.scopes.contains(scope))
+    }
+
+    /// Whether this request's compatibility token may use what `scope`
+    /// allows: the token has it, and for a scope only administrators' tokens
+    /// may have, the account is one now (a role taken away takes it at
+    /// once). Never for a session or an app.
+    pub fn compatibility_allows(&self, scope: compatibility::Scope) -> bool {
+        self.compatibility
+            .is_some_and(|token| token.scopes.contains(scope) && (!scope.administrators_only() || self.account_admin))
+    }
+}
+
+/// Where a token was used from: for the account page's list, and for the
+/// origins a compatibility token is limited to ([`compatibility::Origins`]).
+#[derive(Debug, Clone, Default)]
+pub struct UsedFrom {
+    /// [`ClientIp`]'s, which nobody on the internet can choose.
+    pub ip: Option<String>,
+    pub user_agent: Option<String>,
+}
+
+impl UsedFrom {
+    fn address(&self) -> Option<IpAddr> {
+        self.ip.as_deref().and_then(|ip| ip.parse().ok())
     }
 }
 
@@ -122,47 +173,85 @@ const HASHING_AT_ONCE: usize = 4;
 /// How long a password waits its turn before pley says it is busy.
 const HASHING_WAIT: Duration = Duration::from_secs(10);
 
+/// The answer to a password pley can't check now.
+fn busy_hashing() -> AppError {
+    AppError::Unavailable("Pley is busy checking passwords: try again in a moment".into())
+}
+
 /// Runs Argon2 `work` when its turn comes.
 async fn hashing<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Result<T, AppError> {
     static TURNS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(HASHING_AT_ONCE);
     let _turn = tokio::time::timeout(HASHING_WAIT, TURNS.acquire())
         .await
-        .map_err(|_| AppError::Unavailable("Pley is busy checking passwords: try again in a moment".into()))?
+        .map_err(|_| busy_hashing())?
         .map_err(|e| AppError::Internal(e.into()))?;
     tokio::task::spawn_blocking(work).await.map_err(|e| AppError::Internal(e.into()))
 }
 
 pub async fn hash_password(password: String) -> Result<String, AppError> {
-    hashing(move || {
-        Argon2::default()
-            .hash_password(password.as_bytes())
-            .map(|h: PasswordHash| h.to_string())
-            .map_err(|e| AppError::Internal(anyhow::anyhow!("hashing password: {e}")))
+    hashing(move || hashed(Argon2::default().hash_password(password.as_bytes()).map(|h| h.to_string()))).await?
+}
+
+/// A hash Argon2 made, or why not. Without the memory it works in, pley is
+/// busy, as for a check ([`matched`]).
+fn hashed(made: argon2::password_hash::Result<String>) -> Result<String, AppError> {
+    made.map_err(|e| match e {
+        argon2::password_hash::Error::OutOfMemory => {
+            tracing::warn!("out of memory hashing a password or PIN: answered that Pley is busy");
+            busy_hashing()
+        }
+        e => AppError::Internal(anyhow::anyhow!("hashing password: {e}")),
+    })
+}
+
+/// A real Argon2 hash of a random password, made once: checking a login for
+/// an unknown user against it costs the same as checking a real one. When
+/// it can't be made yet (pley busy, or out of memory), the sign-in is told
+/// so, as a known user's would be, and the next one tries again: an empty
+/// hash kept instead would answer unknown users at once, and their timing
+/// would tell which usernames exist.
+pub async fn dummy_password_hash() -> Result<String, AppError> {
+    static HASH: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
+    kept(&HASH, async {
+        let mut secret = [0u8; 16];
+        getrandom::fill(&mut secret).expect("the system's random numbers");
+        hash_password(hex::encode(secret)).await
+    })
+    .await
+}
+
+/// What `cell` holds, made by `make` the first time it works.
+async fn kept(
+    cell: &tokio::sync::OnceCell<String>,
+    make: impl std::future::Future<Output = Result<String, AppError>>,
+) -> Result<String, AppError> {
+    cell.get_or_try_init(|| make).await.cloned()
+}
+
+/// Whether `password` matches `hash` (never for the markers of accounts
+/// without a password); an error when pley is too busy to check, or hasn't
+/// the memory to ([`matched`]).
+pub async fn verify_password(password: String, hash: String) -> Result<bool, AppError> {
+    hashing(move || match PasswordHash::new(&hash) {
+        Ok(parsed) => matched(Argon2::default().verify_password(password.as_bytes(), &parsed)),
+        Err(_) => Ok(false),
     })
     .await?
 }
 
-/// A real Argon2 hash of a random password, made once: checking a login for
-/// an unknown user against it costs the same as checking a real one.
-pub async fn dummy_password_hash() -> String {
-    static HASH: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
-    HASH.get_or_init(|| async {
-        let mut secret = [0u8; 16];
-        getrandom::fill(&mut secret).expect("the system's random numbers");
-        hash_password(hex::encode(secret)).await.unwrap_or_default()
-    })
-    .await
-    .clone()
-}
-
-/// Whether `password` matches `hash` (never for the markers of accounts
-/// without a password); an error when pley is too busy to check.
-pub async fn verify_password(password: String, hash: String) -> Result<bool, AppError> {
-    hashing(move || {
-        PasswordHash::new(&hash)
-            .is_ok_and(|parsed| Argon2::default().verify_password(password.as_bytes(), &parsed).is_ok())
-    })
-    .await
+/// What an Argon2 check says of the password. Without the memory it works
+/// in (the system is out of it), it said nothing: that is pley being busy,
+/// never a wrong password, which would count towards locking the account
+/// or its PIN.
+fn matched(check: argon2::password_hash::Result<()>) -> Result<bool, AppError> {
+    match check {
+        Ok(()) => Ok(true),
+        Err(argon2::password_hash::Error::OutOfMemory) => {
+            tracing::warn!("out of memory checking a password or PIN: answered that Pley is busy");
+            Err(busy_hashing())
+        }
+        Err(_) => Ok(false),
+    }
 }
 
 pub fn new_token() -> String {
@@ -374,11 +463,20 @@ struct CachedApp {
     cached_at: Instant,
 }
 
+struct CachedCompatibility {
+    user: AuthUser,
+    origins: compatibility::Origins,
+    expires_at: i64,
+    cached_at: Instant,
+}
+
 pub struct AuthService {
     db: Db,
     cache: DashMap<String, CachedSession>,
     /// App access tokens, like `cache` but never extended.
     apps: DashMap<String, CachedApp>,
+    /// Compatibility tokens, like `cache`.
+    compatibility: DashMap<String, CachedCompatibility>,
     /// Bumped by every forget before it forgets: a validation that read the
     /// database before a forget doesn't cache what it read.
     epoch: AtomicU64,
@@ -398,7 +496,8 @@ pub struct AuthService {
 #[cfg(test)]
 #[derive(Default)]
 struct Pauses {
-    /// Held after [`AuthService::validate_app`]'s or
+    /// Held after [`AuthService::validate_app`]'s,
+    /// [`AuthService::validate_compatibility`]'s or
     /// [`AuthService::validate`]'s query, before it caches what it read.
     after_query: parking_lot::Mutex<Option<Arc<Gate>>>,
     /// Run by [`AuthService::remember_app`] between its first look at the
@@ -424,6 +523,7 @@ impl AuthService {
             db,
             cache: DashMap::new(),
             apps: DashMap::new(),
+            compatibility: DashMap::new(),
             epoch: AtomicU64::new(0),
             two_step_required: AtomicBool::new(false),
             throttle: Default::default(),
@@ -442,15 +542,16 @@ impl AuthService {
     }
 
     /// Requires two-step sign-in of every account with a password, or not.
-    /// While it is required, the sessions and app tokens of an account
-    /// without it don't work, nor of an app allowed by one, and their
-    /// refresh tokens get nothing: whatever was signed in with a password
-    /// alone. Cached ones are read again.
+    /// While it is required, the sessions, app tokens and compatibility
+    /// tokens of an account without it don't work, nor of an app allowed by
+    /// one, and their refresh tokens get nothing: whatever was signed in
+    /// with a password alone. Cached ones are read again.
     pub fn require_two_step(&self, on: bool) {
         self.two_step_required.store(on, Ordering::SeqCst);
         self.epoch.fetch_add(1, Ordering::SeqCst);
         self.cache.clear();
         self.apps.clear();
+        self.compatibility.clear();
     }
 
     /// Whether `user_id` is kept out because the server requires two-step
@@ -561,6 +662,7 @@ impl AuthService {
             all_libraries,
             max_age: if is_admin { None } else { max_age },
             app: None,
+            compatibility: None,
         };
         let mut touched_at = last_seen_at;
         if now - last_seen_at > TOUCH_INTERVAL_SECS {
@@ -605,13 +707,14 @@ impl AuthService {
     }
 
     /// Drop cached sessions of a user (password change, deletion, role
-    /// change), and the cached tokens of apps acting as them or allowed by
-    /// them.
+    /// change), the cached tokens of apps acting as them or allowed by
+    /// them, and their cached compatibility tokens.
     pub fn forget_user(&self, user_id: i64) {
         self.epoch.fetch_add(1, Ordering::SeqCst);
         self.cache.retain(|_, s| s.user.id != user_id);
         self.apps
             .retain(|_, a| a.user.id != user_id && a.user.app.as_ref().is_none_or(|app| app.approved_by != user_id));
+        self.compatibility.retain(|_, c| c.user.id != user_id);
     }
 
     /// Drop the cached tokens of these grants (ended, or changed).
@@ -631,9 +734,13 @@ impl AuthService {
         if let Err(err) = grants::purge(&self.db).await {
             tracing::warn!("could not forget apps' expired tokens: {err}");
         }
+        if let Err(err) = compatibility::purge(&self.db).await {
+            tracing::warn!("could not forget expired tokens for other apps: {err}");
+        }
         let now = now();
         self.cache.retain(|_, s| s.expires_at > now && s.touched_at > 0);
         self.apps.retain(|_, a| a.expires_at > now);
+        self.compatibility.retain(|_, c| c.expires_at > now);
         self.throttle.purge();
     }
 
@@ -681,6 +788,7 @@ impl AuthService {
                 scopes: Scopes::from_stored(&row.scope),
                 approved_by: row.approved_by,
             })),
+            compatibility: None,
         };
         self.remember_app(key, CachedApp { user: user.clone(), expires_at, cached_at: Instant::now() }, epoch);
         Some(user)
@@ -734,6 +842,193 @@ impl AuthService {
         if self.epoch.load(Ordering::SeqCst) != epoch {
             self.apps.remove(&key);
         }
+    }
+
+    /// The user of a compatibility token, never as an administrator: what
+    /// its scopes allow beyond `play` (seeing everyone's activity, managing
+    /// libraries) goes by [`AuthUser::compatibility_allows`], where each
+    /// applies, and none of it administers accounts. Every library and no
+    /// age limit for an
+    /// administrator's role, the account's limits otherwise. Not for an
+    /// expired token, a disabled account, or one with a password alone while
+    /// the server requires two-step sign-in; not from where its origins
+    /// don't allow (`used`'s address, none when it isn't known). A token in
+    /// use lasts 90 days from then, written at most every few minutes with
+    /// where it was `used` from.
+    pub async fn validate_compatibility(&self, token: &str, used: Option<&UsedFrom>) -> Option<AuthUser> {
+        if !token.starts_with(compatibility::PREFIX) {
+            return None;
+        }
+        let from = used.and_then(UsedFrom::address);
+        let key = hash_token(token);
+        let now = now();
+        if let Some(entry) = self.compatibility.get(&key)
+            && entry.cached_at.elapsed() < CACHE_TTL
+            && entry.expires_at > now
+        {
+            return entry.origins.allow(from).then(|| entry.user.clone());
+        }
+        // Read before the database: a revocation or a forget that lands
+        // while the query runs keeps what it read out of the cache.
+        let epoch = self.epoch.load(Ordering::SeqCst);
+        let row = self.compatibility_row(&key).await.ok()?;
+        let Some(row) = row else {
+            self.compatibility.remove(&key);
+            return None;
+        };
+        let Some((user, origins)) = self.compatibility_user_of(&row) else {
+            self.compatibility.remove(&key);
+            return None;
+        };
+        let entry = CachedCompatibility {
+            user: user.clone(),
+            origins: origins.clone(),
+            expires_at: row.expires_at,
+            cached_at: Instant::now(),
+        };
+        if !origins.allow(from) {
+            // Neither used nor extended from there.
+            self.remember_compatibility(key, entry, epoch);
+            return None;
+        }
+        if row.last_used_at.is_none_or(|at| now - at > TOUCH_INTERVAL_SECS) {
+            // Sliding expiration, written at most every few minutes.
+            let used = used.cloned().unwrap_or_default();
+            let _ = sqlx::query(
+                "UPDATE compatibility_tokens SET last_used_at = ?, expires_at = ?, last_ip = COALESCE(?, last_ip),
+                        user_agent = COALESCE(?, user_agent)
+                 WHERE id = ?",
+            )
+            .bind(now)
+            .bind(now + compatibility::IDLE_SECS)
+            .bind(used.ip)
+            .bind(used.user_agent.map(|ua| ua.chars().take(200).collect::<String>()))
+            .bind(row.id)
+            .execute(&self.db.write)
+            .await;
+        }
+        self.remember_compatibility(key, entry, epoch);
+        Some(user)
+    }
+
+    /// The user of the compatibility token `token_id`, while it is valid, as
+    /// [`AuthService::validate_compatibility`] would take it from `from`:
+    /// for an address a client was given in its stead (a stream a player
+    /// opens without the token), which names the token rather than carrying
+    /// it. `from` is the request's [`SourceIp`]; a check of a connection
+    /// already open passes the address it was opened from.
+    pub async fn compatibility_user(&self, token_id: i64, from: Option<IpAddr>) -> Option<AuthUser> {
+        let row: CompatibilityRow = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT {} FROM compatibility_tokens t JOIN users u ON u.id = t.user_id WHERE t.id = ?",
+            compatibility_columns()
+        )))
+        .bind(token_id)
+        .fetch_optional(&self.db.read)
+        .await
+        .ok()??;
+        let (user, origins) = self.compatibility_user_of(&row)?;
+        origins.allow(from).then_some(user)
+    }
+
+    /// The user `row` stands for and where it may be used from, unless the
+    /// token has expired, the account is disabled, or it signs in with a
+    /// password alone while the server requires two-step sign-in.
+    fn compatibility_user_of(&self, row: &CompatibilityRow) -> Option<(AuthUser, compatibility::Origins)> {
+        if row.expires_at <= now() || row.disabled || (row.without_two_step && self.two_step_required()) {
+            return None;
+        }
+        let scopes = compatibility::Scopes::from_stored(&row.scope);
+        let user = AuthUser {
+            id: row.user_id,
+            username: row.username.clone(),
+            // Never an administrator: what a scope allows is checked by
+            // name where it applies ([`AuthUser::compatibility_allows`]).
+            is_admin: false,
+            account_admin: row.role_admin,
+            all_libraries: row.all_libraries || row.role_admin,
+            max_age: if row.role_admin { None } else { row.max_age },
+            app: None,
+            compatibility: Some(CompatibilityAccess { token_id: row.id, scopes }),
+        };
+        Some((user, compatibility::Origins::from_stored(row.allowed_from.as_deref())))
+    }
+
+    /// What the database says about the compatibility token whose SHA-256
+    /// is `key`.
+    async fn compatibility_row(&self, key: &str) -> sqlx::Result<Option<CompatibilityRow>> {
+        let row = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT {} FROM compatibility_tokens t JOIN users u ON u.id = t.user_id WHERE t.token_hash = ?",
+            compatibility_columns()
+        )))
+        .bind(key)
+        .fetch_optional(&self.db.read)
+        .await;
+        #[cfg(test)]
+        {
+            let gate = self.pauses.after_query.lock().take();
+            if let Some(gate) = gate {
+                gate.reached.notify_one();
+                gate.release.notified().await;
+            }
+        }
+        row
+    }
+
+    /// Caches a compatibility token read while the epoch was `epoch`, unless
+    /// something was forgotten or revoked since (as
+    /// [`AuthService::remember_app`]).
+    fn remember_compatibility(&self, key: String, entry: CachedCompatibility, epoch: u64) {
+        if self.epoch.load(Ordering::SeqCst) != epoch {
+            return;
+        }
+        self.compatibility.insert(key.clone(), entry);
+        if self.epoch.load(Ordering::SeqCst) != epoch {
+            self.compatibility.remove(&key);
+        }
+    }
+
+    /// Makes a compatibility token for `user_id` (see [`compatibility::create`]):
+    /// the token, shown once, and its row.
+    pub async fn create_compatibility_token(
+        &self,
+        user_id: i64,
+        asked: &compatibility::Asked,
+    ) -> Result<(String, compatibility::TokenRow), AppError> {
+        let (token, row, dropped) = compatibility::create(&self.db, user_id, asked).await?;
+        if !dropped.is_empty() {
+            self.forget_compatibility_tokens(&dropped);
+        }
+        Ok((token, row))
+    }
+
+    /// Revokes compatibility token `id` of `user_id`; whether there was one.
+    /// The row goes first, then the cache forgets it, as [`AuthService::revoke`].
+    pub async fn end_compatibility_token(&self, user_id: i64, id: i64) -> Result<bool, AppError> {
+        let ended = compatibility::delete(&self.db, user_id, id).await?;
+        self.forget_compatibility_tokens(&[id]);
+        Ok(ended)
+    }
+
+    /// Revokes the compatibility token `token`; whether there was one.
+    pub async fn end_compatibility_token_of(&self, token: &str) -> Result<bool, AppError> {
+        let ended = compatibility::delete_token(&self.db, token).await?;
+        if let Some(id) = ended {
+            self.forget_compatibility_tokens(&[id]);
+        }
+        Ok(ended.is_some())
+    }
+
+    /// Revokes every compatibility token of `user_id`.
+    pub async fn end_compatibility_tokens(&self, user_id: i64) -> Result<(), AppError> {
+        let ended = compatibility::delete_for(&self.db, user_id).await?;
+        self.forget_compatibility_tokens(&ended);
+        Ok(())
+    }
+
+    /// Drop the cached compatibility tokens with these ids (ended).
+    fn forget_compatibility_tokens(&self, ids: &[i64]) {
+        self.epoch.fetch_add(1, Ordering::SeqCst);
+        self.compatibility.retain(|_, c| c.user.compatibility.is_none_or(|token| !ids.contains(&token.token_id)));
     }
 
     /// The user of a session token or of an app's access token.
@@ -810,7 +1105,7 @@ impl AuthService {
 
     /// Signs `user_id` out everywhere: their sessions but the one whose hash
     /// is `keep_session_hash`, then every app acting as them or allowed by
-    /// them.
+    /// them, and every compatibility token of theirs.
     pub async fn sign_out_everywhere(&self, user_id: i64, keep_session_hash: Option<&str>) -> Result<(), AppError> {
         sqlx::query("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?")
             .bind(user_id)
@@ -818,6 +1113,7 @@ impl AuthService {
             .execute(&self.db.write)
             .await?;
         self.end_apps(user_id).await?;
+        self.end_compatibility_tokens(user_id).await?;
         self.forget_user(user_id);
         Ok(())
     }
@@ -853,6 +1149,33 @@ struct AppRow {
     approved_by: i64,
     grant_expires: i64,
     ends_at: Option<i64>,
+}
+
+/// The columns of a [`CompatibilityRow`], of `compatibility_tokens t JOIN users u`.
+fn compatibility_columns() -> String {
+    format!(
+        "t.id, t.scope, t.allowed_from, t.expires_at, t.last_used_at, u.id AS user_id, u.username,
+         u.is_admin AS role_admin, u.all_libraries, u.max_age, u.disabled, {} AS without_two_step",
+        without_two_step("u")
+    )
+}
+
+/// What [`AuthService::validate_compatibility`] reads about a token.
+#[derive(sqlx::FromRow)]
+struct CompatibilityRow {
+    id: i64,
+    scope: String,
+    allowed_from: Option<String>,
+    expires_at: i64,
+    last_used_at: Option<i64>,
+    user_id: i64,
+    username: String,
+    role_admin: bool,
+    all_libraries: bool,
+    max_age: Option<i64>,
+    disabled: bool,
+    /// The account signs in with a password alone ([`without_two_step`]).
+    without_two_step: bool,
 }
 
 /// Token from `Authorization: Bearer`, `X-Pley-Token`, the session cookie, or `?token=`.
@@ -935,8 +1258,25 @@ impl<S: Send + Sync> FromRequestParts<S> for SourceIp {
     type Rejection = std::convert::Infallible;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        let peer = parts.extensions.get::<axum::extract::ConnectInfo<SocketAddr>>().map(|info| info.0.ip());
-        Ok(SourceIp(peer.map(|peer| forwarded_for(peer, &parts.headers))))
+        Ok(SourceIp(source_ip_of(&parts.extensions, &parts.headers)))
+    }
+}
+
+/// [`SourceIp`]'s address, for a handler that took the whole request.
+pub fn source_ip_of(extensions: &axum::http::Extensions, headers: &axum::http::HeaderMap) -> Option<IpAddr> {
+    let peer = extensions.get::<axum::extract::ConnectInfo<SocketAddr>>().map(|info| info.0.ip())?;
+    Some(forwarded_for(peer, headers))
+}
+
+/// The other end of a request's connection: the client itself, or the
+/// proxy in front of it. Unknown only without a connection (tests).
+pub struct PeerIp(pub Option<IpAddr>);
+
+impl<S: Send + Sync> FromRequestParts<S> for PeerIp {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        Ok(PeerIp(parts.extensions.get::<axum::extract::ConnectInfo<SocketAddr>>().map(|info| info.0.ip())))
     }
 }
 
@@ -985,7 +1325,8 @@ struct Authenticated(AuthUser);
 /// Every pley API handler that needs a user goes through here: sessions as
 /// always, and app tokens only from `Authorization: Bearer`, and only on the
 /// routes their scopes open ([`scopes::APP_ROUTES`]: any other route is
-/// closed to apps).
+/// closed to apps). Compatibility tokens never: they are for the
+/// compatibility API.
 impl FromRequestParts<AppState> for AuthUser {
     type Rejection = AppError;
 
@@ -1010,12 +1351,20 @@ async fn authenticate(parts: &Parts, state: &AppState) -> Result<AuthUser, AppEr
         if token.starts_with(ACCESS_PREFIX) {
             return state.auth.validate_app(&token).await.ok_or(AppError::InvalidToken);
         }
+        if token.starts_with(compatibility::PREFIX) {
+            return Err(AppError::CompatibilityToken);
+        }
         if token.starts_with(APP_TOKEN_PREFIX) {
             // A refresh token is no bearer token.
             return Err(AppError::InvalidToken);
         }
     }
     let token = token_from_parts(parts).ok_or(AppError::Unauthorized)?;
+    if token.starts_with(compatibility::PREFIX) {
+        // Other apps' tokens open the compatibility API only, wherever
+        // they are sent here: refused, with no other token tried.
+        return Err(AppError::CompatibilityToken);
+    }
     if token.starts_with(APP_TOKEN_PREFIX) {
         // In X-Pley-Token, a cookie or the URL (where logs and Referer
         // headers keep it): refused, with no other token tried.
@@ -1025,13 +1374,14 @@ async fn authenticate(parts: &Parts, state: &AppState) -> Result<AuthUser, AppEr
     // make too (a page on another port of this host is the same site to
     // the browser), and SameSite=Lax lets their POSTs through when there is
     // no body to ask about first, and their links: what changes anything
-    // with it comes from pley's own page, and no other site's page has it
-    // fetch anything (an administrator's folder browser opening a share of
-    // the attacker's, say). Typed addresses and bookmarks are no site's. The
-    // cookie is what signs the request in, `?token=` or not; a header is no
-    // cookie.
-    let by_cookie = header_token(parts).is_none() && cookie_token(parts).is_some();
-    if by_cookie {
+    // with it comes from pley's own page. Browsers say which page asked
+    // (`Sec-Fetch-Site`) only over HTTPS and to localhost: over plain HTTP
+    // another site's link or picture is a GET like pley's own pages', so
+    // what could have the server reach out where it's told (the folder
+    // browser opening a share of the attacker's, say) is a POST, whose
+    // `Origin` says. Typed addresses and bookmarks are no site's. The cookie
+    // is what signs the request in, `?token=` or not; a header is no cookie.
+    if signed_in_by_cookie(parts) {
         let elsewhere = match parts.method {
             Method::GET | Method::HEAD | Method::OPTIONS => from_another_sites_page(parts),
             _ => from_another_site(parts),
@@ -1043,15 +1393,24 @@ async fn authenticate(parts: &Parts, state: &AppState) -> Result<AuthUser, AppEr
     state.auth.validate(&token).await.ok_or(AppError::Unauthorized)
 }
 
+/// Whether the browser's cookie signs this request in (no token in a
+/// header, which wins): one that, over plain HTTP, may be another site's
+/// link or picture ([`from_another_sites_page`] can't tell).
+pub(crate) fn signed_in_by_cookie(parts: &Parts) -> bool {
+    header_token(parts).is_none() && cookie_token(parts).is_some()
+}
+
 /// Whether the browser says another site's page asked for this (a link, an
-/// image, a fetch), not the user's own address bar or bookmarks.
+/// image, a fetch), not the user's own address bar or bookmarks. Over plain
+/// HTTP to an address other than localhost, browsers say nothing either way.
 fn from_another_sites_page(parts: &Parts) -> bool {
     parts.headers.get("sec-fetch-site").is_some_and(|site| matches!(site.as_bytes(), b"cross-site" | b"same-site"))
 }
 
 /// Whether a browser says another site's page made this request: by
-/// `Sec-Fetch-Site`, or, without it (older browsers), by an `Origin` other
-/// than the server it went to. A request saying neither isn't a page's.
+/// `Sec-Fetch-Site`, or, without it (older browsers, and plain HTTP to an
+/// address other than localhost), by an `Origin` other than the server it
+/// went to. A request saying neither isn't a page's.
 fn from_another_site(parts: &Parts) -> bool {
     if let Some(site) = parts.headers.get("sec-fetch-site") {
         return site.as_bytes() != b"same-origin";
@@ -1085,6 +1444,8 @@ fn app_may_use(parts: &Parts, app: &AppAccess) -> Result<(), AppError> {
         Some(Need::AnyApp) => Ok(()),
         Some(Need::Scope(scope)) if app.scopes.contains(scope) => Ok(()),
         Some(Need::Scope(scope)) => Err(AppError::InsufficientScope(Some(scope.name()))),
+        Some(Need::Either(one, other)) if app.scopes.contains(one) || app.scopes.contains(other) => Ok(()),
+        Some(Need::Either(one, _)) => Err(AppError::InsufficientScope(Some(one.name()))),
     }
 }
 
@@ -1128,6 +1489,27 @@ mod tests {
         let checks = (0..24).map(|_| verify_password("hunter22".into(), hash.clone()));
         let results = futures::future::join_all(checks).await;
         assert!(results.into_iter().all(|r| r.unwrap()));
+    }
+
+    #[test]
+    fn a_check_without_the_memory_for_it_is_no_wrong_password() {
+        use argon2::password_hash::Error;
+        assert!(matches!(matched(Ok(())), Ok(true)));
+        assert!(matches!(matched(Err(Error::PasswordInvalid)), Ok(false)));
+        assert!(matches!(matched(Err(Error::OutOfMemory)), Err(AppError::Unavailable(_))));
+        // Making a hash too: busy, not an error of pley's.
+        assert!(matches!(hashed(Err(Error::OutOfMemory)), Err(AppError::Unavailable(_))));
+        assert!(matches!(hashed(Err(Error::Algorithm)), Err(AppError::Internal(_))));
+    }
+
+    #[tokio::test]
+    async fn a_dummy_hash_that_couldnt_be_made_is_made_next_time() {
+        let cell = tokio::sync::OnceCell::new();
+        assert!(matches!(kept(&cell, async { Err(busy_hashing()) }).await, Err(AppError::Unavailable(_))));
+        assert!(cell.get().is_none(), "nothing kept, an empty hash least of all");
+        assert_eq!(kept(&cell, async { Ok("$argon2id$made".to_owned()) }).await.unwrap(), "$argon2id$made");
+        assert_eq!(kept(&cell, async { Err(busy_hashing()) }).await.unwrap(), "$argon2id$made", "kept once made");
+        assert!(dummy_password_hash().await.unwrap().starts_with("$argon2id$"));
     }
 
     #[test]
@@ -1292,7 +1674,7 @@ mod tests {
 
     #[tokio::test]
     async fn sessions_carry_the_users_restrictions() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let (_db, auth) = service_with_user(dir.path()).await;
         let token = auth.create_session(1, Some("agent"), Some("10.0.0.2")).await.unwrap();
         let user = auth.validate(&token).await.unwrap();
@@ -1305,19 +1687,21 @@ mod tests {
                 account_admin: false,
                 all_libraries: false,
                 max_age: Some(12),
-                app: None
+                app: None,
+                compatibility: None
             }
         );
         let admin = auth.create_session(2, None, None).await.unwrap();
         let admin = auth.validate(&admin).await.unwrap();
         assert_eq!(admin.max_age, None, "administrators have no age limit");
         assert!(admin.is_admin && admin.account_admin && admin.manages_requests() && admin.first_party());
+        assert!(admin.oversees_playback() && !user.oversees_playback());
         assert!(auth.validate("not-a-token").await.is_none());
     }
 
     #[tokio::test]
     async fn expired_and_disabled_sessions_stop_working() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let (db, auth) = service_with_user(dir.path()).await;
         let expired = auth.create_session(1, None, None).await.unwrap();
         sqlx::query("UPDATE sessions SET expires_at = ? WHERE token_hash = ?")
@@ -1350,7 +1734,7 @@ mod tests {
 
     #[tokio::test]
     async fn sessions_in_use_are_extended() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let (db, auth) = service_with_user(dir.path()).await;
         let token = auth.create_session(1, None, None).await.unwrap();
         let stale = now() - TOUCH_INTERVAL_SECS - 60;
@@ -1392,11 +1776,12 @@ mod tests {
 
     #[tokio::test]
     async fn app_tokens_act_without_administrator_rights() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let (_db, auth) = service_with_user(dir.path()).await;
         let admin = app_of(&auth, 2, 2).await;
         let user = auth.validate_app(&admin.access_token).await.unwrap();
         assert!(!user.is_admin, "never an administrator through an app");
+        assert!(!user.oversees_playback(), "nor sees everyone's playback without activity");
         assert!(user.all_libraries, "an administrator's role sees every library");
         assert_eq!(user.max_age, None, "and has no age limit");
         let app = user.app.as_deref().unwrap();
@@ -1414,7 +1799,7 @@ mod tests {
 
     #[tokio::test]
     async fn disabled_users_and_approvers_stop_their_apps() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let (db, auth) = service_with_user(dir.path()).await;
         // The kid's profile, allowed by the administrator.
         let issued = app_of(&auth, 1, 2).await;
@@ -1437,7 +1822,7 @@ mod tests {
 
     #[tokio::test]
     async fn forgetting_reaches_cached_app_tokens() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let (db, auth) = service_with_user(dir.path()).await;
         let disable = |id: i64, off: bool| {
             let db = db.clone();
@@ -1495,7 +1880,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_forget_during_an_app_tokens_lookup_keeps_it_out_of_the_cache() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let (db, auth) = service_with_user(dir.path()).await;
         let issued = app_of(&auth, 1, 1).await;
         let gate = Arc::new(Gate::default());
@@ -1515,7 +1900,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_sign_out_during_a_sessions_lookup_keeps_it_out_of_the_cache() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let (_db, auth) = service_with_user(dir.path()).await;
         let session = auth.create_session(1, None, None).await.unwrap();
         let gate = Arc::new(Gate::default());
@@ -1547,7 +1932,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_forget_between_the_check_and_the_insert_still_wins() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let (_db, auth) = service_with_user(dir.path()).await;
         let issued = app_of(&auth, 1, 1).await;
         let grant_id = issued.grant_id;
@@ -1558,7 +1943,7 @@ mod tests {
 
     #[tokio::test]
     async fn session_validation_never_accepts_app_tokens() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let (db, auth) = service_with_user(dir.path()).await;
         let issued = app_of(&auth, 1, 1).await;
         // Even a session stored under the same hash.
@@ -1586,12 +1971,221 @@ mod tests {
 
     #[tokio::test]
     async fn a_new_session_never_gets_a_token_that_looks_like_an_apps() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let (_db, auth) = service_with_user(dir.path()).await;
         let mut draws = ["pley_at_x", "pley_rt_y", "pleyfine"].into_iter().map(str::to_owned);
         let token = auth.create_session_drawing(|| draws.next().unwrap(), 1, None, None).await.unwrap();
         assert_eq!(token, "pleyfine");
         assert!(auth.validate(&token).await.is_some());
+    }
+
+    /// A compatibility token of `user_id` that may play, from anywhere.
+    async fn compatibility_token(auth: &AuthService, user_id: i64) -> String {
+        limited_token(auth, user_id, "play", &[]).await
+    }
+
+    /// A compatibility token of `user_id` with `scope`, used from `origins`.
+    async fn limited_token(auth: &AuthService, user_id: i64, scope: &str, origins: &[&str]) -> String {
+        let origins: Vec<String> = origins.iter().map(|o| (*o).to_owned()).collect();
+        let asked = compatibility::asked("A tool", Some(scope), &origins).unwrap();
+        auth.create_compatibility_token(user_id, &asked).await.unwrap().0
+    }
+
+    #[tokio::test]
+    async fn compatibility_tokens_are_never_administrators_and_check_each_scope() {
+        use compatibility::Scope::{Activity, Manage, Play};
+        let dir = crate::testing::tempdir();
+        let (_db, auth) = service_with_user(dir.path()).await;
+
+        let play = auth.validate_compatibility(&compatibility_token(&auth, 2).await, None).await.unwrap();
+        assert_eq!((play.id, play.is_admin, play.account_admin), (2, false, true));
+        assert!(play.all_libraries && play.max_age.is_none(), "an administrator's role sees everything");
+        assert!(play.app.is_none());
+        assert!(play.compatibility_allows(Play));
+        assert!(!play.compatibility_allows(Activity) && !play.compatibility_allows(Manage));
+
+        // Each scope is checked by name; none makes the token an administrator.
+        let activity = auth.validate_compatibility(&limited_token(&auth, 2, "activity", &[]).await, None).await;
+        let activity = activity.unwrap();
+        assert!(!activity.is_admin && activity.compatibility_allows(Activity));
+        assert!(!activity.compatibility_allows(Manage), "seeing isn't changing");
+        let manage = auth.validate_compatibility(&limited_token(&auth, 2, "manage", &[]).await, None).await.unwrap();
+        assert!(!manage.is_admin && manage.compatibility_allows(Manage));
+        assert!(!manage.compatibility_allows(Activity), "changing isn't seeing everyone's");
+
+        // Someone else's limits stay theirs, and rights stored with a token
+        // are checked against the role at use.
+        let kid = auth.validate_compatibility(&compatibility_token(&auth, 1).await, None).await.unwrap();
+        assert_eq!((kid.id, kid.is_admin, kid.all_libraries, kid.max_age), (1, false, false, Some(12)));
+        let stored = limited_token(&auth, 1, "activity manage", &[]).await;
+        let kid = auth.validate_compatibility(&stored, None).await.unwrap();
+        assert!(!kid.is_admin && !kid.compatibility_allows(Activity) && !kid.compatibility_allows(Manage));
+
+        assert!(auth.validate_compatibility("pley_ct_unknown", None).await.is_none());
+        let session = auth.create_session(2, None, None).await.unwrap();
+        assert!(auth.validate_compatibility(&session, None).await.is_none(), "never a session");
+        let app = app_of(&auth, 2, 2).await;
+        assert!(auth.validate_compatibility(&app.access_token, None).await.is_none(), "nor an app's token");
+        let token = compatibility_token(&auth, 2).await;
+        assert!(auth.validate(&token).await.is_none(), "and the other way round");
+        assert!(auth.validate_app(&token).await.is_none());
+        assert!(auth.validate_any(&token).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn compatibility_tokens_work_only_from_their_origins() {
+        let dir = crate::testing::tempdir();
+        let (db, auth) = service_with_user(dir.path()).await;
+        let from = |ip: &str| UsedFrom { ip: Some(ip.into()), user_agent: None };
+        let token = limited_token(&auth, 1, "play", &["10.0.0.0/24"]).await;
+        let id: i64 = sqlx::query_scalar("SELECT id FROM compatibility_tokens").fetch_one(&db.read).await.unwrap();
+
+        // Read from the database, then from the cache: the same answers.
+        for _ in 0..2 {
+            assert!(auth.validate_compatibility(&token, Some(&from("10.0.0.9"))).await.is_some());
+            assert!(auth.validate_compatibility(&token, Some(&from("192.168.1.4"))).await.is_none());
+            assert!(auth.validate_compatibility(&token, Some(&UsedFrom::default())).await.is_none(), "unknown");
+            assert!(auth.validate_compatibility(&token, None).await.is_none());
+        }
+        auth.forget_user(1);
+        assert!(auth.validate_compatibility(&token, Some(&from("192.168.1.4"))).await.is_none(), "refused first");
+        assert!(auth.validate_compatibility(&token, Some(&from("10.0.0.200"))).await.is_some());
+        // A refused use isn't where it was last used from.
+        let last: Option<String> =
+            sqlx::query_scalar("SELECT last_ip FROM compatibility_tokens").fetch_one(&db.read).await.unwrap();
+        assert_eq!(last.as_deref(), Some("10.0.0.9"));
+
+        // Addresses given out in its stead: the same origins.
+        assert!(auth.compatibility_user(id, "10.0.0.1".parse().ok()).await.is_some());
+        assert!(auth.compatibility_user(id, "10.0.1.1".parse().ok()).await.is_none());
+        assert!(auth.compatibility_user(id, None).await.is_none());
+
+        let local = limited_token(&auth, 1, "play", &["local"]).await;
+        assert!(auth.validate_compatibility(&local, Some(&from("127.0.0.1"))).await.is_some());
+        assert!(auth.validate_compatibility(&local, Some(&from("192.168.50.2"))).await.is_some());
+        assert!(auth.validate_compatibility(&local, Some(&from("203.0.113.5"))).await.is_none());
+        // Without origins: anywhere, an unknown address too.
+        assert!(auth.validate_compatibility(&compatibility_token(&auth, 1).await, None).await.is_some());
+    }
+
+    #[tokio::test]
+    async fn compatibility_tokens_end_and_stop_working() {
+        let dir = crate::testing::tempdir();
+        let (db, auth) = service_with_user(dir.path()).await;
+        let token = compatibility_token(&auth, 1).await;
+        let other = compatibility_token(&auth, 2).await;
+        assert!(auth.validate_compatibility(&token, None).await.is_some());
+
+        // A disabled account's: served from the cache until it is forgotten,
+        // as sessions are, and working again once it is enabled.
+        sqlx::query("UPDATE users SET disabled = 1 WHERE id = 1").execute(&db.write).await.unwrap();
+        assert!(auth.validate_compatibility(&token, None).await.is_some(), "served from the cache");
+        auth.forget_user(1);
+        assert!(auth.validate_compatibility(&token, None).await.is_none());
+        sqlx::query("UPDATE users SET disabled = 0 WHERE id = 1").execute(&db.write).await.unwrap();
+        assert!(auth.validate_compatibility(&token, None).await.is_some());
+
+        // Revoked, cached or not; others stay.
+        let id: i64 = sqlx::query_scalar("SELECT id FROM compatibility_tokens WHERE token_hash = ?")
+            .bind(hash_token(&token))
+            .fetch_one(&db.read)
+            .await
+            .unwrap();
+        assert!(!auth.end_compatibility_token(2, id).await.unwrap(), "only by its own account");
+        assert!(auth.validate_compatibility(&token, None).await.is_some());
+        assert!(auth.end_compatibility_token(1, id).await.unwrap());
+        assert!(auth.validate_compatibility(&token, None).await.is_none());
+        assert!(auth.validate_compatibility(&other, None).await.is_some());
+
+        // Signed out everywhere, by its value, and expired.
+        let token = compatibility_token(&auth, 1).await;
+        assert!(auth.validate_compatibility(&token, None).await.is_some());
+        auth.sign_out_everywhere(1, None).await.unwrap();
+        assert!(auth.validate_compatibility(&token, None).await.is_none());
+        assert!(auth.end_compatibility_token_of(&other).await.unwrap());
+        assert!(auth.validate_compatibility(&other, None).await.is_none());
+        assert!(!auth.end_compatibility_token_of(&other).await.unwrap());
+        let token = compatibility_token(&auth, 1).await;
+        sqlx::query("UPDATE compatibility_tokens SET expires_at = ?").bind(now() - 1).execute(&db.write).await.unwrap();
+        auth.forget_user(1);
+        assert!(auth.validate_compatibility(&token, None).await.is_none(), "90 days unused");
+        auth.purge_expired().await;
+        let left: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM compatibility_tokens").fetch_one(&db.read).await.unwrap();
+        assert_eq!(left, 0);
+
+        // Required two-step sign-in, of an account with a password alone.
+        let token = compatibility_token(&auth, 1).await;
+        assert!(auth.validate_compatibility(&token, None).await.is_some());
+        auth.require_two_step(true);
+        assert!(auth.validate_compatibility(&token, None).await.is_none());
+        auth.require_two_step(false);
+        assert!(auth.validate_compatibility(&token, None).await.is_some());
+    }
+
+    #[tokio::test]
+    async fn compatibility_tokens_in_use_are_extended_and_say_where_from() {
+        let dir = crate::testing::tempdir();
+        let (db, auth) = service_with_user(dir.path()).await;
+        let token = compatibility_token(&auth, 1).await;
+        let row = || {
+            let db = db.clone();
+            let key = hash_token(&token);
+            async move {
+                sqlx::query_as::<_, (Option<i64>, i64, Option<String>, Option<String>)>(
+                    "SELECT last_used_at, expires_at, last_ip, user_agent FROM compatibility_tokens WHERE token_hash = ?",
+                )
+                .bind(key)
+                .fetch_one(&db.read)
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(row().await.0, None, "not used yet");
+        let used = UsedFrom { ip: Some("10.0.0.7".into()), user_agent: Some("Infuse/8.1".into()) };
+        assert!(auth.validate_compatibility(&token, Some(&used)).await.is_some());
+        let (last_used, expires, ip, agent) = row().await;
+        assert!(last_used.is_some_and(|at| at >= now() - 5));
+        assert!(expires >= now() + compatibility::IDLE_SECS - 5);
+        assert_eq!((ip.as_deref(), agent.as_deref()), (Some("10.0.0.7"), Some("Infuse/8.1")));
+
+        // Written again only every few minutes; a check without a request
+        // (the notification socket's) keeps where it was last used from.
+        let stale = now() - TOUCH_INTERVAL_SECS - 60;
+        sqlx::query("UPDATE compatibility_tokens SET last_used_at = ?, expires_at = ?")
+            .bind(stale)
+            .bind(now() + 60)
+            .execute(&db.write)
+            .await
+            .unwrap();
+        auth.compatibility.clear();
+        assert!(auth.validate_compatibility(&token, None).await.is_some());
+        let (last_used, expires, ip, _) = row().await;
+        assert!(last_used.is_some_and(|at| at > stale) && expires >= now() + compatibility::IDLE_SECS - 5);
+        assert_eq!(ip.as_deref(), Some("10.0.0.7"));
+        sqlx::query("UPDATE compatibility_tokens SET last_used_at = ?").bind(now()).execute(&db.write).await.unwrap();
+        auth.compatibility.clear();
+        let other = UsedFrom { ip: Some("10.0.0.8".into()), user_agent: None };
+        assert!(auth.validate_compatibility(&token, Some(&other)).await.is_some());
+        assert_eq!(row().await.2.as_deref(), Some("10.0.0.7"), "not written within a few minutes");
+    }
+
+    #[tokio::test]
+    async fn a_revocation_during_a_compatibility_tokens_lookup_keeps_it_out_of_the_cache() {
+        let dir = crate::testing::tempdir();
+        let (_db, auth) = service_with_user(dir.path()).await;
+        let token = compatibility_token(&auth, 1).await;
+        let gate = Arc::new(Gate::default());
+        *auth.pauses.after_query.lock() = Some(gate.clone());
+        let revoking = async {
+            gate.reached.notified().await;
+            assert!(auth.end_compatibility_token_of(&token).await.unwrap());
+            gate.release.notify_one();
+        };
+        let (read, ()) = tokio::join!(auth.validate_compatibility(&token, None), revoking);
+        assert!(read.is_some(), "it read the token before it was revoked");
+        assert!(!auth.compatibility.contains_key(&hash_token(&token)), "nothing stale is cached");
+        assert!(auth.validate_compatibility(&token, None).await.is_none());
     }
 
     #[test]

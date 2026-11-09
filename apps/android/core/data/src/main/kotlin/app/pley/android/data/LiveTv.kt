@@ -1,6 +1,7 @@
 package app.pley.android.data
 
 import app.pley.android.common.NotBuiltYet
+import app.pley.android.model.Control
 import app.pley.android.model.LiveCategory
 import app.pley.android.model.LiveChannel
 import app.pley.android.model.LiveChannelPage
@@ -10,10 +11,13 @@ import app.pley.android.model.LivePlan
 import app.pley.android.model.LiveSummary
 import app.pley.android.model.LiveWatching
 import app.pley.android.model.WatchRequest
-import java.net.URLEncoder
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 
 /**
@@ -56,9 +60,10 @@ interface LiveTvRepository {
      * server's refusal (`409`: every connection of its source in use,
      * [app.pley.android.network.ApiException.connections] saying what holds
      * each). [takeOver]: the channel whose connection to take, one the
-     * `409` said may be.
+     * `409` said may be. [controls]: what the player obeys from the
+     * remote (channel up and down).
      */
-    suspend fun watch(channelId: Long, clientId: String, takeOver: Long? = null): LiveWatching
+    suspend fun watch(channelId: Long, clientId: String, takeOver: Long? = null, controls: List<Control> = emptyList()): LiveWatching
 
     /** What [sessionId]'s channel is made into, waiting a few seconds for it; `null` when not known by then. */
     suspend fun plan(sessionId: String): LivePlan?
@@ -66,12 +71,24 @@ interface LiveTvRepository {
     /**
      * The address of [channelId]'s MPEG-TS as the provider sends it
      * (`stream.ts`), absolute, for [clientId]: reading it ends that
-     * device's HLS viewer, as watching another channel does.
+     * device's HLS viewer, as watching another channel does. It says what
+     * kind of device reads it, as watching does.
      */
     suspend fun streamUrl(channelId: Long, clientId: String): String
 
     /** Stops watching [sessionId], in the background: it outlives the screen that asks. */
     fun leave(sessionId: String)
+
+    /** Waits until the leaves asked for so far went out (or failed). */
+    suspend fun left() {}
+
+    /**
+     * Drops the leaves that haven't gone out yet, and those of the sessions
+     * watched so far, should a window ask later: a switch of profile would
+     * send them as the next profile. The server ends those sessions by
+     * itself.
+     */
+    fun drop() {}
 
     companion object {
         /** Channels asked for at once, as the web asks. */
@@ -103,7 +120,8 @@ interface LiveTvRepository {
 
             override suspend fun setFavorite(channelId: Long, favorite: Boolean) = throw NotBuiltYet("Live TV")
 
-            override suspend fun watch(channelId: Long, clientId: String, takeOver: Long?): LiveWatching = throw NotBuiltYet("Live TV")
+            override suspend fun watch(channelId: Long, clientId: String, takeOver: Long?, controls: List<Control>): LiveWatching =
+                throw NotBuiltYet("Live TV")
 
             override suspend fun plan(sessionId: String): LivePlan? = null
 
@@ -182,9 +200,14 @@ internal class CachedLiveTv(private val cache: ResourceCache) : LiveTvRepository
         cache.revalidate { key, _ -> key == SnapshotKeys.LIVE_GROUPS || key.startsWith("live:page:favorites:") || key.startsWith("live:around:favorites:") }
     }
 
-    override suspend fun watch(channelId: Long, clientId: String, takeOver: Long?): LiveWatching {
+    override suspend fun watch(channelId: Long, clientId: String, takeOver: Long?, controls: List<Control>): LiveWatching {
         val api = cache.api(cache.profile())
-        val watching = api.watchChannel(channelId, WatchRequest(clientId, takeOver))
+        val since = synchronized(sessions) { drops }
+        val watching = api.watchChannel(channelId, WatchRequest(clientId, takeOver, controls.takeIf { it.isNotEmpty() }))
+        synchronized(sessions) {
+            // Asked for before a drop, it is the profile's that was left: its leave goes nowhere either.
+            if (since == drops) watched += watching.sessionId else dropped += watching.sessionId
+        }
         // Recently watched has it first now: asked again when next shown.
         cache.markStale { key, _ ->
             key == SnapshotKeys.LIVE || key == SnapshotKeys.LIVE_GROUPS || key.startsWith("live:page:recent:") || key.startsWith("live:around:recent:")
@@ -195,10 +218,28 @@ internal class CachedLiveTv(private val cache: ResourceCache) : LiveTvRepository
     override suspend fun plan(sessionId: String): LivePlan? = cache.api(cache.profile()).livePlan(sessionId)
 
     override suspend fun streamUrl(channelId: Long, clientId: String): String =
-        cache.api(cache.profile()).url("/api/live/channels/$channelId/stream.ts?client_id=${URLEncoder.encode(clientId, Charsets.UTF_8.name())}")
+        cache.api(cache.profile()).liveStreamUrl(channelId, clientId)
+
+    /** The leaves on their way. */
+    private val leaving: MutableSet<Job> = ConcurrentHashMap.newKeySet()
+
+    /**
+     * The sessions watched since the last [drop], and those watched before
+     * one, whose leave would go with the next profile's tokens: the lock of
+     * both, and of [drops], the count of drops.
+     */
+    private val sessions = Any()
+    private val watched = mutableSetOf<String>()
+    private val dropped = mutableSetOf<String>()
+    private var drops = 0
 
     override fun leave(sessionId: String) {
-        cache.app.launch {
+        synchronized(sessions) {
+            // The server lets it go by itself after 45 s.
+            if (dropped.remove(sessionId)) return
+            watched -= sessionId
+        }
+        val job = cache.app.launch(start = CoroutineStart.LAZY) {
             try {
                 cache.api(cache.profile()).leaveChannel(sessionId)
             } catch (e: CancellationException) {
@@ -207,5 +248,19 @@ internal class CachedLiveTv(private val cache: ResourceCache) : LiveTvRepository
                 // Out of reach: the server lets the session go by itself after 45 s.
             }
         }
+        leaving += job
+        job.invokeOnCompletion { leaving -= job }
+        job.start()
+    }
+
+    override suspend fun left() = leaving.toList().joinAll()
+
+    override fun drop() {
+        synchronized(sessions) {
+            dropped += watched
+            watched.clear()
+            drops++
+        }
+        leaving.toList().forEach { it.cancel() }
     }
 }

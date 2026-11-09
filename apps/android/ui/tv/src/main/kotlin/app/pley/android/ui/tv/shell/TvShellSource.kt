@@ -3,17 +3,22 @@ package app.pley.android.ui.tv.shell
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 import app.pley.android.auth.AuthEvent
+import app.pley.android.data.RequestNotice
+import app.pley.android.data.RequestsRepository
 import app.pley.android.data.SessionState
 import app.pley.android.data.valueOrNull
 import app.pley.android.designsystem.image.ArtworkImage
 import app.pley.android.model.Library
+import app.pley.android.player.CastFrom
 import app.pley.android.screens.ScreensGraph
+import app.pley.android.screens.requests.RequestsEntry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.emptyFlow
@@ -24,6 +29,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.withContext
 
 /**
  * What the TV's frame reads: how to start, what the rail lists, and who
@@ -64,8 +70,29 @@ interface TvShellSource {
     /** Live TV is open to this profile and has channels: the rail leads to it. */
     val liveTv: Flow<Boolean> get() = flowOf(false)
 
+    /** A USB drive is plugged in: the rail leads to its videos. */
+    val drive: Flow<Boolean> get() = flowOf(false)
+
     /** Each time the server's events connect: it answers again (the offline mark goes). */
     val serverAnswered: Flow<Unit> get() = emptyFlow()
+
+    /** The rail's way into requests (Discover, or the requests) and its number; none while unknown. */
+    val requests: Flow<RequestsEntry> get() = flowOf(RequestsEntry.None)
+
+    /**
+     * News of this profile's requests to pop up, oldest first: on a TV, what
+     * became ready to watch, each with its title's poster.
+     */
+    val notices: Flow<List<TvNotice>> get() = flowOf(emptyList())
+
+    /** [notice] is on screen: off the queue, so newer news can't push it out. */
+    fun dismiss(notice: RequestNotice) = Unit
+
+    /** Music a remote on another device cast here, as it starts, and where from: the shell opens Now Playing. */
+    val castMusic: Flow<CastFrom> get() = emptyFlow()
+
+    /** A cast from another profile's remote couldn't switch the TV to it: nothing plays, the shell says so. */
+    val castRefused: Flow<Unit> get() = emptyFlow()
 
     companion object {
         /**
@@ -74,9 +101,9 @@ interface TvShellSource {
          * the data module last saw it ([householdSize]; 1 until it says).
          * The three are read at once, in the background, as soon as it is
          * made: made before the activity's first frame, it usually knows
-         * them by then. With "Always start as" in a household of several,
-         * the session's saved profile says whether it has a PIN too (from
-         * the disk). Making it touches nothing else.
+         * them by then. In a household of several, the session's saved
+         * profile says whether it has a PIN too (from the disk). Making it
+         * touches nothing else.
          */
         fun of(
             graph: ScreensGraph,
@@ -85,6 +112,10 @@ interface TvShellSource {
         ): TvShellSource = GraphShellSource(graph, startup, householdSize)
     }
 }
+
+/** News of a request to pop up: [notice], and its title's poster on the server. */
+@Immutable
+data class TvNotice(val notice: RequestNotice, val poster: ArtworkImage? = null)
 
 /** The rail's avatar: the profile's name, colour and picture. */
 @Immutable
@@ -123,7 +154,7 @@ private class GraphShellSource(
             val (server, signedIn) = start.await()
             val size = profiles.await()
             val always = settings.await().alwaysStartAs
-            val hasPin = if (signedIn && size > 1 && always != null) leftOnPin() else null
+            val hasPin = if (signedIn && size > 1) leftOnPin() else null
             StartFacts(server, signedIn, profiles = size, alwaysStartAs = always, hasPin = hasPin)
         }.also { known = it }
     }
@@ -154,6 +185,10 @@ private class GraphShellSource(
     }.distinctUntilChanged()
 
     override suspend fun keepUpdated() {
+        // A drive plugged in or pulled out while the app was away: some TV builds don't say.
+        withContext(Dispatchers.Default) { graph.drives.refresh() }
+        // What the profile's remotes cast here plays from now on, also once the TV's player has the window.
+        withContext(Dispatchers.Default) { graph.casts }.start()
         // Server events flow while something listens to them (the data module's LiveUpdates).
         offMain { graph.data.liveUpdates.scans }.collect { }
     }
@@ -170,7 +205,28 @@ private class GraphShellSource(
 
     override val liveTv: Flow<Boolean> = offMain { graph.data.liveTv.summary() }.map { it.valueOrNull?.available == true }.distinctUntilChanged()
 
+    override val drive: Flow<Boolean> = offMain { graph.drives.drive }.map { it != null }.distinctUntilChanged()
+
     override val serverAnswered: Flow<Unit> = offMain { graph.data.liveUpdates.answered }
+
+    // Requests are followed from just after the first frame: reading them starts their events, catching up and polling.
+    override val requests: Flow<RequestsEntry> = offMain { started().state }.map(RequestsEntry::of).distinctUntilChanged()
+
+    override val notices: Flow<List<TvNotice>> = combine(offMain { started().notices }, offMain { graph.data.servers.active }) { notices, origin ->
+        notices.map { notice ->
+            val poster = (notice as? RequestNotice.Ready)?.posterUrl
+            TvNotice(notice, origin?.let { ArtworkImage.of(poster, it) })
+        }
+    }.flowOn(Dispatchers.Default)
+
+    // Made by then: the notice was read from it.
+    override fun dismiss(notice: RequestNotice) = graph.data.requests.dismiss(notice)
+
+    override val castMusic: Flow<CastFrom> = offMain { graph.casts.music }.map { it.from }
+
+    override val castRefused: Flow<Unit> = offMain { graph.casts.refused }
+
+    private fun started(): RequestsRepository = graph.data.requests.also { it.start() }
 
     /** [upstream], made and collected on Default: the graph is never made on the main thread for it. */
     private fun <T> offMain(upstream: () -> Flow<T>): Flow<T> = flow { emitAll(upstream()) }.flowOn(Dispatchers.Default)

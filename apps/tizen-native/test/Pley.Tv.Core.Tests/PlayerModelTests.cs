@@ -65,6 +65,23 @@ public class PlayerModelTests
         Assert.Equal(("playing", 2_700_000 - PlayerModel.SeekEndMarginMs), (h.Source.Reports.Single().State, h.Source.Reports.Single().Position));
     }
 
+    /// <summary>
+    /// The audio chosen is switched to once the engine is prepared, before its picture: a TV's
+    /// player that says it's ready only once its picture moves would play the file's first track
+    /// until then.
+    /// </summary>
+    [Fact]
+    public void The_audio_chosen_is_switched_to_once_prepared_before_the_picture()
+    {
+        h.Add(PlayerHarness.Movie());
+        h.Start(new PlayRequest(1, 0, true, AudioIndex: 2), show: false);
+        Assert.Empty(h.Engine.AudioSwitches);
+        h.Engine.Open();
+        Assert.Equal((1, "fre"), h.Engine.AudioSwitches.Single());
+        h.Engine.Show();
+        Assert.Single(h.Engine.AudioSwitches);
+    }
+
     [Fact]
     public void Direct_play_switches_audio_in_the_engine_and_remembers_the_choice()
     {
@@ -105,6 +122,7 @@ public class PlayerModelTests
         h.Source.Vtt[ItemKit.Origin + "/api/files/10/subtitles/3.vtt"] = new SubtitleText("WEBVTT\n\n00:00:01.000 --> 00:00:04.000\nHello\n", Complete: true);
         h.Start(new PlayRequest(1, 0, true, SubtitleIndex: 3));
         Assert.True(h.State.SubtitleSync);
+        Assert.True(h.State.SubtitleStyled);
         Assert.Empty(h.Model.Cues.Value);
         h.Play(1_000);
         Assert.Equal("Hello", h.Model.Cues.Value.Single().Text);
@@ -118,6 +136,7 @@ public class PlayerModelTests
         h.Model.SelectSubtitle(null);
         Assert.Empty(h.Model.Cues.Value);
         Assert.False(h.State.SubtitleSync);
+        Assert.False(h.State.SubtitleStyled);
     }
 
     [Fact]
@@ -159,6 +178,9 @@ public class PlayerModelTests
         Assert.Single(h.Source.Bodies);
         Assert.False(h.LastBody.ContainsKey("subtitle_index"));
         Assert.True(h.State.SubtitleSync);
+        // They move with Sync but keep their own look: the panel has none to choose.
+        Assert.False(h.State.SubtitleStyled);
+        Assert.DoesNotContain(h.Model.Panel(PlayerPanelKind.Subtitles).Rows, r => r.Kind == PlayerRowKind.Heading);
         Assert.Null(h.Model.Picture.Value);
         h.Play(1_000);
         var frame = h.Model.Picture.Value!;
@@ -177,7 +199,8 @@ public class PlayerModelTests
         h.Model.SelectSubtitle(null);
         Assert.Null(h.Model.Picture.Value);
         Assert.Single(h.Source.Bodies);
-        Assert.Equal(new[] { PgsMks }, h.Source.MksAsked);
+        // Asked for once, whole, from where the player was as they were chosen: the start, which is said too.
+        Assert.Equal(new[] { PgsMks + "?at=0" }, h.Source.MksAsked);
     }
 
     /// <summary>
@@ -212,6 +235,55 @@ public class PlayerModelTests
         h.Model.SelectSubtitle(4);
         Assert.Equal(4, h.Source.Bodies.Count);
         Assert.Equal(4, h.LastBody["subtitle_index"]);
+        Assert.Single(h.Source.MksAsked);
+    }
+
+    /// <summary>
+    /// A whole .mks with Cues is read in parts: the pictures around where the film resumed, then
+    /// those around a seek; never the whole file.
+    /// </summary>
+    [Fact]
+    public void Picture_subtitles_are_read_around_the_film_in_parts()
+    {
+        h.Add(PlayerHarness.Movie());
+        h.Source.Mks[PgsMks] = new SubtitlePictures(CuedMks.Pgs(Enumerable.Range(0, 10).Select(i => i * 120_000).ToArray()), Complete: true);
+        h.Start(new PlayRequest(1, 600_000, false, SubtitleIndex: 4), show: false);
+        h.Engine.PositionMs = 600_000;
+        h.Engine.Show();
+        // Its header, its Cues, the clusters around 600 s.
+        Assert.Equal(3, h.Source.MksParts.Count);
+        Assert.Empty(h.Source.MksAsked);
+        h.Play(500);
+        Assert.NotNull(h.Model.Picture.Value);
+        h.Model.SeekTo(1_000_000);
+        Assert.Equal(4, h.Source.MksParts.Count);
+        h.Play(500);
+        Assert.NotNull(h.Model.Picture.Value);
+        // Back where it was read: not asked for again.
+        h.Model.SeekTo(650_000);
+        h.Play(500);
+        Assert.Equal(4, h.Source.MksParts.Count);
+    }
+
+    /// <summary>
+    /// A picture track chosen as the film starts is asked for once its picture shows: its .mks is
+    /// tens of MB, and asked for at once it took the network and the CPUs from the video's first
+    /// seconds. A new session of the same film keeps it.
+    /// </summary>
+    [Fact]
+    public void Picture_subtitles_are_asked_for_once_the_picture_shows()
+    {
+        h.Add(PlayerHarness.Movie());
+        h.Source.Mks[PgsMks] = PgsTrack();
+        h.Start(new PlayRequest(1, 0, true, SubtitleIndex: 4), show: false);
+        Assert.Empty(h.Source.MksAsked);
+        h.Engine.Show();
+        Assert.Single(h.Source.MksAsked);
+        h.Play(1_000);
+        Assert.NotNull(h.Model.Picture.Value);
+        h.Engine.AskRestart(500);
+        Assert.Single(h.Source.MksAsked);
+        h.Engine.Show();
         Assert.Single(h.Source.MksAsked);
     }
 
@@ -279,6 +351,44 @@ public class PlayerModelTests
         Assert.Equal(2, h.State.ItemId);
         Assert.Equal("S1 · E2 · Episode 2", h.State.Subtitle);
         Assert.Equal(2, h.Engine.Prepared.Count);
+    }
+
+    [Fact]
+    public void An_engine_that_cant_go_on_from_a_place_gets_a_session_there_under_the_cover()
+    {
+        h.Add(PlayerHarness.Episode(1, 1));
+        h.Start(new PlayRequest(1, 1_800_000, false));
+        h.Play(1_000);
+        Assert.NotNull(h.State.FirstFrameMs);
+        // A seek before where the stream it has begins (a resumed film's, trimmed to where it resumed).
+        h.Engine.AskRestart(600_000);
+        Assert.Equal(new[] { "s1" }, h.Source.Stopped);
+        Assert.Equal(600_000L, (long)h.LastBody["start_ms"]!);
+        Assert.Equal(2, h.Engine.Prepared.Count);
+        Assert.Equal(600_000, h.Engine.Prepared[1].StartMs);
+        // Black until the new stream's first picture, as for any new stream.
+        Assert.Null(h.State.FirstFrameMs);
+        Assert.Equal(PhaseKind.Preparing, h.State.Phase.Kind);
+    }
+
+    /// <summary>
+    /// A file that ends a minute or more before the item says: the engine opens it again where it
+    /// ended, and it ends there again. That is its end, weighed from where the film started, not a
+    /// stream that doesn't hold that part (which falls back to a transcode).
+    /// </summary>
+    [Fact]
+    public void A_film_that_ends_again_where_the_engine_opened_it_again_ends()
+    {
+        h.Add(PlayerHarness.Movie());
+        h.Start(new PlayRequest(1, 1_000_000, false));
+        h.Play(10_000);
+        h.Engine.AskRestart(2_000_000);
+        Assert.Equal(2, h.Source.Bodies.Count);
+        h.Engine.Show();
+        h.Engine.PositionMs = 2_000_500;
+        h.Engine.Tell(EngineStatus.Ended);
+        Assert.Equal(PhaseKind.Ended, h.State.Phase.Kind);
+        Assert.Equal(2, h.Source.Bodies.Count);
     }
 
     [Fact]
@@ -652,6 +762,27 @@ public class PlayerModelTests
         h.Clock.Advance(10_000);
         Assert.Equal(2, asked);
     }
+
+    [Fact]
+    public void A_failure_the_TV_says_twice_starts_one_session_at_the_next_step()
+    {
+        h.Add(PlayerHarness.Movie());
+        h.Start(new PlayRequest(1, 0, true));
+        var again = true;
+        h.Source.Answer = _ =>
+        {
+            // As on the TV: the second report comes while the new session is still being asked for.
+            if (again)
+            {
+                again = false;
+                h.Engine.Fail(new EngineError.Unsupported("audio", Audio: true, Container: false));
+            }
+            return FakePlayerSource.Stream(10, "remux");
+        };
+        h.Engine.Fail(new EngineError.Unsupported("audio", Audio: true, Container: false));
+        Assert.Equal(new[] { "auto", "remux" }, h.Source.Bodies.Select(b => (string)b["mode"]!));
+    }
+
 }
 
 /// <summary>The panels as the screen builds them (the Android app's TvPlayerPanels and its screen test).</summary>
@@ -689,6 +820,8 @@ public class PlayerPanelTests
         // A track closes it.
         Assert.False(h.Model.Choose(panel.Rows[1]));
         Assert.Null(h.State.Subtitles.Single(t => t.Selected).Index);
+        // Off, there is nothing to style.
+        Assert.DoesNotContain(h.Model.Panel(PlayerPanelKind.Subtitles).Rows, r => r.Kind == PlayerRowKind.Heading);
     }
 
     [Fact]

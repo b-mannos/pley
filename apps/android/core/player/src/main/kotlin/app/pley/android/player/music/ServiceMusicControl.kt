@@ -78,6 +78,10 @@ class ServiceMusicControl(
         disconnect()
     }
 
+    override suspend fun flush() = playback.flush()
+
+    override fun drop() = playback.drop()
+
     override fun pauseForVideo() = onMain { playback.pauseForVideo() }
 
     override val sleep: StateFlow<SleepState> get() = playback.sleep
@@ -149,6 +153,8 @@ class ServiceMusicControl(
                     }
                 },
                 events = data.liveUpdates.events,
+                playing = data.liveUpdates::playing,
+                here = data.remote::here,
             )
             val playback = MusicPlayback(env, main)
             MusicHub.playback = playback

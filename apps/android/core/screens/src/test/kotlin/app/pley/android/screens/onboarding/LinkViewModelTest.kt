@@ -3,6 +3,7 @@ package app.pley.android.screens.onboarding
 import androidx.lifecycle.viewModelScope
 import app.pley.android.auth.AuthException
 import app.pley.android.auth.DevicePoll
+import app.pley.android.auth.NO_CODES
 import app.pley.android.model.Me
 import app.pley.android.screens.PleyKey
 import java.io.IOException
@@ -43,9 +44,9 @@ class LinkViewModelTest {
         ProfileGate.passed = false
     }
 
-    private fun TestScope.link(purpose: LinkPurpose = LinkPurpose.SignIn, requests: Boolean = true): LinkViewModel {
+    private fun TestScope.link(purpose: LinkPurpose = LinkPurpose.SignIn): LinkViewModel {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
-        return LinkViewModel(source, server, purpose, requests) { testScheduler.currentTime }.also { vm = it }
+        return LinkViewModel(source, server, purpose) { testScheduler.currentTime }.also { vm = it }
     }
 
     @Test
@@ -61,17 +62,6 @@ class LinkViewModelTest {
         assertEquals("$server/link?code=BCDFGHJK", code.qr)
         assertEquals(LinkStatus.Waiting, vm.state.value.status)
         assertEquals(1, source.polling)
-    }
-
-    @Test
-    fun aTvsCodeAsksForNoScopesOfRequests() = runTest {
-        val phone = link()
-        phone.started()
-        runCurrent()
-        phone.viewModelScope.cancel()
-        link(requests = false).started()
-        runCurrent()
-        assertEquals(listOf(true, false), source.requestScopes)
     }
 
     @Test
@@ -227,7 +217,7 @@ class LinkViewModelTest {
     @Test
     fun anOlderServerSaysSoInTheModulesWords() = runTest {
         val vm = link()
-        source.startError = AuthException("this server can't sign in with a code yet: update it, or sign in with a password")
+        source.startError = AuthException(NO_CODES)
         vm.started()
         runCurrent()
         val status = vm.state.value.status

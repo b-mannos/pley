@@ -8,6 +8,8 @@ import app.pley.android.model.MediaRequest
 import app.pley.android.model.NewRequest
 import app.pley.android.model.RequestList
 import app.pley.android.model.RequestScope
+import app.pley.android.model.RequestStage
+import app.pley.android.model.RequestStatus
 import app.pley.android.model.RequestSummary
 import app.pley.android.model.TitleKind
 import app.pley.android.model.TitleStatus
@@ -94,6 +96,94 @@ class DiscoverViewModelTest {
     }
 
     @Test
+    fun withNothingTrendingTheHeroIsTheNextRowsFirstTitleAndEveryRowIsRead() = runTest(dispatcher) {
+        val requests = FakeRequests()
+        val lists = mutableListOf<DiscoverList>()
+        requests.pages = { list, page ->
+            lists += list
+            // Nothing trending this account may ask for; the movies come later than the shows.
+            when (list) {
+                DiscoverList.Trending -> DiscoverPage(page, 1, emptyList())
+                DiscoverList.Shows -> DiscoverPage(page, 1, trending.results.filter { it.kind == TitleKind.Show })
+                else -> DiscoverPage(page, 1, emptyList())
+            }
+        }
+        val vm = viewModel(requests)
+        settle()
+        assertEquals(DiscoverList.entries.toSet(), lists.toSet())
+        val hero = vm.state.value.hero!!
+        assertEquals(trending.results.first { it.kind == TitleKind.Show }.tmdbId, hero.title.tmdbId)
+        assertFalse(vm.state.value.nothing)
+    }
+
+    @Test
+    fun aRowThatFailedIsPassedForTheHeroAndSaidWhenNoRowHasATitle() = runTest(dispatcher) {
+        val requests = FakeRequests()
+        var moviesDown = true
+        requests.pages = { list, page ->
+            when (list) {
+                DiscoverList.Trending -> DiscoverPage(page, 1, emptyList())
+                DiscoverList.Movies -> if (moviesDown) throw ApiException(503, "tmdb_down", "TMDB isn't answering") else DiscoverPage(page, 1, emptyList())
+                DiscoverList.Shows -> DiscoverPage(page, 1, trending.results.filter { it.kind == TitleKind.Show })
+                else -> DiscoverPage(page, 1, emptyList())
+            }
+        }
+        val vm = viewModel(requests)
+        settle()
+        // Popular movies failed: the hero is Popular shows' first.
+        assertEquals(trending.results.first { it.kind == TitleKind.Show }.tmdbId, vm.state.value.hero?.title?.tmdbId)
+        assertEquals(null, vm.state.value.problem)
+
+        // Nothing anywhere but the failure: the page says what failed, and Retry reads that row again.
+        val none = FakeRequests()
+        none.pages = { list, page ->
+            if (list == DiscoverList.Movies && moviesDown) throw ApiException(503, "tmdb_down", "TMDB isn't answering")
+            DiscoverPage(page, 1, emptyList())
+        }
+        val other = viewModel(none)
+        settle()
+        assertEquals(null, other.state.value.hero)
+        assertEquals(RequestProblem.TmdbDown, other.state.value.problem)
+        assertFalse(other.state.value.nothing)
+        moviesDown = false
+        other.retry()
+        settle()
+        assertEquals(null, other.state.value.problem)
+        assertTrue(other.state.value.nothing)
+    }
+
+    @Test
+    fun withNothingInAnyRowThePageSaysSo() = runTest(dispatcher) {
+        val requests = FakeRequests()
+        requests.pages = { _, page -> DiscoverPage(page, 1, emptyList()) }
+        val vm = viewModel(requests)
+        settle()
+        assertEquals(null, vm.state.value.hero)
+        assertTrue(vm.state.value.nothing)
+        assertEquals(null, vm.state.value.problem)
+    }
+
+    @Test
+    fun aRowStillShortAfterItsPagesWaitsForAScroll() = runTest(dispatcher) {
+        val requests = FakeRequests()
+        val asked = mutableListOf<Int>()
+        requests.pages = { _, page ->
+            asked += page
+            DiscoverPage(page, 30, if (page == 2) trending.results.take(1) else emptyList())
+        }
+        val vm = viewModel(requests)
+        settle()
+        val row = vm.row(DiscoverList.Trending)
+        assertEquals((1..5).toList(), asked)
+        assertTrue(row.stopped && row.settled)
+        assertEquals(1, row.titles.size)
+        vm.more(DiscoverList.Trending)
+        settle()
+        assertEquals(6, asked.last())
+        assertFalse(vm.row(DiscoverList.Trending).stopped)
+    }
+
+    @Test
     fun rowsAreReadAsTheyComeIntoView() = runTest(dispatcher) {
         val requests = FakeRequests()
         val lists = mutableListOf<DiscoverList>()
@@ -125,6 +215,27 @@ class DiscoverViewModelTest {
         assertEquals(TitleBadge.Requested, badgeOf(robot))
         // One request read, the rows not read again.
         assertEquals(listOf("request"), requests.api.calls.drop(pagesBefore).map { it.method }.filter { it != "requests" })
+    }
+
+    @Test
+    fun aShowsRequestWhollyReadyTakesItsStatusFromTheShowsPage() = runTest(dispatcher) {
+        val requests = FakeRequests()
+        val vm = viewModel(requests)
+        settle()
+        // Severance (95396): the season asked for came, the rest nobody asked for.
+        val pending = Fixtures.decode<RequestList>("requests/list.json").requests.first { it.id == 44L }
+        requests.api.answer(
+            "request",
+            pending.copy(id = 62, kind = TitleKind.Show, tmdbId = 95396, status = RequestStatus.Available, stage = RequestStage.Available, itemId = 201),
+        )
+        val page: DiscoverDetail = Fixtures.decode("discover/show.json")
+        requests.api.answer("discoverTitle", page.copy(tmdbId = 95396, status = TitleStatus.Partial, itemId = 201))
+        requests.change(RequestChange(62, TitleKind.Show, 95396))
+        settle()
+        val severance = vm.row(DiscoverList.Trending).titles.first { it.tmdbId == 95396L }
+        assertEquals(TitleStatus.Partial, severance.status)
+        assertEquals(PleyKey.DiscoverTitle(TitleKind.Show, 95396), opens(severance))
+        assertEquals(listOf<Any?>(TitleKind.Show, 95396L), requests.api.calls("discoverTitle").last().args)
     }
 
     @Test
@@ -210,6 +321,44 @@ class DiscoverViewModelTest {
         third.heroAction()
         settle()
         assertEquals(RequestEvent.Open(PleyKey.Item(201)), went.single())
+    }
+
+    @Test
+    fun theHerosOtherButtonsDoWhatTheySay() = runTest(dispatcher) {
+        // Partly in a library: Request more seasons, beside Open, opens Which seasons?.
+        val requests = FakeRequests()
+        val partly = trending.results.first { it.tmdbId == 95396L }
+        requests.pages = { _, page -> DiscoverPage(page, 1, listOf(partly)) }
+        val vm = viewModel(requests)
+        val events = mutableListOf<RequestEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.events.collect { events += it } }
+        settle()
+        assertEquals(MainAction.Partial(201, Ask.Yes), vm.state.value.hero?.action)
+        vm.heroMore()
+        settle()
+        assertEquals(RequestEvent.Open(PleyKey.DiscoverTitle(TitleKind.Show, 95396, pick = true)), events.single())
+
+        // Someone else asked for it: Tell me too follows their request here.
+        val movie: DiscoverDetail = Fixtures.decode("discover/movie.json")
+        val asked = FakeRequests()
+        asked.api.answer("discoverTitle", movie.copy(tmdbId = 1184918, status = TitleStatus.Requested, requestId = null, requests = emptyList()))
+        val other = viewModel(asked)
+        settle()
+        assertEquals(MainAction.TellMeToo(Ask.Yes), other.state.value.hero?.action)
+        other.heroTellMeToo()
+        settle()
+        assertEquals(NewRequest(TitleKind.Movie, 1184918), asked.api.calls("ask").single().args.single())
+
+        // Followed: Stop following lets go of the request followed.
+        val followed = Fixtures.decode<RequestList>("requests/list.json").requests.first { it.id == 47L }.copy(kind = TitleKind.Movie, tmdbId = 1184918)
+        val following = FakeRequests()
+        following.api.answer("discoverTitle", movie.copy(tmdbId = 1184918, status = TitleStatus.Requested, requestId = 47, watching = true, requests = listOf(followed)))
+        val third = viewModel(following)
+        settle()
+        assertEquals(MainAction.Following(followed), third.state.value.hero?.action)
+        third.heroStopFollowing()
+        settle()
+        assertEquals(listOf<Any?>(47L), following.api.calls("unwatchRequest").single().args)
     }
 
     @Test

@@ -12,13 +12,14 @@
 //!   watched before, so changing channels on a one-connection account just
 //!   works.
 //! - Channels served as HLS by the provider are read segment by segment and
-//!   handed on as one MPEG-TS stream.
+//!   handed on as one MPEG-TS stream, with the sound of an audio rendition
+//!   kept apart from the picture put in ([`audio`]).
 //! - A connection that breaks is made again, a few times, while the channel
 //!   is watched.
 //! - Whether a channel played is told ([`Played`]): one the provider gives
 //!   nothing for is offline until it plays again.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -34,8 +35,11 @@ use super::{ChannelRow, LiveSettings};
 use crate::auth::AuthUser;
 use crate::error::AppError;
 use crate::events::{EventBus, ServerEvent};
+use crate::playback::{CommandWindow, Controls, DeviceKind};
 use crate::transcoder::Transcoder;
-use crate::util::now;
+use crate::util::{now, now_ms};
+
+mod audio;
 
 /// A channel nobody watches is let go this long after the last viewer left
 /// (unless its connection is wanted sooner): coming back to it is instant.
@@ -53,6 +57,14 @@ const TS_SYNC: u8 = 0x47;
 const CHANNEL_CHUNKS: usize = 2048;
 /// The provider sending nothing this long breaks the connection.
 const STALL: Duration = Duration::from_secs(15);
+/// The most of a provider's HLS segment read whole (to put its audio in).
+const SEGMENT_BYTES: usize = 64 << 20;
+/// The pieces a segment read whole is handed on in, as a segment read as it
+/// comes is: one piece larger than the backlog would empty it.
+const PUSH_BYTES: usize = 64 << 10;
+/// How long a provider's HLS playlist and segments may take.
+const PLAYLIST_WAIT: Duration = Duration::from_secs(10);
+const SEGMENT_WAIT: Duration = Duration::from_secs(20);
 /// Connection attempts in a row before a channel is given up on.
 const ATTEMPTS: u32 = 5;
 /// Bytes after which a connection counts as having worked (its failures
@@ -97,6 +109,95 @@ struct Viewer {
     /// The account is an administrator's (whatever signed it in): whose
     /// connections it may take over.
     admin: bool,
+    /// The commands its player obeys from a remote ([`WatchAs::controls`]).
+    controls: Controls,
+    /// The device it plays on, as the user's remotes show it.
+    device: Option<String>,
+    /// Which device that is, and what kind ([`WatchAs::device_id`]).
+    device_id: String,
+    device_kind: DeviceKind,
+    /// Commands sent to it lately (remote control).
+    commands: CommandWindow,
+    /// Cancelled when it is stopped from elsewhere: a stream reader's
+    /// response ends, though others still watch the channel.
+    stopped: CancellationToken,
+}
+
+impl Viewer {
+    /// Its player is still there: a stream reader while its response is
+    /// read, an HLS player while it asks for the playlist.
+    fn is_there(&self) -> bool {
+        self.kind == ViewerKind::Stream || self.last_seen.elapsed() < VIEWER_GONE
+    }
+
+    /// It reads the stream of `session`, an app's watch session: apps ask
+    /// to watch as their device and read `stream.ts` as `<device>-stream`.
+    fn reads_for(&self, session: &Viewer) -> bool {
+        let (Some(reader), Some(device)) = (self.client_id.as_deref(), session.client_id.as_deref()) else {
+            return false;
+        };
+        self.kind == ViewerKind::Stream
+            && session.kind == ViewerKind::Hls
+            && self.user_id == session.user_id
+            && self.channel_id == session.channel_id
+            && reader != device
+            && device_of(reader) == device
+    }
+}
+
+/// Whether viewer `v`'s player is there ([`Viewer::is_there`]): an app's
+/// watch session whose stream it reads instead is, while that is read. Its
+/// session is the one the player knows, so it stays: remotes list and
+/// command it, and a stop reaches the player.
+fn is_there(viewers: &HashMap<String, Viewer>, v: &Viewer) -> bool {
+    v.is_there() || viewers.values().any(|reader| reader.reads_for(v))
+}
+
+/// One of a user's viewers, as their remotes see it (`GET /api/sessions`).
+#[derive(Debug, Clone)]
+pub struct RemoteViewer {
+    pub session_id: String,
+    pub user_id: i64,
+    pub channel_id: i64,
+    pub device: Option<String>,
+    pub device_id: String,
+    pub device_kind: DeviceKind,
+    pub controls: Controls,
+    pub started_at: i64,
+    /// When its player last asked for the channel (unix ms).
+    pub seen_at_ms: i64,
+}
+
+impl From<&Viewer> for RemoteViewer {
+    fn from(v: &Viewer) -> Self {
+        Self {
+            session_id: v.id.clone(),
+            user_id: v.user_id,
+            channel_id: v.channel_id,
+            device: v.device.clone(),
+            device_id: v.device_id.clone(),
+            device_kind: v.device_kind,
+            controls: v.controls.clone(),
+            started_at: v.started_at,
+            seen_at_ms: now_ms() - v.last_seen.elapsed().as_millis() as i64,
+        }
+    }
+}
+
+/// A watching session ended from elsewhere (taken over, or stopped): whose
+/// it was, and what its player is told.
+#[derive(Debug, Clone)]
+struct Ended {
+    user_id: i64,
+    why: Option<String>,
+}
+
+/// The home a take-over happens in, as it is then: the taker's name, and
+/// the accounts in the home, whose viewers are told who took their
+/// connection.
+pub struct InHome {
+    pub name: String,
+    pub accounts: HashSet<i64>,
 }
 
 /// How a channel is watched.
@@ -111,6 +212,19 @@ pub struct WatchAs {
     pub admin: bool,
     /// Every connection being in use, the channel whose connection to take.
     pub take_over: Option<i64>,
+    /// The home, read as the take-over is asked for, when the account is in
+    /// it (`None` when it isn't, or nothing is taken over): the viewers it
+    /// takes a connection from who are in the home too are told who did.
+    pub home: Option<InHome>,
+    /// The commands its player obeys from a remote (`player_command`).
+    pub controls: Controls,
+    /// The device, as the user's remotes show it.
+    pub device: Option<String>,
+    /// Which device that is ([`crate::api::remote::device_id_of`]); `None`:
+    /// the session stands for itself.
+    pub device_id: Option<String>,
+    /// What kind of device it is ([`crate::api::remote::device_kind_of`]).
+    pub device_kind: DeviceKind,
 }
 
 /// A connection of a source whose connections are all in use, as someone
@@ -130,7 +244,8 @@ pub struct BusyConnection {
     pub can_take_over: bool,
 }
 
-/// What a watching session ended by someone taking its connection over says.
+/// How many sessions ended from elsewhere are remembered, for their players
+/// to be told why (all are forgotten past it).
 const ENDED_KEPT: usize = 500;
 
 /// Someone watching, as administrators see it.
@@ -327,6 +442,23 @@ fn device_of(client: &str) -> &str {
     client.strip_suffix("-stream").unwrap_or(client)
 }
 
+/// What a viewer whose connection `taker` took over to watch `channel` is
+/// told. The taker is named, with the channel, only to their own devices
+/// and to someone else in the home when they are in it too (`home`, as it
+/// is at the take-over); anyone else learns only that the connection was
+/// needed.
+fn taken_over_why(viewer: &Viewer, taker: i64, home: Option<&InHome>, channel: &str) -> String {
+    if viewer.user_id == taker {
+        return format!("Watching moved to {channel} on another device.");
+    }
+    match home {
+        Some(home) if home.accounts.contains(&viewer.user_id) => {
+            format!("{} is watching {channel} now, on the connection this channel used.", home.name)
+        }
+        _ => "Someone else needed this channel's connection to watch another channel.".to_owned(),
+    }
+}
+
 /// A packet that starts a video PES at a random access point: a keyframe.
 fn is_video_keyframe(packet: &[u8]) -> bool {
     let control = (packet[3] >> 4) & 3;
@@ -452,8 +584,12 @@ pub struct Tuners {
     viewers: Mutex<HashMap<String, Viewer>>,
     /// Decisions to start a tuner, one at a time (they count connections).
     starting: tokio::sync::Mutex<()>,
-    /// Why sessions ended that were taken over: their players are told.
-    ended: Mutex<HashMap<String, String>>,
+    /// Sessions ended from elsewhere (taken over, or stopped): their
+    /// players are told why.
+    ended: Mutex<HashMap<String, Ended>>,
+    /// Why, by the keyed address's key of those that had one (a TV's own
+    /// player asks by the key alone).
+    ended_keys: Mutex<Vec<(String, Option<String>)>>,
     played: mpsc::UnboundedSender<Played>,
 }
 
@@ -480,6 +616,7 @@ impl Tuners {
             viewers: Mutex::default(),
             starting: tokio::sync::Mutex::new(()),
             ended: Mutex::default(),
+            ended_keys: Mutex::default(),
             played,
         })
     }
@@ -512,9 +649,12 @@ impl Tuners {
         let mut changed = false;
         {
             let mut viewers = self.viewers.lock();
-            let before = viewers.len();
-            viewers.retain(|_, v| v.kind == ViewerKind::Stream || v.last_seen.elapsed() < VIEWER_GONE);
-            changed |= viewers.len() != before;
+            let gone: Vec<String> = viewers.values().filter(|v| !is_there(&viewers, v)).map(|v| v.id.clone()).collect();
+            if !gone.is_empty() {
+                let users: Vec<i64> = gone.iter().filter_map(|id| viewers.remove(id)).map(|v| v.user_id).collect();
+                changed = true;
+                self.events.sessions_changed(users);
+            }
         }
         let watched: HashMap<i64, usize> = self.viewers.lock().values().fold(HashMap::new(), |mut m, v| {
             *m.entry(v.channel_id).or_insert(0) += 1;
@@ -597,7 +737,16 @@ impl Tuners {
     }
 
     fn end_viewers_of(&self, channel_id: i64) {
-        self.viewers.lock().retain(|_, v| v.channel_id != channel_id);
+        let mut viewers = self.viewers.lock();
+        let mut users = Vec::new();
+        viewers.retain(|_, v| {
+            let watches = v.channel_id == channel_id;
+            if watches {
+                users.push(v.user_id);
+            }
+            !watches
+        });
+        self.events.sessions_changed(users);
     }
 
     /// Starts `user` watching `tune.channel`: through the tuner already
@@ -605,7 +754,7 @@ impl Tuners {
     /// `keyed`: the HLS playlist's address carries a key of its own instead
     /// of needing the token (docs/API.md, "Keyed URLs").
     pub async fn watch(self: &Arc<Self>, user: &AuthUser, tune: Tune<'_>, how: WatchAs) -> Result<Watching, AppError> {
-        let WatchAs { client_id, kind, keyed, admin, take_over } = how;
+        let WatchAs { client_id, kind, keyed, admin, take_over, home, controls, device, device_id, device_kind } = how;
         let channel_id = tune.channel.id;
         // What this device watched before ends: its connection is free. Its
         // stream reader of another channel too, though that response may not
@@ -617,40 +766,59 @@ impl Tuners {
                 !(v.user_id == user.id && same)
             });
         }
-        let tuner = {
-            let _one = self.starting.lock().await;
-            // Not in the match: its guard would live through start_tuner's own lock.
-            let pulling = self.tuners.lock().get(&channel_id).filter(|t| t.is_live()).cloned();
-            match pulling {
-                Some(t) => t,
-                None => self.start_tuner(user, admin, &tune, take_over)?,
-            }
-        };
         let session_id = uuid::Uuid::new_v4().simple().to_string();
         let media_key = (keyed && kind == ViewerKind::Hls).then(crate::playback::new_media_key);
         let url = match &media_key {
             Some(key) => format!("/api/live/media/{key}/index.m3u8"),
             None => format!("/api/live/sessions/{session_id}/index.m3u8"),
         };
-        self.viewers.lock().insert(
-            session_id.clone(),
-            Viewer {
-                id: session_id.clone(),
-                user_id: user.id,
-                username: user.username.clone(),
-                client_id,
-                channel_id,
-                started_at: now(),
-                last_seen: Instant::now(),
-                kind,
-                media_key,
-                app_grant: user.app.as_ref().map(|app| app.grant_id),
-                admin,
-            },
-        );
+        let tuner = {
+            let _one = self.starting.lock().await;
+            // Not in the match: its guard would live through start_tuner's own lock.
+            let pulling = self.tuners.lock().get(&channel_id).filter(|t| t.is_live()).cloned();
+            let tuner = match pulling {
+                Some(t) => t,
+                None => self.start_tuner(user, admin, home.as_ref(), &tune, take_over)?,
+            };
+            // Watching before the lock goes: a take-over, made under it too,
+            // then counts this viewer and tells it, where one made between
+            // finding the tuner and adding the viewer would miss it.
+            self.viewers.lock().insert(
+                session_id.clone(),
+                Viewer {
+                    id: session_id.clone(),
+                    user_id: user.id,
+                    username: user.username.clone(),
+                    client_id,
+                    channel_id,
+                    started_at: now(),
+                    last_seen: Instant::now(),
+                    kind,
+                    media_key,
+                    app_grant: user.app.as_ref().map(|app| app.grant_id),
+                    admin,
+                    controls,
+                    device,
+                    device_id: device_id.unwrap_or_else(|| format!("session-{session_id}")),
+                    device_kind,
+                    commands: CommandWindow::default(),
+                    stopped: CancellationToken::new(),
+                },
+            );
+            tuner
+        };
         tuner.state.lock().idle_since = None;
         self.events.send(ServerEvent::LiveTunersChanged);
+        // A new session for the user's remotes, and the one this device
+        // watched before gone from them: a change of channel.
+        self.events.send(ServerEvent::SessionsChanged { user_id: user.id });
         Ok(Watching { url, session_id, kind })
+    }
+
+    /// Why the session a keyed address's `key` opened ended, when it was
+    /// taken over or stopped (`Some(None)`: stopped without a word).
+    pub fn ended_by_key(&self, key: &str) -> Option<Option<String>> {
+        self.ended_keys.lock().iter().find(|(k, _)| crate::playback::same_key(k, key)).map(|(_, why)| why.clone())
     }
 
     /// The session a keyed address's `key` opens, who watches in it, and
@@ -667,6 +835,7 @@ impl Tuners {
         self: &Arc<Self>,
         user: &AuthUser,
         admin: bool,
+        home: Option<&InHome>,
         tune: &Tune<'_>,
         take_over: Option<i64>,
     ) -> Result<Arc<Tuner>, AppError> {
@@ -687,7 +856,7 @@ impl Tuners {
                 Some(idle) => self.remove_tuner(idle),
                 None => match take_over.and_then(|id| on_source.iter().find(|t| t.channel_id == id)) {
                     Some(held) if self.may_take_over(user.id, admin, held.channel_id) => {
-                        self.take_over(user, held, tune.channel.display_name());
+                        self.take_over(user, home, held, tune.channel.display_name());
                     }
                     Some(_) => {
                         return Err(AppError::forbidden(
@@ -730,28 +899,56 @@ impl Tuners {
             .all(|v| v.user_id == user_id || (admin && !v.admin))
     }
 
-    /// Ends everyone watching `held`, telling them why, and lets its
-    /// connection go for `user` to watch `channel_name` with.
-    fn take_over(&self, user: &AuthUser, held: &Arc<Tuner>, channel_name: &str) {
-        {
+    /// Ends everyone watching `held`, telling them why (their players at
+    /// once, through their event streams), and lets its connection go for
+    /// `user` to watch `channel_name` with. `home`: the home as it is now,
+    /// when `user` is in it.
+    fn take_over(&self, user: &AuthUser, home: Option<&InHome>, held: &Arc<Tuner>, channel_name: &str) {
+        let told: Vec<(Viewer, String)> = {
             let mut viewers = self.viewers.lock();
-            let mut ended = self.ended.lock();
-            if ended.len() > ENDED_KEPT {
-                ended.clear();
-            }
-            for v in viewers.values().filter(|v| v.channel_id == held.channel_id) {
-                let why = if v.user_id == user.id {
-                    format!("Watching moved to {channel_name} on another device.")
-                } else {
-                    format!("{} started watching {channel_name} on this connection.", user.username)
-                };
-                ended.insert(v.id.clone(), why);
+            let told: Vec<(Viewer, String)> = viewers
+                .values()
+                .filter(|v| v.channel_id == held.channel_id)
+                .map(|v| (v.clone(), taken_over_why(v, user.id, home, channel_name)))
+                .collect();
+            for (v, why) in &told {
+                self.remember_ended(v, Some(why.clone()));
             }
             viewers.retain(|_, v| v.channel_id != held.channel_id);
-        }
+            told
+        };
         tracing::info!(channel = held.channel_id, by = %user.username, "live channel's connection taken over");
+        let users: Vec<i64> = told.iter().map(|(v, _)| v.user_id).collect();
+        // Told before the stream stops: a player whose stream breaks off
+        // knows why instead of tuning again.
+        for (v, message) in told {
+            self.events.send(ServerEvent::LiveTakenOver {
+                user_id: v.user_id,
+                session_id: v.id,
+                channel_id: v.channel_id,
+                message,
+            });
+        }
         self.remove_tuner(held);
         self.events.send(ServerEvent::LiveTunersChanged);
+        self.events.sessions_changed(users);
+    }
+
+    /// Remembers that `viewer` was ended from elsewhere, and `why`: its
+    /// player's next request is told (`410`), by its session or its key.
+    fn remember_ended(&self, viewer: &Viewer, why: Option<String>) {
+        let mut ended = self.ended.lock();
+        if ended.len() > ENDED_KEPT {
+            ended.clear();
+        }
+        ended.insert(viewer.id.clone(), Ended { user_id: viewer.user_id, why: why.clone() });
+        if let Some(key) = &viewer.media_key {
+            let mut ended_keys = self.ended_keys.lock();
+            if ended_keys.len() > ENDED_KEPT {
+                ended_keys.clear();
+            }
+            ended_keys.push((key.clone(), why));
+        }
     }
 
     fn all_in_use(&self, user: &AuthUser, admin: bool, tune: &Tune<'_>, on_source: &[Arc<Tuner>]) -> AppError {
@@ -790,10 +987,10 @@ impl Tuners {
     fn viewer(&self, session_id: &str, user: &AuthUser) -> Result<Viewer, AppError> {
         let mut viewers = self.viewers.lock();
         let Some(v) = viewers.get_mut(session_id).filter(|v| v.user_id == user.id) else {
-            let why = self.ended.lock().get(session_id).cloned();
-            return Err(AppError::SessionStopped(Some(
-                why.unwrap_or_else(|| "this channel isn't being watched any more".into()),
-            )));
+            return Err(match self.ended.lock().get(session_id) {
+                Some(ended) => AppError::SessionStopped(ended.why.clone()),
+                None => AppError::SessionStopped(Some("this channel isn't being watched any more".into())),
+            });
         };
         v.last_seen = Instant::now();
         Ok(v.clone())
@@ -811,14 +1008,92 @@ impl Tuners {
         let removed = {
             let mut viewers = self.viewers.lock();
             match viewers.get(session_id) {
-                Some(v) if v.user_id == user.id || user.is_admin => viewers.remove(session_id).is_some(),
-                _ => false,
+                Some(v) if v.user_id == user.id || user.is_admin => viewers.remove(session_id),
+                _ => None,
             }
         };
-        if removed {
+        if let Some(viewer) = &removed {
             self.events.send(ServerEvent::LiveTunersChanged);
+            self.events.send(ServerEvent::SessionsChanged { user_id: viewer.user_id });
         }
-        removed
+        removed.is_some()
+    }
+
+    /// The viewers of `user_id` whose players are still there, for their
+    /// remotes: an app's stream reader is its watch session.
+    pub fn playing(&self, user_id: i64) -> Vec<RemoteViewer> {
+        let viewers = self.viewers.lock();
+        let theirs: Vec<&Viewer> = viewers.values().filter(|v| v.user_id == user_id).collect();
+        theirs
+            .iter()
+            .filter(|v| is_there(&viewers, v) && !theirs.iter().any(|session| v.reads_for(session)))
+            .map(|v| RemoteViewer::from(*v))
+            .collect()
+    }
+
+    /// Viewer `session_id`, whoever's it is, while its player is there.
+    pub fn present(&self, session_id: &str) -> Option<RemoteViewer> {
+        let viewers = self.viewers.lock();
+        viewers.get(session_id).filter(|v| is_there(&viewers, v)).map(RemoteViewer::from)
+    }
+
+    /// Counts a remote's command to viewer `session_id`: whether it may go
+    /// ([`CommandWindow::take`]), or `None` when the viewer is no longer
+    /// there (stopped, taken over or swept since the remote looked it up).
+    pub fn take_command(&self, session_id: &str) -> Option<bool> {
+        let mut viewers = self.viewers.lock();
+        if !viewers.get(session_id).is_some_and(|v| is_there(&viewers, v)) {
+            return None;
+        }
+        viewers.get_mut(session_id).map(|v| v.commands.take())
+    }
+
+    /// Ends viewer `session_id` from elsewhere (`DELETE /api/sessions/{id}`):
+    /// `user`'s own, or anyone's for who oversees playback (an administrator,
+    /// or one of Pley's own apps allowed `activity` on an administrator's
+    /// account: see [`AuthUser::oversees_playback`]). Its player hears
+    /// `session_stopped` and its next requests answer `410` with `message`.
+    /// `None` when no viewer of that id is known; one ended already is fine.
+    /// The stream an app reads for it ends with it.
+    pub fn stop(&self, session_id: &str, user: &AuthUser, message: Option<String>) -> Option<Result<(), AppError>> {
+        let viewer = {
+            let mut viewers = self.viewers.lock();
+            match viewers.get(session_id) {
+                Some(v) if v.user_id == user.id || user.oversees_playback() => {
+                    let viewer = viewers.remove(session_id)?;
+                    let readers: Vec<String> =
+                        viewers.values().filter(|r| r.reads_for(&viewer)).map(|r| r.id.clone()).collect();
+                    for reader in readers.iter().filter_map(|id| viewers.remove(id)) {
+                        reader.stopped.cancel();
+                        self.remember_ended(&reader, message.clone());
+                    }
+                    Some(viewer)
+                }
+                Some(_) => return Some(Err(AppError::forbidden("not your session"))),
+                None => None,
+            }
+        };
+        let Some(viewer) = viewer else {
+            return self.ended.lock().get(session_id).map(|ended| {
+                if ended.user_id == user.id || user.oversees_playback() {
+                    Ok(())
+                } else {
+                    Err(AppError::forbidden("not your session"))
+                }
+            });
+        };
+        viewer.stopped.cancel();
+        self.remember_ended(&viewer, message.clone());
+        tracing::info!(channel = viewer.channel_id, by = %user.username, "live session stopped");
+        self.events.send(ServerEvent::SessionStopped {
+            user_id: viewer.user_id,
+            session_id: viewer.id.clone(),
+            message,
+            by_admin: viewer.user_id != user.id,
+        });
+        self.events.send(ServerEvent::LiveTunersChanged);
+        self.events.send(ServerEvent::SessionsChanged { user_id: viewer.user_id });
+        Some(Ok(()))
     }
 
     /// The live playlist of an HLS viewer's channel, the transcoder's job
@@ -989,10 +1264,12 @@ impl Tuners {
         let tuner = self.tuner_of(&viewer)?;
         let stream = tuner.subscribe().ok_or_else(|| AppError::Unavailable("the channel stopped".into()))?;
         let guard = Leaves { tuners: self.clone(), session_id: session_id.to_owned() };
-        Ok(stream.map(move |chunk| {
-            let _watching = &guard;
-            chunk
-        }))
+        Ok(stream
+            .map(move |chunk| {
+                let _watching = &guard;
+                chunk
+            })
+            .take_until(viewer.stopped.cancelled_owned()))
     }
 
     /// The connections in use, for administrators.
@@ -1044,8 +1321,10 @@ struct Leaves {
 
 impl Drop for Leaves {
     fn drop(&mut self) {
-        if self.tuners.viewers.lock().remove(&self.session_id).is_some() {
+        let gone = self.tuners.viewers.lock().remove(&self.session_id);
+        if let Some(viewer) = gone {
             self.tuners.events.send(ServerEvent::LiveTunersChanged);
+            self.tuners.events.send(ServerEvent::SessionsChanged { user_id: viewer.user_id });
         }
     }
 }
@@ -1161,8 +1440,8 @@ async fn read_text(resp: reqwest::Response) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-async fn get_text(tuner: &Tuner, http: &reqwest::Client, url: &url::Url) -> Result<String, String> {
-    let mut req = http.get(url.clone()).timeout(Duration::from_secs(10));
+async fn get_text(tuner: &Tuner, http: &reqwest::Client, url: &url::Url, wait: Duration) -> Result<String, String> {
+    let mut req = http.get(url.clone()).timeout(wait);
     if !tuner.user_agent.is_empty() {
         req = req.header(reqwest::header::USER_AGENT, &tuner.user_agent);
     }
@@ -1174,72 +1453,160 @@ async fn get_text(tuner: &Tuner, http: &reqwest::Client, url: &url::Url) -> Resu
 }
 
 /// A channel the provider serves as HLS: its media playlist followed,
-/// each new segment handed on as it comes.
+/// each new segment handed on as it comes. A variant whose audio is a
+/// rendition of its own has that rendition's segments put in its own, read
+/// alongside them.
 async fn pull_hls(tuner: &Tuner, http: &reqwest::Client, mut url: url::Url, mut text: String) -> Result<(), String> {
+    let mut sound = None;
     if let Some(variant) = best_variant(&text) {
-        url = url.join(&variant).map_err(|_| "the provider's playlist names a bad address".to_owned())?;
-        text = get_text(tuner, http, &url).await?;
+        if let Some(uri) = variant.audio.and_then(|group| audio::rendition(&text, &group)) {
+            sound = Some(audio::Rendition::new(url.join(&uri).map_err(|_| BAD_ADDRESS.to_owned())?));
+        }
+        url = url.join(&variant.uri).map_err(|_| BAD_ADDRESS.to_owned())?;
+        let (got, ()) = tokio::join!(get_text(tuner, http, &url, PLAYLIST_WAIT), refresh(&mut sound, tuner, http));
+        text = got?;
     }
     let mut next: Option<u64> = None;
+    let mut held = false;
     loop {
         let playlist = media_playlist(&text)?;
         // Join a few segments behind the live edge, as players do.
         let first = next.unwrap_or_else(|| playlist.last_sequence().saturating_sub(2));
-        for (sequence, uri) in playlist.segments.iter().filter(|(s, _)| *s >= first) {
-            let segment = url.join(uri).map_err(|_| "the provider's playlist names a bad address".to_owned())?;
-            let mut req = http.get(segment).timeout(Duration::from_secs(20));
-            if !tuner.user_agent.is_empty() {
-                req = req.header(reqwest::header::USER_AGENT, &tuner.user_agent);
+        for segment in playlist.segments.iter().filter(|s| s.sequence >= first) {
+            let at = url.join(&segment.uri).map_err(|_| BAD_ADDRESS.to_owned())?;
+            match sound.as_mut().filter(|r| r.wanted()) {
+                Some(rendition) => {
+                    let video =
+                        async { read_segment(get_segment(tuner, http, at, SEGMENT_WAIT).await?, SEGMENT_BYTES).await };
+                    // The audio has about the segment's length: the picture
+                    // waits for it no longer.
+                    let started = Instant::now();
+                    let round = started + Duration::from_secs_f64(segment.duration.clamp(2.0, 10.0));
+                    let (video, mut audio) =
+                        tokio::join!(video, rendition.take(tuner, http, segment.sequence, segment.duration, round));
+                    let video = video?;
+                    // The transcoder decides from the first moment whether
+                    // the channel has sound: the first segment waits a
+                    // little for its own, unless it has sound of its own.
+                    if !held {
+                        held = true;
+                        rendition.look(&video);
+                        let by = started + audio::FIRST_SOUND_WAIT;
+                        while audio.is_empty() && rendition.active() && Instant::now() < by {
+                            tokio::time::sleep(Duration::from_millis(500)).await;
+                            rendition.refresh(tuner, http, by).await;
+                            audio = rendition.take(tuner, http, segment.sequence, 0.0, by).await;
+                        }
+                    }
+                    push_whole(tuner, rendition.join(tuner.channel_id, &video, &audio));
+                }
+                None => {
+                    let mut resp = get_segment(tuner, http, at, SEGMENT_WAIT).await?;
+                    while let Some(chunk) = resp.chunk().await.map_err(|e| super::describe(&e))? {
+                        tuner.push(chunk);
+                    }
+                }
             }
-            let mut resp = req.send().await.map_err(|e| super::describe(&e))?;
-            if !resp.status().is_success() {
-                return Err(format!("the provider answered {} for a segment", resp.status()));
-            }
-            while let Some(chunk) = resp.chunk().await.map_err(|e| super::describe(&e))? {
-                tuner.push(chunk);
-            }
-            next = Some(sequence + 1);
+            next = Some(segment.sequence + 1);
         }
         if playlist.ended {
             return Ok(());
         }
         let wait = Duration::from_secs_f64((playlist.target_duration / 2.0).clamp(1.0, 5.0));
         tokio::time::sleep(wait).await;
-        text = get_text(tuner, http, &url).await?;
+        let (got, ()) = tokio::join!(get_text(tuner, http, &url, PLAYLIST_WAIT), refresh(&mut sound, tuner, http));
+        text = got?;
     }
+}
+
+/// Reads an audio rendition's playlist again, if there is one.
+async fn refresh(sound: &mut Option<audio::Rendition>, tuner: &Tuner, http: &reqwest::Client) {
+    if let Some(rendition) = sound {
+        rendition.refresh(tuner, http, Instant::now() + audio::PLAYLIST_WAIT).await;
+    }
+}
+
+/// Hands on a segment read whole, in pieces.
+fn push_whole(tuner: &Tuner, data: Vec<u8>) {
+    let data = Bytes::from(data);
+    for at in (0..data.len()).step_by(PUSH_BYTES) {
+        tuner.push(data.slice(at..data.len().min(at + PUSH_BYTES)));
+    }
+}
+
+const BAD_ADDRESS: &str = "the provider's playlist names a bad address";
+
+async fn get_segment(
+    tuner: &Tuner,
+    http: &reqwest::Client,
+    url: url::Url,
+    wait: Duration,
+) -> Result<reqwest::Response, String> {
+    let mut req = http.get(url).timeout(wait);
+    if !tuner.user_agent.is_empty() {
+        req = req.header(reqwest::header::USER_AGENT, &tuner.user_agent);
+    }
+    let resp = req.send().await.map_err(|e| super::describe(&e))?;
+    if !resp.status().is_success() {
+        return Err(format!("the provider answered {} for a segment", resp.status()));
+    }
+    Ok(resp)
+}
+
+/// A segment whole, no larger than `limit`.
+async fn read_segment(mut resp: reqwest::Response, limit: usize) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(|e| super::describe(&e))? {
+        if out.len() + chunk.len() > limit {
+            return Err("the provider's segment is too large".into());
+        }
+        out.extend_from_slice(&chunk);
+    }
+    Ok(out)
 }
 
 struct MediaPlaylist {
     target_duration: f64,
-    segments: Vec<(u64, String)>,
+    segments: Vec<Segment>,
     ended: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Segment {
+    sequence: u64,
+    /// Its `#EXTINF`, in seconds.
+    duration: f64,
+    uri: String,
 }
 
 impl MediaPlaylist {
     fn last_sequence(&self) -> u64 {
-        self.segments.last().map_or(0, |(s, _)| *s)
+        self.segments.last().map_or(0, |s| s.sequence)
     }
 }
 
+struct Variant {
+    uri: String,
+    /// The audio group it names (`AUDIO="…"`).
+    audio: Option<String>,
+}
+
 /// The variant with the most bits of a multivariant playlist.
-fn best_variant(text: &str) -> Option<String> {
-    let mut best: Option<(u64, String)> = None;
+fn best_variant(text: &str) -> Option<Variant> {
+    let mut best: Option<(u64, Variant)> = None;
     let mut lines = text.lines().map(str::trim);
     while let Some(line) = lines.next() {
         if let Some(attrs) = line.strip_prefix("#EXT-X-STREAM-INF:") {
-            let bandwidth = attrs
-                .split(',')
-                .find_map(|a| a.trim().strip_prefix("BANDWIDTH="))
-                .and_then(|b| b.parse().ok())
-                .unwrap_or(0);
+            let bandwidth = audio::attribute(attrs, "BANDWIDTH").and_then(|b| b.parse().ok()).unwrap_or(0);
             if let Some(uri) = lines.by_ref().find(|l| !l.is_empty() && !l.starts_with('#'))
                 && best.as_ref().is_none_or(|(b, _)| bandwidth > *b)
             {
-                best = Some((bandwidth, uri.to_owned()));
+                let audio = audio::attribute(attrs, "AUDIO").map(str::to_owned);
+                best = Some((bandwidth, Variant { uri: uri.to_owned(), audio }));
             }
         }
     }
-    best.map(|(_, uri)| uri)
+    best.map(|(_, variant)| variant)
 }
 
 fn media_playlist(text: &str) -> Result<MediaPlaylist, String> {
@@ -1247,12 +1614,12 @@ fn media_playlist(text: &str) -> Result<MediaPlaylist, String> {
     let mut target_duration = 6.0;
     let mut segments = Vec::new();
     let mut ended = false;
-    let mut in_segment = false;
+    let mut duration = None;
     for line in text.lines().map(str::trim) {
         if let Some(n) = line.strip_prefix("#EXT-X-MEDIA-SEQUENCE:") {
             sequence = n.parse().unwrap_or(0);
         } else if let Some(d) = line.strip_prefix("#EXT-X-TARGETDURATION:") {
-            target_duration = d.parse().unwrap_or(6.0);
+            target_duration = seconds(d).unwrap_or(6.0);
         } else if line.starts_with("#EXT-X-MAP") {
             return Err("the provider sends fragmented MP4, which isn't read yet".into());
         } else if let Some(key) = line.strip_prefix("#EXT-X-KEY:") {
@@ -1261,17 +1628,30 @@ fn media_playlist(text: &str) -> Result<MediaPlaylist, String> {
             }
         } else if line.starts_with("#EXT-X-ENDLIST") {
             ended = true;
-        } else if line.starts_with("#EXTINF") {
-            in_segment = true;
-        } else if !line.is_empty() && !line.starts_with('#') && in_segment {
-            segments.push((sequence + segments.len() as u64, line.to_owned()));
-            in_segment = false;
+        } else if let Some(info) = line.strip_prefix("#EXTINF:") {
+            duration = Some(info.split(',').next().and_then(seconds).unwrap_or(target_duration));
+        } else if !line.is_empty()
+            && !line.starts_with('#')
+            && let Some(duration) = duration.take()
+        {
+            segments.push(Segment { sequence: sequence + segments.len() as u64, duration, uri: line.to_owned() });
         }
     }
     if segments.is_empty() && !ended {
-        return Err("the provider's playlist has no segments".into());
+        return Err(NO_SEGMENTS.into());
     }
     Ok(MediaPlaylist { target_duration, segments, ended })
+}
+
+/// Why a media playlist isn't read, when it has no segments (a live one
+/// may be so for a moment).
+const NO_SEGMENTS: &str = "the provider's playlist has no segments";
+
+/// A playlist's duration: a number of seconds above 0 and no more than ten
+/// minutes. Others (NaN, infinite, 0, negative) aren't taken: what they
+/// would pace would never end, or never start.
+fn seconds(text: &str) -> Option<f64> {
+    text.trim().parse::<f64>().ok().filter(|d| d.is_finite() && *d > 0.0 && *d <= 600.0)
 }
 
 #[cfg(test)]
@@ -1282,19 +1662,31 @@ mod tests {
     fn the_best_variant_is_the_one_with_most_bits() {
         let text = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360\nlow.m3u8\n\
                     #EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080\nhigh/index.m3u8\n";
-        assert_eq!(best_variant(text).as_deref(), Some("high/index.m3u8"));
-        assert_eq!(best_variant("#EXTM3U\n#EXTINF:2,\na.ts\n"), None);
+        let best = best_variant(text).unwrap();
+        assert_eq!((best.uri.as_str(), best.audio), ("high/index.m3u8", None));
+        assert!(best_variant("#EXTM3U\n#EXTINF:2,\na.ts\n").is_none());
+        // Its audio group, its codecs' commas notwithstanding.
+        let text = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=8500800,CODECS=\"avc1.64002a,mp4a.40.2\",AUDIO=\"program_audio\"\n\
+                    1080p.m3u8\n";
+        assert_eq!(best_variant(text).unwrap().audio.as_deref(), Some("program_audio"));
     }
 
     #[test]
     fn media_playlists_number_their_segments() {
         let text =
-            "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-MEDIA-SEQUENCE:100\n#EXTINF:4.0,\na.ts\n#EXTINF:4.0,\nb.ts\n";
+            "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-MEDIA-SEQUENCE:100\n#EXTINF:4.0,\na.ts\n#EXTINF:3.5,\nb.ts\n";
         let p = media_playlist(text).unwrap();
-        assert_eq!(p.segments, [(100, "a.ts".to_owned()), (101, "b.ts".to_owned())]);
+        let segment = |sequence, duration, uri: &str| Segment { sequence, duration, uri: uri.to_owned() };
+        assert_eq!(p.segments, [segment(100, 4.0, "a.ts"), segment(101, 3.5, "b.ts")]);
         assert_eq!((p.target_duration, p.ended, p.last_sequence()), (4.0, false, 101));
         assert!(media_playlist("#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"k\"\n#EXTINF:4,\na.ts\n").is_err());
         assert!(media_playlist("#EXTM3U\n#EXT-X-MAP:URI=\"init.mp4\"\n").is_err());
+        // Durations that aren't a number of seconds above 0 are the target.
+        let text = "#EXTM3U\n#EXT-X-TARGETDURATION:NaN\n#EXTINF:0,\na.ts\n#EXTINF:-3,\nb.ts\n#EXTINF:inf,\nc.ts\n";
+        let p = media_playlist(text).unwrap();
+        assert_eq!(p.target_duration, 6.0);
+        assert!(p.segments.iter().all(|s| s.duration == 6.0));
+        assert_eq!(media_playlist("#EXTM3U\n#EXT-X-TARGETDURATION:2\n").err().as_deref(), Some(NO_SEGMENTS));
     }
 
     fn packet(pid: u16, start: bool, flags: Option<u8>, payload: &[u8]) -> Vec<u8> {
@@ -1365,6 +1757,45 @@ mod tests {
         p[4] = (TS_PACKET - 6) as u8;
         p[TS_PACKET - 1] = 0;
         assert_eq!(pmt_pid(&p), None);
+    }
+
+    fn viewer(user_id: i64) -> Viewer {
+        Viewer {
+            id: "s".into(),
+            user_id,
+            username: format!("user{user_id}"),
+            client_id: None,
+            channel_id: 1,
+            started_at: 0,
+            last_seen: Instant::now(),
+            kind: ViewerKind::Hls,
+            media_key: None,
+            app_grant: None,
+            admin: false,
+            controls: Controls::new(),
+            device: None,
+            device_id: "session-s".into(),
+            device_kind: DeviceKind::Other,
+            commands: CommandWindow::default(),
+            stopped: CancellationToken::new(),
+        }
+    }
+
+    #[test]
+    fn who_took_a_connection_over_is_named_only_in_the_home() {
+        // Sam (1) in the home with account 2; account 3 isn't.
+        let home = InHome { name: "Sam".into(), accounts: HashSet::from([1, 2]) };
+        // Their own other device.
+        assert_eq!(taken_over_why(&viewer(1), 1, None, "News"), "Watching moved to News on another device.");
+        // Both in the home, as it is at the take-over.
+        assert_eq!(
+            taken_over_why(&viewer(2), 1, Some(&home), "News"),
+            "Sam is watching News now, on the connection this channel used."
+        );
+        // Either outside it: neither who nor what.
+        let anonymous = "Someone else needed this channel's connection to watch another channel.";
+        assert_eq!(taken_over_why(&viewer(3), 1, Some(&home), "News"), anonymous);
+        assert_eq!(taken_over_why(&viewer(2), 1, None, "News"), anonymous);
     }
 
     #[test]

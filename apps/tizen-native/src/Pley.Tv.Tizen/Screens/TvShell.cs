@@ -4,6 +4,7 @@ using Pley.Tv.Core;
 using Pley.Tv.Core.Api;
 using Pley.Tv.Core.Live;
 using Pley.Tv.Core.Player;
+using Pley.Tv.Core.Requests;
 using Pley.Tv.Core.Ui;
 using Pley.Tv.Tizen.Kit;
 using Tizen.NUI;
@@ -38,6 +39,12 @@ abstract class ShellPage
     public virtual void Gone()
     {
     }
+
+    /// <summary>
+    /// The remote is in the middle of something on the page (libraries being sorted, a playlist's
+    /// entry lifted): requests' news waits, as a press meant for it would close the news instead.
+    /// </summary>
+    public virtual bool Busy => false;
 
     /// <summary>A focus that shows nothing, for a page with nothing to focus yet.</summary>
     protected FocusItem Waiting { get; } = new FocusItem("waiting");
@@ -81,6 +88,11 @@ sealed class TvShell : Sheet
     LiveTvEntry? liveTv;
     bool nowPlaying;
     bool storage;
+    /// <summary>The way into requests and its number, while the profile has any.</summary>
+    RequestsEntry requests = RequestsEntry.None;
+
+    /// <summary>Whether the person asked for less motion (Settings): nothing turns or slides by itself.</summary>
+    public bool ReduceMotion => state.Settings.Value.ReduceMotion;
 
     public TvShell(AppState state, Action<RailItem> onRail, Action onProfile) : base("shell", Axis.Row)
     {
@@ -136,6 +148,9 @@ sealed class TvShell : Sheet
     /// <summary>The page the stack starts at, which the rail shows as current.</summary>
     public PageKey? RootKey => stack.Count > 0 ? stack[0].Key : null;
 
+    /// <summary>The pages' keys, the stack's root first: to open them again (in another language).</summary>
+    public IReadOnlyList<PageKey> Keys => stack.ConvertAll(p => p.Key);
+
     /// <summary>Opens <paramref name="page"/> over the one on top.</summary>
     public void Open(ShellPage page)
     {
@@ -189,15 +204,17 @@ sealed class TvShell : Sheet
         }
         stack.Clear();
         stack.Add(page);
-        Show(page);
+        // Marked before the page enters: a page with nothing to focus yet gives focus to the rail's
+        // current entry, which was still the page before (Home, on the first one opened).
         MarkCurrent();
+        Show(page);
     }
 
     /// <summary>Focus to the rail's current entry, which opens the rail.</summary>
     public bool FocusRail() => Rail.FocusCurrent();
 
-    /// <summary>A short message at the foot of the page, gone after 3.5 s.</summary>
-    public void Toast(string text)
+    /// <summary>A short message at the foot of the page, gone after 3.5 s, or <paramref name="ms"/> (a cast's "Playing from …", 4 s).</summary>
+    public void Toast(string text, long ms = 3_500)
     {
         toastText.Text = text;
         var width = toastText.NaturalSize.Width;
@@ -205,6 +222,7 @@ sealed class TvShell : Sheet
         toast.Size = new Size(width + Ui.Dp(40), Ui.Dp(38));
         toast.Show();
         toastTimer.Stop();
+        toastTimer.Interval = (uint)ms;
         toastTimer.Start();
     }
 
@@ -220,7 +238,8 @@ sealed class TvShell : Sheet
     /// <summary>The rail's entries for the libraries, with Live TV while it has channels and Now Playing while music has a queue.</summary>
     void RailItems()
     {
-        railItems = Pley.Tv.Core.Ui.Rail.Items(state.Libraries.Value ?? Array.Empty<Library>(), nowPlaying: nowPlaying, liveTv: liveTv?.Channels.Value > 0, storage: storage);
+        railItems = Pley.Tv.Core.Ui.Rail.Items(state.Libraries.Value ?? Array.Empty<Library>(), nowPlaying: nowPlaying, liveTv: liveTv?.Channels.Value > 0, storage: storage,
+            requests: Pley.Tv.Core.Ui.Rail.RequestsItem(requests));
         Rail.SetItems(railItems);
         MarkCurrent();
     }
@@ -239,6 +258,18 @@ sealed class TvShell : Sheet
         {
             if ((n != null) == nowPlaying) return;
             nowPlaying = n != null;
+            RailItems();
+        }));
+    }
+
+    /// <summary>The way into requests shows in the rail as <paramref name="source"/>'s summary says, with its number.</summary>
+    public void Follow(IRequestsSource source)
+    {
+        watches.Add(source.State.Watch(s =>
+        {
+            var entry = RequestsEntry.Of(s);
+            if (entry == requests) return;
+            requests = entry;
             RailItems();
         }));
     }

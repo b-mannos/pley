@@ -34,35 +34,25 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.key
-import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.staticCompositionLocalOf
-import app.pley.android.designsystem.tile.rememberSkeleton
-import app.pley.android.designsystem.tile.skeleton
-import app.pley.android.model.LiveCategory
-import app.pley.android.screens.livetv.LiveTv
-import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -70,13 +60,19 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -86,7 +82,11 @@ import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcons
+import app.pley.android.designsystem.text.asString
+import app.pley.android.designsystem.tile.rememberSkeleton
+import app.pley.android.designsystem.tile.skeleton
 import app.pley.android.model.BusyConnection
+import app.pley.android.model.LiveCategory
 import app.pley.android.model.LiveChannel
 import app.pley.android.player.engine.VideoSurface
 import app.pley.android.player.live.LivePhase
@@ -94,14 +94,17 @@ import app.pley.android.player.live.LiveState
 import app.pley.android.player.live.LiveTrouble
 import app.pley.android.screens.livetv.ChannelDigits
 import app.pley.android.screens.livetv.LivePlayerViewModel
+import app.pley.android.screens.livetv.LiveTv
 import app.pley.android.ui.phone.R
-import app.pley.android.ui.phone.kit.PleyChip
 import app.pley.android.ui.phone.kit.PleyIconButton
 import app.pley.android.ui.phone.kit.PleyTextButton
 import app.pley.android.ui.phone.kit.PrimaryButton
 import app.pley.android.ui.phone.kit.TonalButton
+import app.pley.android.ui.phone.remote.CastTarget
+import app.pley.android.ui.phone.remote.PlayOnButton
 import kotlin.math.abs
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
  * The phone's live player (the web's LivePlayerPage): the channel on its
@@ -152,7 +155,8 @@ internal fun LivePlayerScreen(vm: LivePlayerViewModel, onBack: () -> Unit) {
     }
 
     CompositionLocalProvider(LocalCategory provides category) {
-    Box(Modifier.fillMaxSize().background(Color.Black).testTag(LIVE_PLAYER)) {
+    // A window of its own: UI Automator (the benchmarks' journeys) finds its tags as resource ids.
+    Box(Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }.background(Color.Black).testTag(LIVE_PLAYER)) {
         VideoSurface(engine?.player, Modifier.fillMaxSize().testTag(TestTags.PLAYER_SURFACE))
         val density = LocalDensity.current
         Box(
@@ -325,6 +329,8 @@ private fun Controls(
                     },
                     tint = if (channel.favorite) PleyColors.Accent else PleyColors.Fg,
                 )
+                // The channel moves to the device: this player closes once it took it.
+                PlayOnButton(CastTarget.channel(channel.id), plain = true)
             } else {
                 Spacer(Modifier.weight(1f))
             }
@@ -504,9 +510,9 @@ private fun TroubleCard(
                         modifier = Modifier.padding(top = 4.dp),
                     )
                 }
-            } else if (trouble.message.isNotBlank()) {
+            } else if (trouble.text.asString().isNotBlank()) {
                 Text(
-                    trouble.message,
+                    trouble.text.asString(),
                     style = MaterialTheme.typography.bodyMedium,
                     color = PleyColors.Muted,
                     textAlign = TextAlign.Center,
@@ -515,7 +521,10 @@ private fun TroubleCard(
             }
             Spacer(Modifier.height(20.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (onRetry != null) PrimaryButton(stringResource(R.string.live_player_retry), onClick = onRetry, icon = PleyIcons.RefreshCw)
+                if (onRetry != null) {
+                    val retry = if (trouble.kind == LiveTrouble.Kind.Stopped) R.string.live_player_watch_again else R.string.live_player_retry
+                    PrimaryButton(stringResource(retry), onClick = onRetry, icon = PleyIcons.RefreshCw)
+                }
                 TonalButton(stringResource(R.string.live_player_other_channels), onClick = onChannels, icon = PleyIcons.List)
             }
             PleyTextButton(stringResource(R.string.live_player_back_to_guide), onClick = onBack)
@@ -698,7 +707,11 @@ private fun PanelChannels(
             )
         }
         LazyColumn(state = list, contentPadding = PaddingValues(bottom = 16.dp)) {
-            items(count = pages.total ?: 0, key = { index -> pages[index]?.id ?: -index - 1L }) { index ->
+            items(
+                count = pages.total ?: 0,
+                key = { index -> pages[index]?.id ?: -index - 1L },
+                contentType = { index -> if (pages[index] == null) "skeleton" else "channel" },
+            ) { index ->
                 val channel = pages[index]
                 if (channel == null) {
                     Box(Modifier.fillMaxWidth().height(58.dp).padding(horizontal = 16.dp, vertical = 8.dp).skeleton(skeleton, PleyShape.Field))

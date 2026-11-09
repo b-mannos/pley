@@ -18,7 +18,9 @@ export interface PlayRequest {
   fileId?: number | null;
   startMs?: number | null;
   fromStart?: boolean;
+  /** Tracks for this play only, in place of the saved ones; one the file doesn't have leaves them to those. */
   audioIndex?: number | null;
+  /** `-1`: none. */
   subtitleIndex?: number | null;
   queue?: { kind: "playlist" | "collection"; id: number } | null;
 }
@@ -65,8 +67,12 @@ export function playingAudio(file: MediaFile | null, info: PlaybackInfo): MediaS
   return audio.filter((s) => s.index === info.audio_index)[0] ?? audio.filter((s) => s.default)[0] ?? audio[0] ?? null;
 }
 
-/** The subtitles to start with: as asked, else the profile's choice; `null` is off, whatever the file flags. */
+/**
+ * The subtitles to start with: as asked (`-1`: none, as a cast asks), else
+ * the profile's choice; `null` is off, whatever the file flags.
+ */
 export function initialSubtitle(file: MediaFile | null, requested: number | null | undefined): MediaStream | null {
+  if (requested === -1) return null;
   const subs = subtitleStreams(file);
   return (requested != null ? subs.filter((s) => s.index === requested)[0] : undefined) ?? subs.filter((s) => s.index === file?.selected_subtitle)[0] ?? null;
 }
@@ -89,6 +95,16 @@ export function isPicture(s: MediaStream | null | undefined): boolean {
 
 export function picturePath(fileId: number, index: number): string {
   return `/api/files/${fileId}/subtitles/${index}.mks`;
+}
+
+/**
+ * `url` asked for from where the player is (`atMs` of the file): a track the server hasn't copied out of its file yet
+ * comes from there first. At the start too: a copy under way from elsewhere answers with the pictures there to a
+ * player that doesn't say.
+ */
+export function pictureUrlAt(url: string, atMs: number): string {
+  const at = Math.max(0, Math.round(atMs)) || 0;
+  return `${url}${url.indexOf("?") >= 0 ? "&" : "?"}at=${at}`;
 }
 
 /** Whether this TV decodes `stream`'s audio or sends it as it is to the receiver. */

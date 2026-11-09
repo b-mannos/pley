@@ -1,16 +1,22 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import type { ListenChoice, NetworkSettings as Network } from "@/api/types";
-import { mockApi, renderWithProviders } from "@/test/render";
+import { apiError, mockApi, renderWithProviders } from "@/test/render";
 import { movedPage, NetworkSettings, stillServes } from "./NetworkSettings";
 
 const NETWORK: Network = {
   web: ["127.0.0.1:7539"],
+  jellyfin: [],
+  jellyfin_on_web: false,
   plex: [],
-  plex_on_web: false,
+  plex_on_web: true,
   discovery: true,
-  fixed: { web: false, plex: false, discovery: false },
+  bonjour: false,
+  bonjour_adapters: [],
+  bonjour_host_name: "",
+  bonjour_host_default: "pley-0123456789ab",
+  fixed: { web: false, jellyfin: false, plex: false, discovery: false, bonjour: false },
   listeners: [{ kind: "web", address: "127.0.0.1:7539", error: null }],
   adapters: [
     {
@@ -45,22 +51,27 @@ describe("NetworkSettings", () => {
     expect(screen.getByText("Private network")).toBeInTheDocument();
     expect(screen.getByText("Not connected")).toBeInTheDocument();
     expect(screen.getByText(/Windows Firewall decides/)).toBeInTheDocument();
-    await user.click(screen.getByRole("checkbox", { name: /Ethernet/ }));
+    await user.click(within(screen.getByRole("group", { name: "Networks" })).getByRole("checkbox", { name: /Ethernet/ }));
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
       expect(requests.find((r) => r.method === "PUT")?.body).toEqual({
         web: ["127.0.0.1:7539", "192.168.1.10:7539"],
+        jellyfin: [],
+        jellyfin_on_web: false,
         plex: [],
-        plex_on_web: false,
+        plex_on_web: true,
         discovery: true,
+        bonjour: false,
+        bonjour_adapters: [],
+        bonjour_host_name: "",
       }),
     );
     expect(await screen.findByText("Pley listens there now")).toBeInTheDocument();
     expect(screen.getByText("192.168.1.10:7539")).toBeInTheDocument();
   });
 
-  it("turns the Plex-compatible API on, on pley's port or its own", async () => {
+  it("turns the Jellyfin-compatible API on, on pley's port or its own", async () => {
     const user = userEvent.setup();
     const requests = mockApi({
       "GET /api/network": () => ({ ...NETWORK, web: ["0.0.0.0:7539"] }),
@@ -68,28 +79,288 @@ describe("NetworkSettings", () => {
     });
     renderWithProviders(<NetworkSettings />);
     expect(await screen.findByRole("radio", { name: /Every network/ })).toHaveAttribute("aria-checked", "true");
-    await user.click(screen.getByRole("switch", { name: "Plex-compatible API" }));
-    expect(screen.getByRole("radio", { name: "On Pley's port (7539)" })).toHaveAttribute("aria-checked", "true");
+    await user.click(screen.getByRole("switch", { name: "Jellyfin-compatible API" }));
+    const where = within(screen.getByRole("radiogroup", { name: "Jellyfin-compatible API's port" }));
+    expect(where.getByRole("radio", { name: "On Pley's port (7539)" })).toHaveAttribute("aria-checked", "true");
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() =>
       expect(requests.filter((r) => r.method === "PUT").at(-1)?.body).toEqual({
         web: ["0.0.0.0:7539"],
+        jellyfin: [],
+        jellyfin_on_web: true,
         plex: [],
         plex_on_web: true,
         discovery: true,
+        bonjour: false,
+        bonjour_adapters: [],
+        bonjour_host_name: "",
       }),
     );
 
-    await user.click(screen.getByRole("radio", { name: "On port 32400" }));
+    // A port of its own: Jellyfin's, or another typed in.
+    await user.click(where.getByRole("radio", { name: "On a port of its own" }));
+    const port = screen.getByRole("spinbutton", { name: "Jellyfin port" });
+    expect(port).toHaveValue(8096);
+    await user.clear(port);
+    await user.type(port, "7539");
+    expect(screen.getByText("Choose another port for the Jellyfin-compatible API, or Pley's port.")).toBeInTheDocument();
+    await user.clear(port);
+    await user.type(port, "8920");
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() =>
       expect(requests.filter((r) => r.method === "PUT").at(-1)?.body).toEqual({
         web: ["0.0.0.0:7539"],
+        jellyfin: ["0.0.0.0:8920"],
+        jellyfin_on_web: false,
+        plex: [],
+        plex_on_web: true,
+        discovery: true,
+        bonjour: false,
+        bonjour_adapters: [],
+        bonjour_host_name: "",
+      }),
+    );
+
+    // And off again.
+    await user.click(screen.getByRole("switch", { name: "Jellyfin-compatible API" }));
+    expect(screen.queryByRole("spinbutton", { name: "Jellyfin port" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(requests.filter((r) => r.method === "PUT").at(-1)?.body).toEqual({
+        web: ["0.0.0.0:7539"],
+        jellyfin: [],
+        jellyfin_on_web: false,
+        plex: [],
+        plex_on_web: true,
+        discovery: true,
+        bonjour: false,
+        bonjour_adapters: [],
+        bonjour_host_name: "",
+      }),
+    );
+  });
+
+  it("has the Plex-compatible API on pley's port, and moves it to its own or turns it off", async () => {
+    const user = userEvent.setup();
+    const requests = mockApi({
+      "GET /api/network": () => ({ ...NETWORK, web: ["0.0.0.0:7539"] }),
+      "PUT /api/network": (req) => ({ ...NETWORK, ...(req.body as ListenChoice) }),
+    });
+    renderWithProviders(<NetworkSettings />);
+    expect(await screen.findByRole("switch", { name: "Plex-compatible API" })).toHaveAttribute("aria-checked", "true");
+    const plex = within(screen.getByRole("radiogroup", { name: "Plex-compatible API's port" }));
+    expect(plex.getByRole("radio", { name: "On Pley's port (7539)" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText("Plex-compatible API, on Pley's port")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+
+    // Plex's port, saved with the Jellyfin-compatible API's choice as it is.
+    await user.click(plex.getByRole("radio", { name: "On a port of its own" }));
+    expect(screen.getByRole("spinbutton", { name: "Plex port" })).toHaveValue(32400);
+    expect(screen.getByText("Plex's own is 32400.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(requests.filter((r) => r.method === "PUT").at(-1)?.body).toEqual({
+        web: ["0.0.0.0:7539"],
+        jellyfin: [],
+        jellyfin_on_web: false,
         plex: ["0.0.0.0:32400"],
         plex_on_web: false,
         discovery: true,
+        bonjour: false,
+        bonjour_adapters: [],
+        bonjour_host_name: "",
       }),
     );
+
+    // The two APIs can't share a port of their own.
+    await user.click(screen.getByRole("switch", { name: "Jellyfin-compatible API" }));
+    const jellyfin = within(screen.getByRole("radiogroup", { name: "Jellyfin-compatible API's port" }));
+    await user.click(jellyfin.getByRole("radio", { name: "On a port of its own" }));
+    const jellyfinPort = screen.getByRole("spinbutton", { name: "Jellyfin port" });
+    await user.clear(jellyfinPort);
+    await user.type(jellyfinPort, "32400");
+    expect(screen.getByText("The Jellyfin-compatible and Plex-compatible APIs can't share a port.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    await user.clear(jellyfinPort);
+    await user.type(jellyfinPort, "8096");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(requests.filter((r) => r.method === "PUT").at(-1)?.body).toEqual({
+        web: ["0.0.0.0:7539"],
+        jellyfin: ["0.0.0.0:8096"],
+        jellyfin_on_web: false,
+        plex: ["0.0.0.0:32400"],
+        plex_on_web: false,
+        discovery: true,
+        bonjour: false,
+        bonjour_adapters: [],
+        bonjour_host_name: "",
+      }),
+    );
+
+    // Off, said as such rather than left out.
+    await user.click(screen.getByRole("switch", { name: "Plex-compatible API" }));
+    expect(screen.queryByRole("radiogroup", { name: "Plex-compatible API's port" })).not.toBeInTheDocument();
+    expect(screen.getByText(/such as Kometa and Tautulli/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(requests.filter((r) => r.method === "PUT").at(-1)?.body).toEqual({
+        web: ["0.0.0.0:7539"],
+        jellyfin: ["0.0.0.0:8096"],
+        jellyfin_on_web: false,
+        plex: [],
+        plex_on_web: false,
+        discovery: true,
+        bonjour: false,
+        bonjour_adapters: [],
+        bonjour_host_name: "",
+      }),
+    );
+  });
+
+  it("leaves the Plex-compatible API alone when the command line sets it", async () => {
+    const user = userEvent.setup();
+    const requests = mockApi({
+      "GET /api/network": () => ({
+        ...NETWORK,
+        plex: ["0.0.0.0:32400"],
+        plex_on_web: false,
+        fixed: { web: false, jellyfin: false, plex: true, discovery: false, bonjour: false },
+        listeners: [
+          { kind: "web", address: "127.0.0.1:7539", error: null },
+          { kind: "plex", address: "0.0.0.0:32400", error: "address in use" },
+        ],
+      }),
+      "PUT /api/network": (req) => ({ ...NETWORK, ...(req.body as ListenChoice) }),
+    });
+    renderWithProviders(<NetworkSettings />);
+    expect(await screen.findByRole("switch", { name: "Plex-compatible API" })).toBeDisabled();
+    expect(screen.getByText("Set by --plex-bind or PLEY_PLEX_BIND.")).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "Plex port" })).toBeDisabled();
+    const listener = screen.getByText("0.0.0.0:32400").closest("li");
+    expect(listener).toHaveTextContent("Plex-compatible API");
+    expect(listener).toHaveTextContent("Can't listen: address in use");
+
+    await user.click(screen.getByRole("switch", { name: "Jellyfin-compatible API" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(requests.find((r) => r.method === "PUT")?.body).toEqual({
+        web: ["127.0.0.1:7539"],
+        jellyfin: [],
+        jellyfin_on_web: true,
+        plex: ["0.0.0.0:32400"],
+        plex_on_web: false,
+        discovery: true,
+        bonjour: false,
+        bonjour_adapters: [],
+        bonjour_host_name: "",
+      }),
+    );
+  });
+
+  it("says why the server refuses a choice", async () => {
+    const user = userEvent.setup();
+    mockApi({
+      // On two ports, from the command line: the page shows the first.
+      "GET /api/network": () => ({
+        ...NETWORK,
+        jellyfin: ["0.0.0.0:8096", "0.0.0.0:32400"],
+        fixed: { web: false, jellyfin: true, plex: false, discovery: false, bonjour: false },
+      }),
+      "PUT /api/network": () =>
+        apiError(400, "bad_request", "the Plex-compatible API can't share port 32400 with the Jellyfin-compatible API"),
+    });
+    renderWithProviders(<NetworkSettings />);
+    const plex = within(await screen.findByRole("radiogroup", { name: "Plex-compatible API's port" }));
+    await user.click(plex.getByRole("radio", { name: "On a port of its own" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(
+      await screen.findByText("The Plex-compatible API can't share port 32400 with the Jellyfin-compatible API"),
+    ).toBeInTheDocument();
+    // The choice stays, to change.
+    expect(screen.getByRole("spinbutton", { name: "Plex port" })).toHaveValue(32400);
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+  });
+
+  it("announces by Bonjour on the networks chosen", async () => {
+    const user = userEvent.setup();
+    const requests = mockApi({
+      "GET /api/network": () => ({ ...NETWORK, web: ["0.0.0.0:7539"] }),
+      "PUT /api/network": (req) => ({ ...NETWORK, ...(req.body as ListenChoice) }),
+    });
+    renderWithProviders(<NetworkSettings />);
+    // Off until turned on.
+    expect(await screen.findByRole("switch", { name: "Found by Apple's devices (Bonjour)" })).not.toBeChecked();
+    expect(screen.queryByRole("group", { name: "Announced on" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("switch", { name: "Found by Apple's devices (Bonjour)" }));
+    expect(screen.getByRole("checkbox", { name: /Every network Pley listens on/ })).toBeChecked();
+
+    // A host name of its own, as typed.
+    expect(screen.getByRole("textbox", { name: "Host name" })).toHaveAttribute("placeholder", "pley-0123456789ab");
+    await user.type(screen.getByRole("textbox", { name: "Host name" }), "my media");
+    expect(screen.getByText(/Bonjour's host name is letters, digits and hyphens/)).toBeInTheDocument();
+    // Hidden, a host name that can't be saved doesn't stop the rest: the saved one stays.
+    await user.click(screen.getByRole("switch", { name: "Found by Apple's devices (Bonjour)" }));
+    expect(screen.queryByText(/Bonjour's host name is letters, digits and hyphens/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("switch", { name: "Found by Apple's devices (Bonjour)" }));
+    await user.clear(screen.getByRole("textbox", { name: "Host name" }));
+    await user.type(screen.getByRole("textbox", { name: "Host name" }), "Media.local");
+
+    // The home network only, not the Wi-Fi.
+    await user.click(within(screen.getByRole("group", { name: "Announced on" })).getByRole("checkbox", { name: /^Ethernet/ }));
+    expect(screen.getByRole("checkbox", { name: /Every network Pley listens on/ })).not.toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(requests.filter((r) => r.method === "PUT").at(-1)?.body).toEqual({
+        web: ["0.0.0.0:7539"],
+        jellyfin: [],
+        jellyfin_on_web: false,
+        plex: [],
+        plex_on_web: true,
+        discovery: true,
+        bonjour: true,
+        bonjour_adapters: ["Ethernet"],
+        bonjour_host_name: "media",
+      }),
+    );
+
+    // Off: its choices go with it from the page, and stay saved.
+    await user.click(screen.getByRole("switch", { name: "Found by Apple's devices (Bonjour)" }));
+    expect(screen.queryByRole("group", { name: "Announced on" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requests.filter((r) => r.method === "PUT").at(-1)?.body).toMatchObject({ bonjour: false }));
+  });
+
+  it("offers Bonjour only the networks Pley listens on", async () => {
+    mockApi({
+      "GET /api/network": () => ({
+        ...NETWORK,
+        web: ["127.0.0.1:7539", "192.168.1.10:7539"],
+        bonjour: true,
+        bonjour_adapters: ["Wi-Fi"],
+        bonjour_host_name: "",
+      }),
+    });
+    renderWithProviders(<NetworkSettings />);
+    const announced = within(await screen.findByRole("group", { name: "Announced on" }));
+    expect(announced.getByRole("checkbox", { name: /^Ethernet/ })).not.toBeChecked();
+    // Chosen before, but Pley doesn't listen there now.
+    expect(announced.getByRole("checkbox", { name: /^Wi-Fi/ })).toBeChecked();
+    expect(announced.getByText(/Not a network Pley listens on now/)).toBeInTheDocument();
+  });
+
+  it("leaves Bonjour alone when the command line turns it off", async () => {
+    mockApi({
+      "GET /api/network": () => ({
+        ...NETWORK,
+        web: ["0.0.0.0:7539"],
+        bonjour: false,
+        fixed: { web: false, jellyfin: false, plex: false, discovery: false, bonjour: true },
+      }),
+    });
+    renderWithProviders(<NetworkSettings />);
+    expect(await screen.findByRole("switch", { name: "Found by Apple's devices (Bonjour)" })).toBeDisabled();
+    expect(screen.getByText(/Turned off by --no-bonjour/)).toBeInTheDocument();
   });
 
   it("leaves what the command line sets alone, and says which addresses wait", async () => {
@@ -97,15 +368,15 @@ describe("NetworkSettings", () => {
       "GET /api/network": () => ({
         ...NETWORK,
         web: ["0.0.0.0:7539"],
-        fixed: { web: true, plex: false, discovery: false },
-        listeners: [{ kind: "plex", address: "0.0.0.0:32400", error: "address in use (by a Plex server?)" }],
+        fixed: { web: true, jellyfin: false, plex: false, discovery: false, bonjour: false },
+        listeners: [{ kind: "jellyfin", address: "0.0.0.0:8096", error: "address in use" }],
       }),
     });
     renderWithProviders(<NetworkSettings />);
     expect(await screen.findByRole("radio", { name: /Every network/ })).toBeDisabled();
     expect(screen.getByText("PLEY_BIND")).toBeInTheDocument();
     expect(screen.getByRole("spinbutton", { name: "Port" })).toBeDisabled();
-    expect(screen.getByText("Can't listen: address in use (by a Plex server?)")).toBeInTheDocument();
+    expect(screen.getByText("Can't listen: address in use")).toBeInTheDocument();
   });
 
   it("knows when this page would stop working, or move", () => {

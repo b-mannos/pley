@@ -14,6 +14,22 @@ from collections import namedtuple
 
 WIDTH, HEIGHT = 1920, 1080
 
+# The add-on's words the windows' XML draws (strings.po ids). Kodi's own
+# $ADDON[] would draw them in Kodi's language: each is a Home window
+# property instead, which the add-on fills in the language shown
+# (kodi.show_words) and fills again when it changes.
+WORDS = (
+    30003, 30004, 30005, 30019, 30020, 30021, 30027, 30100, 30101, 30102, 30103, 30104, 30105, 30106, 30107, 30109,
+    30110, 30111, 30171, 30172, 30174, 30175, 30176, 30177, 30178, 30180, 30207, 30214, 30219, 30247, 30257,
+)
+
+
+def word(id_: int) -> str:
+    """The label that draws the words of `id_` (one of WORDS)."""
+    if id_ not in WORDS:
+        raise ValueError("%d isn't one of layout.WORDS" % id_)
+    return "$INFO[Window(Home).Property(pley.word.%d)]" % id_
+
 # pley's colours (PleyColors.kt), as Kodi writes them: AARRGGBB.
 BG = "FF0B0D10"
 SURFACE = "FF12151A"
@@ -85,6 +101,21 @@ GRID = {
 }
 
 
+# A library poster's quality badges (the Android TV app's TileOverlays):
+# pills 36 tall, 12 in from the art's left and foot and 12 apart, each its
+# word in FONT_BADGE with 12 either side. By the key the tile gives the
+# skin (tiles.badges): its word, and its pill's width. "4K" and the
+# widest after it fill a poster of the grid to its inset.
+BADGE_HEIGHT, BADGE_INSET, BADGE_GAP = 36, 12, 12
+BADGES = {
+    "4k": ("4K", 50),
+    "dolby_vision": ("DV", 54),
+    "hdr10plus": ("HDR+", 82),
+    "hdr10": ("HDR", 70),
+    "hlg": ("HLG", 68),
+}
+
+
 def stride(shape: Shape) -> int:
     return shape.width + shape.gap
 
@@ -108,27 +139,34 @@ BACKDROP = 1001
 SCRIM_HERO, SCRIM_ROWS, SCRIM_ITEM = 1003, 1004, 1005
 
 # The rail (TvRail, RailItems.kt): a group, its entries' groups and buttons.
-# The first three libraries take an entry each; with more, Libraries (a page
-# of them all) takes Collections' place, so the rail never holds more than
-# seven entries between the avatar and Settings; eight with Live TV, after
-# Home as in the web's sidebar, where the server has channels.
+# Search, Home, Live TV after it where the server has channels (as in the
+# web's sidebar), the libraries, then Playlists and Collections; with more
+# libraries than the rail lists, Libraries (a page of them all) takes
+# Collections' place. The Android TV app's rail scrolls; Kodi's entries have
+# fixed places, so it lists as many libraries as fit over Settings at full
+# height (window.rail_shown).
 RAIL = 100
 RAIL_AVATAR = 110
 RAIL_SEARCH = 111
 RAIL_HOME = 112
 RAIL_LIVE = 117
-RAIL_LIBRARIES = (113, 114, 115)
+# Room for five libraries: with Search, Home, Libraries and Playlists, nine
+# entries fit (RAIL_FIT); a sixth, as the other TV apps list, would not.
+RAIL_LIBRARIES = (113, 114, 115, 122, 123)
+RAIL_LEAST_LIBRARIES = 4  # listed whatever else the rail holds
 RAIL_ALL_LIBRARIES = 116
 RAIL_PLAYLISTS = 119
 RAIL_COLLECTIONS = 120
 RAIL_SETTINGS = 121
 RAIL_ENTRIES = (RAIL_AVATAR, RAIL_SEARCH, RAIL_HOME, RAIL_LIVE) + RAIL_LIBRARIES + (RAIL_ALL_LIBRARIES, RAIL_PLAYLISTS, RAIL_COLLECTIONS, RAIL_SETTINGS)
-RAIL_TOP = 194  # the first entry's middle, under the avatar's 86
-RAIL_PITCH = 112
-RAIL_SETTINGS_Y = 974
-RAIL_ROW = 100  # an entry's pill, as tall as the space between entries allows
-RAIL_GAP = 12  # at least, between two pills
-RAIL_AVATAR_Y = 86
+RAIL_AVATAR_Y = 86  # the avatar's middle; it is 100 tall, down to 136
+RAIL_TOP = 184  # the first entry's middle, a gap under the avatar
+RAIL_ROW = 80  # an entry's pill (40 on the Android TV app's canvas), as tall as the space between entries allows
+RAIL_GAP = 8  # at least, between two pills
+RAIL_PITCH = RAIL_ROW + RAIL_GAP
+RAIL_SETTINGS_Y = 986  # Settings' middle: its foot on the safe area's, 1026
+# How many entries fit from Search down at full height, Settings apart.
+RAIL_FIT = (RAIL_SETTINGS_Y - RAIL_TOP) // RAIL_PITCH
 RAIL_NAME, RAIL_SUBTITLE, RAIL_INITIAL, RAIL_PICTURE, RAIL_COLOR = 130, 131, 132, 133, 134
 
 
@@ -154,8 +192,8 @@ def rail_pill(entry: int) -> int:
 def rail_pitch(entries: int) -> int:
     """How far apart `entries` entries from Search down are: closer than
     RAIL_PITCH when there are too many for the last to end a step above
-    Settings (seven do). Settings' pill is as tall as the others', so a
-    full rail goes down to it evenly."""
+    Settings (more than RAIL_FIT). Settings' pill is as tall as the others',
+    so a full rail goes down to it evenly."""
     # From Search's middle, a step per entry down to Settings' middle.
     return min(RAIL_PITCH, (RAIL_SETTINGS_Y - RAIL_TOP) // entries)
 
@@ -227,8 +265,11 @@ LIBRARY_CONTROLS = 4020
 # The sort chip twice: ascending and descending (its icon says which).
 LIBRARY_SORT, LIBRARY_SORT_DOWN, LIBRARY_UNWATCHED, LIBRARY_GENRE, LIBRARY_YEAR = 4021, 4121, 4023, 4024, 4025
 LIBRARY_FILTER = 4022
-# The filter chips twice too: off, and on (leading with a check).
+# The filter chips twice too: off, and on (leading with a check). The
+# resolution and the dynamic range have no chips of their own, which the
+# row has no room for: Filter's twin says them while one is chosen.
 LIBRARY_UNWATCHED_ON, LIBRARY_GENRE_ON, LIBRARY_YEAR_ON = 4123, 4124, 4125
+LIBRARY_FILTER_ON = 4122
 LIBRARY_COUNT = 4026
 LIBRARY_GRID = 4030  # one list per grid shape
 LIBRARY_EMPTY = 4040

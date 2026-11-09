@@ -312,10 +312,35 @@ public class LocalTests
     }
 
     [Fact]
-    public void A_subtitle_file_not_in_UTF8_is_read_as_Latin1()
+    public void A_subtitle_file_not_in_UTF8_is_read_as_Windows1252()
     {
         Assert.Equal("café", LocalFolder.Decode(new byte[] { 0x63, 0x61, 0x66, 0xe9 }));
         Assert.Equal("café", LocalFolder.Decode(Encoding.UTF8.GetBytes("café")));
+        // Its curly quotes, dash and euro, which Latin-1 would make control characters.
+        Assert.Equal("“Hi” – 5€", LocalFolder.Decode(new byte[] { 0x93, 0x48, 0x69, 0x94, 0x20, 0x96, 0x20, 0x35, 0x80 }));
+    }
+
+    [Fact]
+    public void A_subtitle_file_in_UTF16_or_UTF32_is_read_by_its_byte_order_mark()
+    {
+        const string text = "Café 日本 \U0001F3AC";
+        Assert.Equal(text, LocalFolder.Decode(new byte[] { 0xFF, 0xFE }.Concat(Encoding.Unicode.GetBytes(text)).ToArray()));
+        Assert.Equal(text, LocalFolder.Decode(new byte[] { 0xFE, 0xFF }.Concat(Encoding.BigEndianUnicode.GetBytes(text)).ToArray()));
+        Assert.Equal(text, LocalFolder.Decode(new byte[] { 0xFF, 0xFE, 0, 0 }.Concat(new UTF32Encoding(false, false).GetBytes(text)).ToArray()));
+        Assert.Equal(text, LocalFolder.Decode(new byte[] { 0, 0, 0xFE, 0xFF }.Concat(new UTF32Encoding(true, false).GetBytes(text)).ToArray()));
+        // A lone surrogate and an odd last byte don't stop the rest.
+        Assert.Equal("�A", LocalFolder.Decode(new byte[] { 0xFF, 0xFE, 0x00, 0xD8, 0x41, 0x00, 0x42 }));
+    }
+
+    [Fact]
+    public void A_subtitle_file_in_UTF16_without_its_mark_is_read_by_its_NUL_bytes()
+    {
+        const string text = "1\n00:00:01,000 --> 00:00:02,000\nCafé 日本\n";
+        Assert.Equal(text, LocalFolder.Decode(Encoding.Unicode.GetBytes(text)));
+        Assert.Equal(text, LocalFolder.Decode(Encoding.BigEndianUnicode.GetBytes(text)));
+        // Text in a single-byte encoding has no NULs: never taken for UTF-16.
+        const string plain = "1\n00:00:01,000 --> 00:00:02,000\nHello\n";
+        Assert.Equal(plain, LocalFolder.Decode(Encoding.UTF8.GetBytes(plain)));
     }
 
     // ---- playing one
@@ -335,11 +360,13 @@ public class LocalTests
         public Task<ItemDetail> Item(long id) => throw new NotSupportedException();
         public Task<PlaybackInfo> StartPlayback(IReadOnlyDictionary<string, object?> body) => throw new NotSupportedException();
         public Task StopPlayback(string session) => throw new NotSupportedException();
-        public Task Progress(long itemId, long positionMs, long? durationMs, string state, string session) => throw new NotSupportedException();
+        public Task Progress(long itemId, long positionMs, long? durationMs, string state, string session, PlayingTracks? tracks = null, string? quality = null) => throw new NotSupportedException();
         public Task<SessionStatus> PlaybackStatus(string session, int timeoutMs) => throw new NotSupportedException();
         public Task Reachable(int timeoutMs) => throw new NotSupportedException();
         public Task<SubtitleText> Subtitles(string url) => throw new NotSupportedException();
         public Task<SubtitlePictures> PictureSubtitles(string url) => throw new NotSupportedException();
+
+        public Task<SubtitlePart> PictureSubtitlesPart(string url, long from, long to) => throw new NotSupportedException();
         public Task<TrickplayInfo?> Trickplay(long fileId) => throw new NotSupportedException();
         public string TrickplaySheetUrl(long fileId, int sheet, string version) => "";
         public Task<ItemSummary?> Next(long itemId) => throw new NotSupportedException();

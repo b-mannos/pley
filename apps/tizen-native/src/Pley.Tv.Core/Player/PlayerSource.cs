@@ -47,8 +47,8 @@ public interface IPlayerSource
     /// <summary>DELETE /api/playback/{session}.</summary>
     Task StopPlayback(string session);
 
-    /// <summary>POST /api/items/{id}/progress.</summary>
-    Task Progress(long itemId, long positionMs, long? durationMs, string state, string session);
+    /// <summary>POST /api/items/{id}/progress, with the <paramref name="tracks"/> playing and the <paramref name="quality"/> picked.</summary>
+    Task Progress(long itemId, long positionMs, long? durationMs, string state, string session, PlayingTracks? tracks = null, string? quality = null);
 
     /// <summary>GET /api/playback/{session}, waiting <paramref name="timeoutMs"/> at most.</summary>
     Task<SessionStatus> PlaybackStatus(string session, int timeoutMs);
@@ -61,6 +61,9 @@ public interface IPlayerSource
 
     /// <summary>The server's .mks of a picture subtitle track at an absolute address.</summary>
     Task<SubtitlePictures> PictureSubtitles(string url);
+
+    /// <summary>Bytes from, to (inclusive) of the server's .mks of a picture subtitle track (<see cref="PictureRanges"/>).</summary>
+    Task<SubtitlePart> PictureSubtitlesPart(string url, long from, long to);
 
     /// <summary>The file's seek previews; null while the server makes them.</summary>
     Task<TrickplayInfo?> Trickplay(long fileId);
@@ -127,7 +130,8 @@ public sealed class AppPlayerSource : IPlayerSource
 
     public Task StopPlayback(string session) => Api.StopPlayback(session);
 
-    public Task Progress(long itemId, long positionMs, long? durationMs, string state, string session) => Api.Progress(itemId, positionMs, durationMs, state, session);
+    public Task Progress(long itemId, long positionMs, long? durationMs, string state, string session, PlayingTracks? tracks = null, string? quality = null) =>
+        Api.Progress(itemId, positionMs, durationMs, state, session, tracks, quality);
 
     public Task<SessionStatus> PlaybackStatus(string session, int timeoutMs) => Api.PlaybackStatus(session, timeoutMs: timeoutMs);
 
@@ -136,6 +140,8 @@ public sealed class AppPlayerSource : IPlayerSource
     public Task<SubtitleText> Subtitles(string url) => Api.Subtitles(url);
 
     public Task<SubtitlePictures> PictureSubtitles(string url) => Api.PictureSubtitles(url);
+
+    public Task<SubtitlePart> PictureSubtitlesPart(string url, long from, long to) => Api.PictureSubtitlesPart(url, from, to);
 
     public Task<TrickplayInfo?> Trickplay(long fileId) => Api.Trickplay(fileId);
 

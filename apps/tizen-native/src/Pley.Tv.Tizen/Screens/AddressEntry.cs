@@ -11,7 +11,7 @@ namespace Pley.Tv.Tizen.Screens;
 /// Typing a server's address (design spec §2.11, tv-addendum §4.4; the Android app's TvAddressEntry):
 /// a field and Connect under it. The TV's keyboard opens with the screen, so a name or a whole https
 /// address types as easily as an IP; once it is closed, the remote's digit keys type too. Port 7539
-/// is used by default. Back goes back to the list.
+/// is used by default. Back goes back to the list. The globe at the bottom right picks the TV's language.
 /// </summary>
 sealed class AddressEntry : Sheet
 {
@@ -21,12 +21,14 @@ sealed class AddressEntry : Sheet
     readonly ServersModel model;
     readonly TextInput field;
     readonly ButtonView connect;
+    readonly ButtonView globeButton;
     readonly TextLabel problem;
     readonly IDisposable watch;
     readonly IDisposable keys;
-    string connectLabel = "Connect";
+    string connectLabel = Strings.T("signin.address.connect");
 
-    public AddressEntry(Shell shell, ServersModel model) : base("address-entry")
+    /// <param name="typed">In the field at first: what was typed before the screen was drawn again in another language.</param>
+    public AddressEntry(Shell shell, ServersModel model, LanguageGlobe globe, string typed = "") : base("address-entry")
     {
         this.shell = shell;
         this.model = model;
@@ -34,36 +36,42 @@ sealed class AddressEntry : Sheet
         View.Add(Onboarding.BrandGlow());
 
         var center = PleyTv.CanvasWidth / 2;
-        var title = Text.Label("Enter your server's address", PleyType.Title, PleyColors.Fg, width: 600);
+        var title = Text.Label(Strings.T("signin.address.title"), PleyType.Title, PleyColors.Fg, width: 600);
         title.HorizontalAlignment = HorizontalAlignment.Center;
         title.Position = new Position(Ui.Dp(center - 300), Ui.Dp(Top));
         View.Add(title);
 
         var fieldTop = Top + PleyType.Title.Line + 8;
-        field = new TextInput(shell.Input, FieldWidth, "192.168.1.20 or pley.example.com", InputMethod.PanelLayoutType.URL, InputMethod.ActionButtonTitleType.Go)
+        field = new TextInput(shell.Input, FieldWidth, Strings.T("signin.address.placeholder"), InputMethod.PanelLayoutType.URL, InputMethod.ActionButtonTitleType.Go)
         {
             Position = new Position(Ui.Dp(center - FieldWidth / 2), Ui.Dp(fieldTop)),
         };
+        field.Value = typed;
         field.Changed += _ => model.AddressEdited();
         field.Submitted = Connect;
         View.Add(field);
 
         var connectTop = fieldTop + TextInput.Height + 14;
-        connect = new ButtonView("Connect", ButtonKind.Pill, Connect);
+        connect = new ButtonView(connectLabel, ButtonKind.Pill, Connect);
         connect.PositionY = Ui.Dp(connectTop);
         LayoutConnect();
         View.Add(connect);
 
         // Under it: how addresses work, and what went wrong.
-        var hint = Paragraph("Port 7539 is used by default.", PleyType.Caption, PleyColors.Muted, 1);
+        var hint = Paragraph(Strings.T("signin.address.port", ("port", Addresses.DefaultPort)), PleyType.Caption, PleyColors.Muted, 1);
         hint.Position = new Position(Ui.Dp(center - FieldWidth / 2), Ui.Dp(connectTop + PleyTv.ButtonHeight + 24));
         View.Add(hint);
         problem = Paragraph("", PleyType.Body, PleyColors.DangerText, 6);
         problem.Position = new Position(hint.PositionX, hint.PositionY + hint.SizeHeight + Ui.Dp(12));
         View.Add(problem);
 
+        globeButton = GlobeButton.Of(shell, globe);
+        View.Add(globeButton);
+
+        // Down from Connect reaches the globe.
         Root.Add(field.Item);
         Root.Add(connect.Item);
+        Root.Add(globeButton.Item);
 
         // D-pad rule 10: with the keyboard closed, the remote's digit keys type into the field, with the
         // letters and "." ":" "/" "-" "_" a keyboard sends. While it is open, the field takes every key first.
@@ -87,17 +95,26 @@ sealed class AddressEntry : Sheet
         };
     }
 
-    public void Show()
+    /// <param name="focusGlobe">The globe has focus, and the TV's keyboard stays closed: drawn again after the globe changed the language.</param>
+    public void Show(bool focusGlobe = false)
     {
         shell.Push(this);
+        if (focusGlobe)
+        {
+            Tree.Focus(globeButton.Item);
+            return;
+        }
         Tree.Focus(field.Item);
         field.Start();
     }
 
+    /// <summary>What the field holds.</summary>
+    public string Address => field.Value;
+
     void Show(ServersState state)
     {
         problem.Text = state.AddressProblem?.Text ?? "";
-        var label = state.CheckingAddress ? "Checking…" : "Connect";
+        var label = state.CheckingAddress ? Strings.T("signin.address.checking") : Strings.T("signin.address.connect");
         if (connectLabel != label)
         {
             connectLabel = label;

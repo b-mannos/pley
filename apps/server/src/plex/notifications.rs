@@ -11,9 +11,11 @@
 //! - `activity`: library scans starting, progressing and ending;
 //! - `status`: a library scan finished (`LIBRARY_UPDATE`).
 //!
-//! A user hears about their own sessions (administrators about everyone's)
-//! and the libraries they may open. The token is checked again every 10 s:
-//! the socket closes once it is revoked, and changed rights apply.
+//! A user hears about their own sessions (an administrator's token with
+//! `activity` about everyone's) and the libraries they may open. The token
+//! is checked again every 10 s: the socket closes once it is revoked, and
+//! changed rights apply. A ping goes with each check, so that a quiet
+//! socket isn't taken for a server gone.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -28,7 +30,7 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::time::MissedTickBehavior;
 
 use super::{PlexError, PlexResult, PlexUser, meta, playback};
-use crate::auth::AuthUser;
+use crate::auth::{AuthUser, ClientIp, UsedFrom};
 use crate::catalog;
 use crate::events::{ScanPhase, ServerEvent};
 use crate::state::AppState;
@@ -39,6 +41,8 @@ use crate::util::now;
 const TICK: Duration = Duration::from_secs(10);
 /// New items reported for one library change; the rest come with the next.
 const BATCH: i64 = 500;
+/// The most a message from a client may be, in bytes.
+const MAX_MESSAGE: usize = 64 * 1024;
 
 /// The token the client connected with, to check it again later.
 pub struct Token(String);
@@ -55,14 +59,19 @@ pub async fn socket(
     State(state): State<AppState>,
     PlexUser(user): PlexUser,
     Token(token): Token,
+    ClientIp(ip): ClientIp,
     upgrade: WebSocketUpgrade,
 ) -> PlexResult<Response> {
     // Listening, and what is there already known, before the client hears
     // back: nothing that happens once it is connected goes unreported.
     let events = state.events.subscribe();
-    let mut listener = Listener::new(state, user, token);
+    let mut listener = Listener::new(state, user, token, UsedFrom { ip, user_agent: None });
     listener.start().await.map_err(PlexError::Internal)?;
-    Ok(upgrade.on_upgrade(move |socket| listener.run(socket, events)))
+    // Plex's clients send nothing: a few bytes at most are read.
+    Ok(upgrade
+        .max_message_size(MAX_MESSAGE)
+        .max_frame_size(MAX_MESSAGE)
+        .on_upgrade(move |socket| listener.run(socket, events)))
 }
 
 /// A session as last reported: its key and client stay the same to the end.
@@ -80,6 +89,9 @@ struct Listener {
     state: AppState,
     user: AuthUser,
     token: String,
+    /// Where the client connected from, which the token's origins are
+    /// checked against again.
+    from: UsedFrom,
     /// Names of the libraries the user may open.
     libraries: HashMap<i64, String>,
     /// What was last reported, by session.
@@ -91,11 +103,12 @@ struct Listener {
 }
 
 impl Listener {
-    fn new(state: AppState, user: AuthUser, token: String) -> Self {
+    fn new(state: AppState, user: AuthUser, token: String, from: UsedFrom) -> Self {
         Self {
             state,
             user,
             token,
+            from,
             libraries: HashMap::new(),
             sessions: HashMap::new(),
             newest: HashMap::new(),
@@ -138,13 +151,21 @@ impl Listener {
                     Err(RecvError::Closed) => break,
                 },
                 _ = tick.tick() => {
-                    let Some(user) = self.state.auth.validate(&self.token).await else { break };
-                    let rights = (user.is_admin, user.all_libraries, user.max_age);
-                    if rights != (self.user.is_admin, self.user.all_libraries, self.user.max_age) {
+                    let Some(user) = self.state.auth.validate_compatibility(&self.token, Some(&self.from)).await
+                    else {
+                        break;
+                    };
+                    let rights = (super::sees_everyone(&user), user.all_libraries, user.max_age);
+                    if rights != (super::sees_everyone(&self.user), self.user.all_libraries, self.user.max_age) {
                         self.user = user;
                         if let Err(err) = self.load_libraries().await {
                             tracing::debug!("notification socket: {err}");
                         }
+                    }
+                    // A ping as Plex's server sends them: clients such as
+                    // Tautulli take a socket quiet for 15 s for a server down.
+                    if socket.send(Message::Ping(Default::default())).await.is_err() {
+                        return;
                     }
                     self.sessions_changed()
                 }
@@ -174,8 +195,21 @@ impl Listener {
 
     async fn on_event(&mut self, event: ServerEvent) -> Vec<Value> {
         let result = match event {
-            ServerEvent::SessionsChanged => Ok(self.sessions_changed()),
+            // Someone else's sessions are looked at only by a client that
+            // sees everyone's (as on Pley's own streams): nothing changed
+            // that the others list.
+            ServerEvent::SessionsChanged { user_id } if user_id == self.user.id || super::sees_everyone(&self.user) => {
+                Ok(self.sessions_changed())
+            }
+            ServerEvent::SessionsChanged { .. } => Ok(Vec::new()),
             ServerEvent::LibrariesChanged => self.load_libraries().await.map(|()| Vec::new()),
+            // The libraries the account may open changed: it is read again.
+            ServerEvent::OwnLibrariesChanged { user_id } if user_id == self.user.id => {
+                if let Some(user) = self.state.auth.validate_compatibility(&self.token, Some(&self.from)).await {
+                    self.user = user;
+                }
+                self.load_libraries().await.map(|()| Vec::new())
+            }
             ServerEvent::LibraryChanged { library_id } => self.items_added(library_id).await,
             ServerEvent::ScanStarted { library_id } => {
                 Ok(self.scan(library_id, "started", 0, "").into_iter().collect())
@@ -207,8 +241,11 @@ impl Listener {
             | ServerEvent::OwnLibrariesChanged { .. }
             | ServerEvent::UserStateChanged { .. }
             | ServerEvent::SessionStopped { .. }
+            | ServerEvent::PlayerCommand { .. }
+            | ServerEvent::Cast { .. }
             | ServerEvent::LiveChannelsChanged
             | ServerEvent::LiveTunersChanged
+            | ServerEvent::LiveTakenOver { .. }
             | ServerEvent::RequestsChanged { .. }
             | ServerEvent::RequestAvailable { .. }
             | ServerEvent::RequestDecided { .. }
@@ -226,7 +263,8 @@ impl Listener {
     /// moved on since the last look, and `stopped` for those that ended.
     fn sessions_changed(&mut self) -> Vec<Value> {
         let live = self.state.sessions.active();
-        let mine: Vec<_> = live.iter().filter(|s| self.user.is_admin || s.user_id == self.user.id).collect();
+        let everyone = super::sees_everyone(&self.user);
+        let mine: Vec<_> = live.iter().filter(|s| everyone || s.user_id == self.user.id).collect();
         let mut notes = Vec::new();
         for session in &mine {
             let play = session.play.lock().clone();

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import type HlsType from "hls.js";
@@ -11,8 +12,6 @@ import {
   Minimize,
   Pause,
   Play,
-  RotateCcw,
-  RotateCw,
   ServerOff,
   SkipForward,
   TriangleAlert,
@@ -25,6 +24,7 @@ import { onServerEvent } from "@/api/events";
 import { fetchNext, invalidateWatchState, keys, useTrickplay } from "@/api/hooks";
 import { deleteSubtitle, trackStream } from "@/api/subtitles";
 import type {
+  Control,
   ItemDetail,
   ItemSummary,
   MediaFile,
@@ -40,9 +40,11 @@ import { useAuth } from "@/auth";
 import { Slider } from "@/components/Slider";
 import { useToast } from "@/components/Toast";
 import { canPlayNativeHls, videoCaps } from "@/lib/caps";
+import { deviceFields } from "@/lib/castReceiver";
 import { cn } from "@/lib/cn";
 import { episodeLabel, fileResolution, formatBitrate, formatClock, streamLabel } from "@/lib/format";
 import { loadHls } from "@/lib/hls";
+import { playingHere } from "@/lib/playingHere";
 import { warmStream } from "./prepare";
 import { useDocumentTitle, useLocalStorage } from "@/lib/hooks";
 import {
@@ -56,8 +58,8 @@ import {
 } from "@/lib/progress";
 import { playUrl } from "@/lib/usePlayItem";
 import { nextInQueue, queuePlayUrl, type QueuePosition } from "@/lib/videoQueue";
-import { AutoQuality, ORIGINAL_ID, storedMemory, type AutoMemory, type AutoStep, type Lowered } from "./autoQuality";
-import { autoLadder, chooseQuality, modeFor, namedFor, qualitiesFor, qualityById } from "./quality";
+import { AutoQuality, ORIGINAL_ID, storedMemory, type AutoMemory, type AutoStep } from "./autoQuality";
+import { autoLadder, chooseQuality, modeFor, namedFor, ORIGINAL, qualitiesFor, qualityById, qualityLabel } from "./quality";
 import { networkStart, reportCeiling } from "./network";
 import { ChaptersMenu } from "./ChaptersMenu";
 import type { SubtitleSources } from "./FindSubtitles";
@@ -93,6 +95,19 @@ const PROGRESS_INTERVAL = 10_000;
 /** While paused: the server forgets players it hasn't heard from for 90 s. */
 const PAUSED_HEARTBEAT = 30_000;
 const HIDE_CONTROLS_AFTER = 3_000;
+/**
+ * The remote's commands a video obeys: `next` only where something can come
+ * next, `audio` where its own menu offers Audio (more than one track), and
+ * `subtitles` and `quality` always, as its menu offers Subtitles (a track
+ * found or added while it plays can be picked too) and Quality.
+ */
+function videoControls(next: boolean, audioTracks: number): Control[] {
+  const controls: Control[] = ["play", "pause", "seek", "skip"];
+  if (next) controls.push("next");
+  if (audioTracks > 1) controls.push("audio");
+  controls.push("subtitles", "quality");
+  return controls;
+}
 
 type WebkitVideo = HTMLVideoElement & { webkitEnterFullscreen?: () => void };
 
@@ -229,13 +244,8 @@ function bufferedAhead(v: HTMLMediaElement): number {
   return 0;
 }
 
-/** What to check when the server answers nothing (the Android apps say the same). */
-const REACH_HINT = "Check that the server is on and that this device is on its network.";
-
 /** How often Automatic looks at what has loaded (autoQuality.ts). */
 const AUTO_SAMPLE_MS = 1_000;
-/** Why Automatic plays below the original, as the details say. */
-const LOWERED: Record<Lowered, string> = { network: "Lowered for your connection", device: "Lowered for this device" };
 
 /**
  * Automatic's memory of a slow network: this browser's, for the server it
@@ -268,12 +278,8 @@ function newAuto(file: MediaFile, afresh: boolean): AutoQuality {
   return auto;
 }
 
-/** "Quality lowered to 8 Mbps 1080p." */
-function smootherText(label: string): string {
-  return `Quality lowered to ${label}`;
-}
-
 export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: initialSub, queue }: VideoPlayerProps) {
+  const { t } = useTranslation(["player", "common"]);
   const navigate = useNavigate();
   const qc = useQueryClient();
   const toast = useToast();
@@ -308,6 +314,16 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   /** What Automatic last said over the picture. */
   const [qualityNotice, setQualityNotice] = useState<QualityNoticeText | null>(null);
   const say = (text: string) => setQualityNotice((old) => ({ text, n: (old?.n ?? 0) + 1 }));
+  /** "Quality lowered to 8 Mbps 1080p". */
+  const smootherText = (label: string) => t("video.qualityLowered", { quality: label });
+  /** A remote's skip, by the offset it asked for: "+30 s", "−10 s". */
+  const skipText = (offsetMs: number) => {
+    const seconds = Math.round(Math.abs(offsetMs) / 1000);
+    return offsetMs < 0 ? t("video.skippedBack", { seconds }) : t("video.skippedAhead", { seconds });
+  };
+  /** Other subtitles, as C and the remote say them: "Subtitles: English (SRT)", "Subtitles off". */
+  const subtitlesText = (track: MediaStream | null) =>
+    track ? t("video.subtitlesShown", { track: streamLabel(track) }) : t("video.subtitlesOff");
   /** Automatic's original fell back to a conversion: the next session says at what. */
   const announceFallback = useRef(false);
   /** The lines of the size a stream in several sizes plays at now (hls.js picks it). */
@@ -403,9 +419,15 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
    * burned into the video, as before, only when the server can't make such
    * files: from then on, for every picture track.
    */
-  const pictureHooks = useRef<PictureTrackHooks>({ unavailable: () => undefined, failed: () => undefined });
+  const pictureHooks = useRef<PictureTrackHooks>({
+    unavailable: () => undefined,
+    failed: () => undefined,
+    position: () => Math.round(positionRef.current * 1000),
+  });
   const pictureChosen = selectedSub && selectedSub.text_based === false ? selectedSub : null;
   const pictures = usePictureTrack(pictureChosen && file ? picturePath(file.id, pictureChosen.index) : null, pictureHooks);
+  // A track still being read is asked for again from where the player went.
+  const picturesSought = useEffectEvent(() => pictures.sought());
   const burnIndex = pictureChosen && pictures.unavailable ? pictureChosen.index : null;
   const drawnPictureIndex = pictureChosen && !pictures.unavailable ? pictureChosen.index : null;
   const shownTextIndex = selectedSub && selectedSub.text_based !== false ? selectedSub.index : null;
@@ -434,7 +456,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const [unreachable, setUnreachable] = useState(false);
   const failUnreachable = () => {
     setUnreachable(true);
-    setError(REACH_HINT);
+    // What to check when the server answers nothing (the Android apps say the same).
+    setError(t("video.reachHint"));
   };
   const [needsGesture, setNeedsGesture] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -456,6 +479,13 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const [chaptersOpen, setChaptersOpen] = useState(false);
   const [active, setActive] = useState(true);
   const [hoveringControls, setHoveringControls] = useState(false);
+  /**
+   * Paused from the user's remote, on another device: the controls don't
+   * come up for it as they do for a pause here, since nobody here asked
+   * for them. Over once it plays again, or someone here moves the mouse,
+   * taps or presses a key.
+   */
+  const [remotePaused, setRemotePaused] = useState(false);
   const [ended, setEnded] = useState(false);
   const [upNext, setUpNext] = useState<ItemSummary | null>(null);
   /** Ended on the server: nothing plays any more, and it says why. */
@@ -500,10 +530,10 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     },
   });
   const sleepEndLabel = isEpisode
-    ? "End of this episode"
+    ? t("video.sleepEnd.episode")
     : item.kind === "movie"
-      ? "End of this movie"
-      : "End of this video";
+      ? t("video.sleepEnd.movie")
+      : t("video.sleepEnd.video");
 
   const destroyHls = () => {
     hlsRef.current?.destroy();
@@ -526,6 +556,28 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
 
   /** Set once mounted: a progress report that answers 410 stops playback. */
   const progressGone = useRef<(sessionId: string) => void>(() => undefined);
+  /**
+   * What session `s` plays, which each of its reports says for the user's
+   * remotes: its audio track, and the subtitles shown now (-1: none).
+   */
+  const shownSubtitleIndex = selectedSub?.index ?? -1;
+  const shownSubtitle = useRef(shownSubtitleIndex);
+  useLayoutEffect(() => {
+    shownSubtitle.current = shownSubtitleIndex;
+  }, [shownSubtitleIndex]);
+  // …and its Quality menu's pick.
+  const pickedQuality = useRef(selectedQuality.id);
+  useLayoutEffect(() => {
+    pickedQuality.current = selectedQuality.id;
+  }, [selectedQuality.id]);
+  const tracksOf = useCallback(
+    (s: PlaybackInfo) => ({
+      audio_index: s.audio_index ?? undefined,
+      subtitle_index: shownSubtitle.current,
+      quality: pickedQuality.current,
+    }),
+    [],
+  );
   const report = useCallback(
     (state: PlaybackState, keepalive = false) => {
       const s = sessionRef.current;
@@ -537,12 +589,13 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
           duration_ms: s.duration_ms || undefined,
           state,
           session_id: s.session_id,
+          ...tracksOf(s),
         },
         keepalive,
         () => progressGone.current(s.session_id),
       );
     },
-    [item.id],
+    [item.id, tracksOf],
   );
 
   const goBack = useCallback(() => {
@@ -587,6 +640,10 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     if (ev.session_id === ours) stopPlayback({ message: ev.message, byAdmin: ev.by_admin });
   });
   useEffect(() => onServerEvent(onEvent), []);
+
+  // The remote leaves this tab's own session out.
+  const sessionHere = stopped ? null : (info?.session_id ?? null);
+  useEffect(() => (sessionHere ? playingHere(sessionHere) : undefined), [sessionHere]);
 
   /** A progress report answered 410: stopped on the server, heard without the event stream. */
   const onProgressGone = useEffectEvent((sessionId: string) => {
@@ -713,7 +770,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       setBuffering(false);
       const prev = sessionRef.current;
       sessionRef.current = null;
-      if (prev) void endSession(item.id, prev, positionRef.current * 1000);
+      if (prev) void endSession(item.id, prev, positionRef.current * 1000, false, tracksOf(prev));
       destroyHls();
       video.pause();
       video.removeAttribute("src");
@@ -761,6 +818,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
           start_ms: Math.round(startSec * 1000),
           mode: requestMode,
           caps: videoCaps(),
+          controls: videoControls(hasNext, audioStreams.length),
+          ...deviceFields(),
           ...(alongside ? { keep_previous: true } : {}),
         });
       let pinfo: PlaybackInfo;
@@ -810,7 +869,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
             const Hls = await loadHls();
             if (cancelled) return;
             if (!Hls.isSupported()) {
-              if (!canPlayNativeHls(video)) throw new Error("This browser can't play HLS streams.");
+              if (!canPlayNativeHls(video)) throw new Error(t("video.errors.noHls"));
               video.src = pinfo.url;
               seekOnLoad(startSec);
             } else {
@@ -875,7 +934,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
                 }
                 // No answer at all, after the retries: the server is out of reach.
                 if (data.type === Hls.ErrorTypes.NETWORK_ERROR && !data.response?.code) failUnreachable();
-                else setError(`Playback failed (${data.details}).`);
+                else setError(t("video.errors.failed", { details: data.details }));
               });
               hls.on(Hls.Events.MANIFEST_PARSED, (_evt, data: ManifestParsedData) => {
                 // The size to start at, rather than hls.js's guess from a
@@ -963,7 +1022,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
         video.removeAttribute("src");
         video.load();
       }
-      const done = s ? endSession(item.id, s, positionRef.current * 1000, true) : Promise.resolve();
+      const done = s ? endSession(item.id, s, positionRef.current * 1000, true, tracksOf(s)) : Promise.resolve();
       void done.then(() => invalidateWatchState(qc));
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -977,7 +1036,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       const s = sessionRef.current;
       if (!s) return;
       sessionRef.current = null;
-      void endSession(item.id, s, positionRef.current * 1000, true);
+      void endSession(item.id, s, positionRef.current * 1000, true, tracksOf(s));
     };
     const onShow = (e: PageTransitionEvent) => {
       if (e.persisted && !sessionRef.current) restartAt(positionRef.current);
@@ -988,7 +1047,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       window.removeEventListener("pagehide", onHide);
       window.removeEventListener("pageshow", onShow);
     };
-  }, [item.id, restartAt]);
+  }, [item.id, restartAt, tracksOf]);
 
   // ---------------------------------------------------------------------
   // Media element events.
@@ -1000,7 +1059,13 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     const durMs = s?.duration_ms || Math.round(duration * 1000);
     positionRef.current = durMs / 1000;
     const done = s
-      ? reportProgress(item.id, { position_ms: durMs, duration_ms: durMs || undefined, state: "stopped", session_id: s.session_id })
+      ? reportProgress(item.id, {
+          position_ms: durMs,
+          duration_ms: durMs || undefined,
+          state: "stopped",
+          session_id: s.session_id,
+          ...tracksOf(s),
+        })
       : Promise.resolve();
     void done.then(() => invalidateWatchState(qc));
     if (!hasNext) {
@@ -1037,7 +1102,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       return;
     }
     if (code === MediaError.MEDIA_ERR_NETWORK) failUnreachable();
-    else setError(message || "This video can't be played in your browser.");
+    else setError(message || t("video.errors.cantPlay"));
   });
 
   const onMediaError = useEffectEvent(() => {
@@ -1102,7 +1167,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
         restartAt(livePosition());
         return;
       }
-      setError("This video doesn't play in this browser: it stops at the same spot each time.");
+      setError(t("video.errors.sameSpot"));
       return;
     }
     if (starving && hls && r.network < 4) {
@@ -1115,7 +1180,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       restartAt(livePosition());
       return;
     }
-    setError("Playback stopped and couldn't get going again.");
+    setError(t("video.errors.stalled"));
   });
   useEffect(() => {
     const timer = window.setInterval(onStall, STALL_CHECK_MS);
@@ -1200,6 +1265,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     if (!v) return;
     const onPlay = () => {
       setPlaying(true);
+      setRemotePaused(false);
       setNeedsGesture(false);
       setEnded(false);
     };
@@ -1255,6 +1321,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       if (!sessionRef.current || !mediaShown.current) return;
       positionRef.current = v.currentTime;
       report(v.paused ? "paused" : "playing");
+      picturesSought();
     };
     const onEnded = () => {
       stopWaiting();
@@ -1334,7 +1401,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const stepPlaybackSpeed = (by: 1 | -1) => {
     const next = stepSpeed(speed, by);
     setSpeed(next);
-    toast.info(`Speed: ${speedLabel(next)}`);
+    toast.info(t("video.speed", { speed: speedLabel(next) }));
   };
 
   // Volume.
@@ -1353,6 +1420,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const shownTextUrl =
     [...addedTracks, ...(info?.subtitles ?? [])].find((s) => s.index === shownTextIndex && s.text_based)?.url ?? null;
   const [loadedCues, setLoadedCues] = useState<{ url: string; cues: VTTCue[] } | null>(null);
+  const subtitlesFailed = useEffectEvent(() => toast.error(t("video.subtitlesNotLoaded")));
   // Subtitles show up by themselves once loaded (nothing is said meanwhile).
   // Embedded ones come as far as the server has read them out of the file
   // (`X-Pley-Complete: 0`); the player asks again until it has them all.
@@ -1369,14 +1437,14 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
           if (!complete) again = window.setTimeout(() => void load(), SUBTITLES_AGAIN_MS);
         })
         .catch(() => {
-          if (!abort.signal.aborted) toast.error("These subtitles couldn't be loaded.");
+          if (!abort.signal.aborted) subtitlesFailed();
         });
     void load();
     return () => {
       abort.abort();
       window.clearTimeout(again);
     };
-  }, [shownTextUrl, toast]);
+  }, [shownTextUrl]);
   const shownCues = loadedCues && loadedCues.url === shownTextUrl ? loadedCues.cues : null;
   /** The cues on the track: more of the same subtitles only add the new ones. */
   const trackCues = useRef<{ track: TextTrack | null; cues: VTTCue[] | null; shift: number; lift: number }>({
@@ -1450,9 +1518,9 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     startMsRef.current = currentMs();
     prepareNext.current = true;
   });
-  const picturesFailed = useEffectEvent(() => toast.error("These subtitles couldn't be loaded."));
+  const picturesFrom = useEffectEvent(() => currentMs());
   useEffect(() => {
-    pictureHooks.current = { unavailable: picturesUnavailable, failed: picturesFailed };
+    pictureHooks.current = { unavailable: picturesUnavailable, failed: subtitlesFailed, position: picturesFrom };
   }, []);
 
 
@@ -1487,6 +1555,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const hideTimer = useRef<number | undefined>(undefined);
   const poke = useCallback(() => {
     setActive(true);
+    // From here a remote's pause is a pause like any other: the controls stay.
+    setRemotePaused(false);
     window.clearTimeout(hideTimer.current);
     hideTimer.current = window.setTimeout(() => setActive(false), HIDE_CONTROLS_AFTER);
   }, []);
@@ -1499,7 +1569,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const showControls =
     active ||
     hoveringControls ||
-    !playing ||
+    (!playing && !remotePaused) ||
     settingsOpen ||
     chaptersOpen ||
     loading ||
@@ -1516,9 +1586,10 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     else v.pause();
   };
 
-  const seekTo = (seconds: number) => {
+  /** Where it seeks to (s), no further than the end; null without a video. */
+  const seekTo = (seconds: number): number | null => {
     const v = videoRef.current;
-    if (!v) return;
+    if (!v) return null;
     const max = duration > 0 ? Math.max(0, duration - 0.25) : Number.POSITIVE_INFINITY;
     const t = Math.max(0, Math.min(seconds, max));
     v.currentTime = t;
@@ -1526,6 +1597,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     setCurrent(t);
     if (ended) setEnded(false);
     if (upNext) setUpNext(null);
+    return t;
   };
   const seekBy = (delta: number) => seekTo((videoRef.current?.currentTime ?? current) + delta);
 
@@ -1567,13 +1639,15 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       void qc.invalidateQueries({ queryKey: keys.item(item.id), refetchType: "none" });
     });
   };
-  const changeAudio = (index: number) => {
+  /** Another track: a new session, made ready while this one plays on. False: it plays already. */
+  const changeAudio = (index: number): boolean => {
     const playing = audioIndex ?? info?.audio_index ?? audioStreams.find((s) => s.default)?.index ?? audioStreams[0]?.index;
-    if (index === playing) return;
+    if (index === playing) return false;
     startMsRef.current = currentMs();
     prepareNext.current = true;
     setAudioIndex(index);
     rememberTracks(index, subIndex);
+    return true;
   };
   /**
    * A quality picked in the menu, kept for the next titles. Automatic
@@ -1611,7 +1685,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     setDeletedTracks((list) => list.filter((i) => i !== track.index));
     setAddedHere((list) => [...list, track.index]);
     changeSubtitle(track.index);
-    toast.success(`Subtitles added: ${streamLabel(trackStream(track))}`);
+    toast.success(t("video.subtitlesAdded", { track: streamLabel(trackStream(track)) }));
     // The item's page lists it the next time it shows.
     void qc.invalidateQueries({ queryKey: keys.item(item.id), refetchType: "none" });
   };
@@ -1625,10 +1699,10 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
         setDeletedTracks((list) => [...list, index]);
         setAddedTracks((list) => list.filter((t) => t.index !== index));
         if (subIndex === index) changeSubtitle(null);
-        toast.info("Subtitles deleted");
+        toast.info(t("video.subtitlesDeleted"));
         void qc.invalidateQueries({ queryKey: keys.item(item.id), refetchType: "none" });
       },
-      (err: unknown) => toast.error(`These subtitles couldn't be deleted. ${errorMessage(err)}`),
+      (err: unknown) => toast.error(t("video.subtitlesNotDeleted", { error: errorMessage(err) })),
     );
   };
   const subtitleSources: SubtitleSources | null = file
@@ -1641,14 +1715,15 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     const pos = texts.findIndex((s) => s.index === shownTextIndex);
     const next = pos + 1 < texts.length ? texts[pos + 1] : null;
     changeSubtitle(next ? next.index : null);
-    toast.info(next ? `Subtitles: ${streamLabel(next)}` : "Subtitles off");
+    toast.info(subtitlesText(next ?? null));
   };
 
-  const playNext = async () => {
+  /** `remote`: asked for from another device, which is told nothing here when nothing comes next. */
+  const playNext = async (remote = false) => {
     try {
       const next = upNext ?? (await findNext());
       if (!next) {
-        toast.info(queue ? "This is the last one" : "This is the last episode");
+        if (!remote) toast.info(queue ? t("video.lastInQueue") : t("video.lastEpisode"));
         return;
       }
       // A running sleep timer goes on with the next one.
@@ -1658,6 +1733,110 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       toast.error(errorMessage(err));
     }
   };
+
+  // The user's remote, on another device: this player acts on commands for
+  // the session it plays now, and reports at once, so the remote sees it.
+  // What a command changes is said in a brief notice; the controls stay as
+  // they are, for whoever watches here didn't ask for them.
+  const onCommand = useEffectEvent((ev: ServerEvent) => {
+    if (ev.type !== "player_command") return;
+    const v = videoRef.current;
+    const s = sessionRef.current;
+    if (!v || !s || ev.session_id !== s.session_id || error || stopped) return;
+    switch (ev.command) {
+      case "play":
+        if (v.paused || v.ended) {
+          void v.play().then(
+            () => {
+              report("playing");
+              toast.info(t("video.remotePlaying"));
+            },
+            // A browser that wants a click first: its Play shows, as it must.
+            () => setNeedsGesture(true),
+          );
+        } else {
+          // Playing already: said again, so a remote a little behind settles.
+          report("playing");
+        }
+        break;
+      case "pause":
+        // Its pause event reports; paused already, it is said again.
+        if (!v.paused) {
+          setRemotePaused(true);
+          v.pause();
+          toast.info(t("video.remotePaused"));
+        } else {
+          report("paused");
+        }
+        break;
+      case "seek":
+      case "skip": {
+        const ms = ev.command === "seek" ? ev.position_ms : ev.offset_ms;
+        if (ms === null) break;
+        const at = seekTo(ev.command === "seek" ? ms / 1000 : livePosition() + ms / 1000);
+        // Not when the seek lands, which a conversion starting there can take a while to.
+        report(v.paused ? "paused" : "playing");
+        if (ev.command === "seek") toast.info(t("video.jumpedTo", { time: formatClock(at) }));
+        else if (ms !== 0) toast.info(skipText(ms));
+        break;
+      }
+      case "next":
+        if (hasNext) void playNext(true);
+        break;
+      case "previous":
+        // Videos have none.
+        break;
+      // As its own menu picks them; what plays already is said again at once.
+      // A new audio track's session says it as it starts, and other
+      // subtitles are said as they show (below).
+      case "audio": {
+        if (ev.stream_index === null) break;
+        const index = ev.stream_index;
+        if (!changeAudio(index)) {
+          report(v.paused ? "paused" : "playing");
+          break;
+        }
+        const track = audioStreams.find((x) => x.index === index);
+        if (track) toast.info(t("video.audioShown", { track: streamLabel(track) }));
+        break;
+      }
+      case "subtitles": {
+        if (ev.stream_index === null) break;
+        const index = ev.stream_index < 0 ? null : ev.stream_index;
+        if (index === (selectedSub?.index ?? null)) {
+          report(v.paused ? "paused" : "playing");
+          break;
+        }
+        changeSubtitle(index);
+        // A track it doesn't list shows none: "Subtitles off", where some showed.
+        const track = subStreams.find((x) => x.index === index) ?? null;
+        if (track || selectedSub) toast.info(subtitlesText(track));
+        break;
+      }
+      // As its Quality menu picks it: the stream starts again at that
+      // quality, whose session says it as it starts.
+      case "quality": {
+        const picked = qualities.find((q) => q.id === ev.quality);
+        if (!picked) break;
+        if (picked.id === selectedQuality.id) {
+          report(v.paused ? "paused" : "playing");
+          break;
+        }
+        changeQuality(picked.id);
+        toast.info(t("video.qualityShown", { quality: qualityLabel(picked) }));
+        break;
+      }
+    }
+  });
+  useEffect(() => onServerEvent(onCommand), []);
+
+  // Other subtitles or another quality, wherever they were picked (the menu,
+  // C, a remote), are said at once, for the user's remotes to show.
+  const qualityShown = selectedQuality.id;
+  useEffect(() => {
+    const v = videoRef.current;
+    if (v) report(v.paused ? "paused" : "playing");
+  }, [shownSubtitleIndex, qualityShown, report]);
 
   // Skip Intro / Skip Credits; an episode's credits bring up Up Next.
   const markers = useMemo(() => fileMarkers(item, info?.file_id ?? file?.id), [item, info?.file_id, file?.id]);
@@ -1675,7 +1854,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     },
   });
   const skipMarker = () => {
-    if (marker) seekTo(Math.min(skipTarget(marker), duration));
+    if (marker) seekTo(Math.min(skipTarget(marker) / 1000, duration));
   };
 
   const retry = () => {
@@ -1778,11 +1957,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
 
   const VolumeIcon = muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
   // After a failed direct play the server only knows that a transcode was requested.
-  const fallbackNote = fellBack
-    ? stalled
-      ? "The original didn't play smoothly in this browser."
-      : "This browser couldn't play the original file."
-    : null;
+  const fallbackNote = fellBack ? (stalled ? t("video.originalNotSmooth") : t("video.originalFailed")) : null;
   // What Automatic plays ("Original", "8 Mbps 1080p"; the original converted here by its quality), and why when lower.
   const converted = info?.auto_quality && playingQuality.id === ORIGINAL_ID ? namedFor(file, qualityById(info.auto_quality)) : null;
   const autoNow = !auto
@@ -1792,9 +1967,10 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       : playingQuality.id === ORIGINAL_ID
         ? converted?.maxBitrate
           ? converted.label
-          : "Original"
-        : playingQuality.label;
-  const autoWhy = auto?.lowered && auto.playing !== ORIGINAL_ID ? LOWERED[auto.lowered] : null;
+          : qualityLabel(ORIGINAL)
+        : qualityLabel(playingQuality);
+  // Why Automatic plays below the original, as the details say.
+  const autoWhy = auto?.lowered && auto.playing !== ORIGINAL_ID ? t(`video.lowered.${auto.lowered}`) : null;
   const note = fallbackNote ?? autoWhy;
 
   return (
@@ -1851,7 +2027,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       {needsGesture && !error ? (
         <button
           type="button"
-          aria-label="Play"
+          aria-label={t("common:actions.play")}
           onClick={togglePlay}
           className="absolute left-1/2 top-1/2 z-20 flex size-20 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-accent text-accent-fg shadow-2xl transition hover:scale-105"
         >
@@ -1867,9 +2043,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
           <CircleStop className="size-12 text-accent" />
           <div className="max-w-lg">
             <div className="text-lg font-semibold">
-              {stopped.byAdmin === false
-                ? "Playback was stopped from another device"
-                : "Playback was stopped by the server's administrator"}
+              {stopped.byAdmin === false ? t("video.stoppedElsewhere") : t("video.stoppedByAdmin")}
             </div>
             {stopped.message ? (
               <p className="mt-2 whitespace-pre-line break-words text-sm text-white/80">{stopped.message}</p>
@@ -1880,22 +2054,22 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
             onClick={goBack}
             className="rounded-md bg-white/10 px-5 py-2 text-sm font-semibold hover:bg-white/20"
           >
-            Back
+            {t("common:actions.back")}
           </button>
         </div>
       ) : error ? (
         <div role="alert" className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 bg-black/85 p-6 text-center">
           {unreachable ? <ServerOff className="size-12 text-accent" /> : <TriangleAlert className="size-12 text-accent" />}
           <div className="max-w-lg">
-            <div className="text-lg font-semibold">{unreachable ? "Can't reach your server" : "Playback error"}</div>
+            <div className="text-lg font-semibold">{unreachable ? t("video.unreachable") : t("video.errorTitle")}</div>
             <p className="mt-1 text-sm text-white/70">{error}</p>
           </div>
           <div className="flex gap-2">
             <button type="button" onClick={retry} className="rounded-md bg-accent px-5 py-2 text-sm font-semibold text-accent-fg hover:bg-accent-hover">
-              Retry
+              {t("common:actions.retry")}
             </button>
             <button type="button" onClick={goBack} className="rounded-md bg-white/10 px-5 py-2 text-sm font-semibold hover:bg-white/20">
-              Back
+              {t("common:actions.back")}
             </button>
           </div>
         </div>
@@ -1912,7 +2086,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       >
         <button
           type="button"
-          aria-label="Back"
+          aria-label={t("common:actions.back")}
           onClick={goBack}
           className="flex size-10 shrink-0 items-center justify-center rounded-full transition hover:bg-white/15"
         >
@@ -1944,35 +2118,17 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
         <div className="mt-1 flex items-center gap-0.5 sm:gap-1.5">
           <button
             type="button"
-            aria-label={playing ? "Pause" : "Play"}
+            aria-label={playing ? t("controls.pause") : t("common:actions.play")}
             onClick={togglePlay}
             className="flex size-11 items-center justify-center rounded-full transition hover:bg-white/15"
           >
             {playing ? <Pause className="size-6 fill-current" /> : <Play className="ml-0.5 size-6 fill-current" />}
           </button>
-          <button
-            type="button"
-            aria-label="Back 10 seconds"
-            title="Back 10 s (←)"
-            onClick={() => seekBy(-10)}
-            className="flex size-10 items-center justify-center rounded-full transition hover:bg-white/15"
-          >
-            <RotateCcw className="size-5" />
-          </button>
-          <button
-            type="button"
-            aria-label="Forward 30 seconds"
-            title="Forward 30 s"
-            onClick={() => seekBy(30)}
-            className="flex size-10 items-center justify-center rounded-full transition hover:bg-white/15"
-          >
-            <RotateCw className="size-5" />
-          </button>
           {/* A phone's own buttons set the volume: the row keeps its room for the rest. */}
           <div className="group/vol hidden items-center sm:flex">
             <button
               type="button"
-              aria-label={muted ? "Unmute" : "Mute"}
+              aria-label={muted ? t("controls.unmute") : t("controls.mute")}
               onClick={toggleMute}
               className="flex size-10 items-center justify-center rounded-full transition hover:bg-white/15"
             >
@@ -1980,7 +2136,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
             </button>
             <div className="hidden w-0 overflow-hidden transition-[width] duration-200 group-hover/vol:w-24 group-focus-within/vol:w-24 sm:block">
               <Slider
-                label="Volume"
+                label={t("controls.volume")}
                 value={muted ? 0 : volume}
                 max={1}
                 onPreview={(v) => {
@@ -2036,8 +2192,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
           {hasNext ? (
             <button
               type="button"
-              aria-label={queue ? "Next" : "Next episode"}
-              title={queue ? "Next" : "Next episode"}
+              aria-label={queue ? t("common:actions.next") : t("video.nextEpisode")}
+              title={queue ? t("common:actions.next") : t("video.nextEpisode")}
               onClick={() => void playNext()}
               className="flex size-10 items-center justify-center rounded-full transition hover:bg-white/15"
             >
@@ -2100,8 +2256,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
           {fullscreenOffered || fullscreen ? (
             <button
               type="button"
-              aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
-              title="Fullscreen (f)"
+              aria-label={fullscreen ? t("video.exitFullscreen") : t("video.fullscreen")}
+              title={t("video.fullscreenShortcut")}
               onClick={toggleFullscreen}
               className="flex size-10 items-center justify-center rounded-full transition hover:bg-white/15"
             >

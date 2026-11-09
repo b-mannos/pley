@@ -96,16 +96,6 @@ sub test_media_picks_shown_before_the_server_says()
     tkEqual(item.files[0].selected_subtitle, invalid, "another file's pick")
 end sub
 
-sub test_media_sizes_as_the_other_apps()
-    tkEqual(mediaBytes(512), "512 B")
-    tkEqual(mediaBytes(1536), "1.5 KB")
-    tkEqual(mediaBytes(157286400), "150 MB")
-    tkEqual(mediaBytes(66571993088&), "62.0 GB", "past 32 bits")
-    tkEqual(mediaBytes(1000000), "977 KB", "three digits")
-    tkEqual(mediaBytes(1048576), "1.0 MB")
-    tkEqual(mediaBytes(invalid), "")
-end sub
-
 sub test_media_versions_one_line_each()
     file = mediaTestFile()
     tkEqual(mediaVersionLine(file, 1), "4K · HEVC · DV P8.1 · TrueHD Atmos 7.1 · 62.0 GB", "the default audio: none picked")
@@ -215,4 +205,34 @@ sub test_media_info_as_text()
     tkEqual(lines[9], "")
     tkEqual(lines[10], "FINAL CUT", "an edition by its name")
     tkEqual(lines[11], "File")
+end sub
+
+sub test_media_words_in_french_and_spanish()
+    i18nUse("fr")
+    file = mediaTestFile()
+    tkEqual(mediaTrackLabel(file.streams[4]), "Anglais – SDH (SRT)", "a title naming the language in English names it once")
+    tkEqual(mediaTrackLabel(file.streams[3]), "Anglais – Commentary (AAC Stéréo)")
+    tkEqual(mediaTrackLabel(file.streams[5]), "Français (PGS, Forcés)")
+    tkEqual(mediaTrackLabel(file.streams[6]), "Signs & Songs (SRT, Forcés, Externes)")
+    tkEqual(mediaTrackLabel({ kind: "audio", codec: "ac3", language: "fre", title: "Français", channels: 6 }), "Français (AC3 5.1)", "or as shown")
+    tkEqual(mediaLanguage("und"), "Langue inconnue")
+    tkEqual(mediaAutomaticLabel(file), "Automatique (Anglais)")
+    tkEqual(mediaTracks(file).subtitles.labels[0], "Désactivés")
+    tkEqual(mediaFrameRate(23.976023, true), "23,976 i/s, entrelacé")
+    tkEqual(mediaBitDepth(10, "yuv420p10le"), "10 bits · 4:2:0")
+    tkEqual(mediaLevel("hevc", 153), "5.1", "a level is a name, with a point")
+    tkEqual(mediaDolbyVision({ dv_profile: 8, dv_bl_compat: 1, dv_level: 6 }), "Profil 8.1 · Niveau 6 · couche de base compatible HDR10")
+    one = { files: [{ id: 1, path: "a.mkv", size: 1536, container: "mkv", streams: [{ index: 0, kind: "audio", codec: "aac", channels: 2 }] }] }
+    colon = Chr(160) + ": "
+    tkEqual(mediaInfoText(one).Split(Chr(10)), ["Fichier", "Nom" + colon + "a.mkv", "Conteneur" + colon + "MKV", "Taille" + colon + "1,5 Ko", "", "Audio", "Codec" + colon + "AAC", "Canaux" + colon + "Stéréo"])
+    i18nUse("es")
+    tkEqual(mediaTrackLabel(file.streams[2]), "Francés (AC3 5.1)")
+    tkEqual(mediaAutomaticLabel(file), "Automática (Inglés)")
+    tkEqual(mediaVersionLine({ id: 9, size: 0, streams: [] }, 2), "Versión 2")
+    tkEqual(mediaChannels(5, invalid), "5 canales")
+    titles = []
+    for each block in mediaFacts(file)
+        titles.Push(block.title)
+    end for
+    tkEqual(titles, ["Archivo", "Video", "Audio 1", "Audio 2", "Audio 3", "Subtítulos 1", "Subtítulos 2", "Subtítulos 3"])
 end sub

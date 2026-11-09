@@ -2,12 +2,15 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useQueryClient } from "@tanstack/react-query";
 import type HlsType from "hls.js";
 import type { ErrorData } from "hls.js";
-import type { ItemSummary, PlaybackMethod, PlaybackMode, ServerEvent } from "@/api/types";
+import type { Control, ItemSummary, PlaybackMethod, PlaybackMode, PlaybackState, ServerEvent } from "@/api/types";
 import { errorMessage } from "@/api/client";
 import { onServerEvent } from "@/api/events";
 import { invalidateWatchState } from "@/api/hooks";
+import { t } from "@/i18n";
 import { audioCaps, canPlayNativeHls } from "@/lib/caps";
+import { deviceFields } from "@/lib/castReceiver";
 import { loadHls } from "@/lib/hls";
+import { playingHere } from "@/lib/playingHere";
 import { getStored, writeStorage } from "@/lib/hooks";
 import {
   endSession,
@@ -53,7 +56,12 @@ const AudioContext = createContext<AudioPlayerApi | null>(null);
 const AudioTimeContext = createContext<AudioTime>({ position: 0, duration: 0, buffered: 0 });
 
 const PROGRESS_INTERVAL = 10_000;
+// While paused, a report now and then keeps the session listed: the server
+// counts a player it hasn't heard from in 90 s as gone, and remotes drop it.
+const PAUSED_HEARTBEAT = 30_000;
 
+/** The remote's commands music obeys. */
+const MUSIC_CONTROLS: Control[] = ["play", "pause", "seek", "skip", "next", "previous"];
 
 interface Session {
   sessionId: string;
@@ -64,10 +72,13 @@ interface Session {
   url: string;
   /** Last known playhead (ms); the element reads 0 while it is reset. */
   positionMs: number;
+  /** No longer this tab's (the remote lists it again as another device's, if it is still there). */
+  leave: () => void;
 }
 
 /** Report the final position of `s` and release it on the server. */
 function release(s: Session, keepalive = false, positionMs = s.positionMs): Promise<void> {
+  s.leave();
   return endSession(s.itemId, { session_id: s.sessionId, duration_ms: s.durationMs }, positionMs, keepalive);
 }
 
@@ -137,6 +148,7 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
   const stopPlayback = useCallback(
     (by: StoppedBy) => {
       // Nothing to release: the server has ended it.
+      sessionRef.current?.leave();
       sessionRef.current = null;
       hlsRef.current?.destroy();
       hlsRef.current = null;
@@ -150,8 +162,8 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       const what =
         by.byAdmin === false
-          ? "Playback was stopped from another device."
-          : "Playback was stopped by the server's administrator.";
+          ? t("music.stoppedElsewhere", { ns: "player" })
+          : t("music.stoppedByAdmin", { ns: "player" });
       setError(by.message ? `${what} ${by.message}` : what);
       invalidateWatchState(qc);
     },
@@ -177,7 +189,7 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
         else if (recoveries.current.recreate < 3) {
           recoveries.current.recreate += 1;
           restartAt(s.positionMs);
-        } else setError("Playback failed");
+        } else setError(t("music.failed", { ns: "player" }));
       });
     },
     [restartAt, stopPlayback],
@@ -212,7 +224,14 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
     const acquired = (async () => {
       await Promise.all([released, previousStart]);
       if (cancelled) return null;
-      const info = await startPlayback({ item_id: itemId, caps: audioCaps(), start_ms: startMs, mode });
+      const info = await startPlayback({
+        item_id: itemId,
+        caps: audioCaps(),
+        start_ms: startMs,
+        mode,
+        controls: MUSIC_CONTROLS,
+        ...deviceFields(),
+      });
       if (cancelled) {
         await stopSession(info.session_id);
         return null;
@@ -224,6 +243,7 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
         method: info.method,
         url: info.url,
         positionMs: startMs,
+        leave: playingHere(info.session_id),
       };
       return info;
     })();
@@ -242,7 +262,7 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
         if (info.hls && !canPlayNativeHls(audio)) {
           const Hls = await loadHls();
           if (cancelled) return;
-          if (!Hls.isSupported()) throw new Error("This browser can't play HLS streams");
+          if (!Hls.isSupported()) throw new Error(t("music.noHls", { ns: "player" }));
           const hls = new Hls({ enableWorker: true, maxBufferLength: 60, startPosition: startMs / 1000 });
           hlsRef.current = hls;
           hls.on(Hls.Events.ERROR, (_e, data: ErrorData) => {
@@ -278,7 +298,7 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
               hls.recoverMediaError();
               return;
             }
-            setError("Playback failed");
+            setError(t("music.failed", { ns: "player" }));
           });
           hls.on(Hls.Events.FRAG_LOADED, () => {
             recoveries.current.recreate = 0;
@@ -369,7 +389,7 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
         // Firefox without a sound output (none there, or it went away)
         // says it can't decode, and plays on in silence: another session
         // or a transcode wouldn't help.
-        setError("No sound output: check the speakers or headphones");
+        setError(t("music.noSound", { ns: "player" }));
         return;
       }
       const undecodable = code === MediaError.MEDIA_ERR_DECODE || code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED;
@@ -385,7 +405,7 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
         recreateUnlessStopped(s);
         return;
       }
-      setError("Playback failed");
+      setError(t("music.failed", { ns: "player" }));
     };
     audio.addEventListener("play", onPlay);
     audio.addEventListener("pause", onPause);
@@ -407,20 +427,19 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
     };
   }, [qc, goTo, restartAt, recreateUnlessStopped, indexRef, queueRef]);
 
-  // Periodic progress while playing. One answered 410 was stopped on the
-  // server, heard without the event stream (for a direct play, the only
-  // request that can tell).
+  // Periodic progress while playing, and now and then while paused. One
+  // answered 410 was stopped on the server, heard without the event stream
+  // (for a direct play, the only request that can tell).
   useEffect(() => {
-    if (!playing) return;
     const timer = window.setInterval(() => {
       const s = sessionRef.current;
-      if (!s) return;
+      if (!s || (!playing && audioRef.current?.ended)) return;
       void reportProgress(
         s.itemId,
         {
           position_ms: s.positionMs,
           duration_ms: s.durationMs || undefined,
-          state: "playing",
+          state: playing ? "playing" : "paused",
           session_id: s.sessionId,
         },
         false,
@@ -428,7 +447,7 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
           if (sessionRef.current === s) stopPlayback({ message: null, byAdmin: null });
         },
       );
-    }, PROGRESS_INTERVAL);
+    }, playing ? PROGRESS_INTERVAL : PAUSED_HEARTBEAT);
     return () => window.clearInterval(timer);
   }, [playing, stopPlayback]);
 
@@ -490,15 +509,26 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
     if (i + 1 < queueRef.current.length) goTo(i + 1);
   }, [goTo, indexRef, queueRef]);
 
-  const prev = useCallback(() => {
+  const seek = useCallback((seconds: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const target = Math.max(0, seconds);
+    audio.currentTime = target;
+    if (sessionRef.current) sessionRef.current.positionMs = Math.round(target * 1000);
+    setTime((t) => ({ ...t, position: target }));
+  }, []);
+
+  /** The track before, or this one from its start a few seconds in (true: it started over). */
+  const prev = useCallback((): boolean => {
     const audio = audioRef.current;
     const i = indexRef.current;
     if ((audio && audio.currentTime > 3) || i === 0) {
-      if (audio) audio.currentTime = 0;
-      return;
+      seek(0);
+      return true;
     }
     goTo(i - 1);
-  }, [goTo, indexRef]);
+    return false;
+  }, [goTo, seek, indexRef]);
 
   const jumpTo = useCallback(
     (i: number) => {
@@ -508,14 +538,59 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
     [goTo, queueRef],
   );
 
-  const seek = useCallback((seconds: number) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    const target = Math.max(0, seconds);
-    audio.currentTime = target;
-    if (sessionRef.current) sessionRef.current.positionMs = Math.round(target * 1000);
-    setTime((t) => ({ ...t, position: target }));
-  }, []);
+  // The user's remote, on another device: the queue acts on commands for
+  // the track it plays now, and reports at once, so the remote sees it. A
+  // new track reports as it starts.
+  useEffect(() => {
+    const reportNow = (s: Session, state: PlaybackState) => {
+      if (sessionRef.current !== s) return;
+      void reportProgress(s.itemId, {
+        position_ms: s.positionMs,
+        duration_ms: s.durationMs || undefined,
+        state,
+        session_id: s.sessionId,
+      });
+    };
+    return onServerEvent((ev: ServerEvent) => {
+      const audio = audioRef.current;
+      const s = sessionRef.current;
+      if (ev.type !== "player_command" || !audio || !s || ev.session_id !== s.sessionId) return;
+      const state = () => (audio.paused ? "paused" : "playing");
+      switch (ev.command) {
+        case "play":
+          if (audio.paused) {
+            void audio.play().then(
+              () => reportNow(s, "playing"),
+              () => undefined,
+            );
+          } else {
+            // Playing already: said again, so a remote a little behind settles.
+            reportNow(s, "playing");
+          }
+          break;
+        case "pause":
+          // Its pause event reports; paused already, it is said again.
+          if (!audio.paused) audio.pause();
+          else reportNow(s, "paused");
+          break;
+        case "seek":
+        case "skip": {
+          const ms = ev.command === "seek" ? ev.position_ms : ev.offset_ms === null ? null : s.positionMs + ev.offset_ms;
+          if (ms === null) break;
+          const end = s.durationMs || (Number.isFinite(audio.duration) ? audio.duration * 1000 : Number.POSITIVE_INFINITY);
+          seek(Math.min(Math.max(0, ms), end) / 1000);
+          reportNow(s, state());
+          break;
+        }
+        case "next":
+          next();
+          break;
+        case "previous":
+          if (prev()) reportNow(s, state());
+          break;
+      }
+    });
+  }, [next, prev, seek]);
 
   const setVolume = useCallback((v: number) => {
     const clamped = Math.max(0, Math.min(1, v));

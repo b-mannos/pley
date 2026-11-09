@@ -12,6 +12,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -28,6 +29,9 @@ import kotlinx.serialization.SerializationException
 
 /** A value and whether the server just gave it (else it was saved). */
 internal data class Fresh<T>(val value: T, val fresh: Boolean)
+
+/** The language of the server at [issuer] (GET /api/server): "fr"; `null`: a Pley from before languages. */
+internal data class ServerLanguage(val issuer: String, val language: String?)
 
 /**
  * Who is signed in where, from this device first:
@@ -68,6 +72,16 @@ internal class SessionManager(
     /** The profile, and whether the server just said so. */
     val meState = MutableStateFlow<Fresh<Me>?>(null)
 
+    /** The server's language, once it said it while signed in, since the app started. */
+    val serverLanguage = MutableStateFlow<ServerLanguage?>(null)
+
+    /**
+     * The server in use (its issuer) when it answered PUT /api/me/language
+     * with 404 or 405: it keeps no account's language, whatever its
+     * GET /api/server says. Forgotten when another server is in use.
+     */
+    val noLanguageRoute = MutableStateFlow<String?>(null)
+
     /** Told when the profile in use changes (`null`: none): memory caches go. */
     var onScopeChange: (ProfileScope?) -> Unit = {}
 
@@ -89,6 +103,8 @@ internal class SessionManager(
                 if (active.isEmpty()) {
                     origin = null
                     meState.value = null
+                    serverLanguage.value = null
+                    noLanguageRoute.value = null
                     setScope(null)
                     _state.value = SessionState.NoServer
                 } else {
@@ -111,6 +127,8 @@ internal class SessionManager(
 
     private suspend fun follow(active: String) {
         origin = active
+        // Another server may have the route.
+        if (noLanguageRoute.value != active) noLanguageRoute.value = null
         val tokens = withContext(compute) { auth.tokens(active) }
         tokens.signedIn.collectLatest { signedIn ->
             if (!signedIn) {
@@ -143,7 +161,22 @@ internal class SessionManager(
                 publish(active, null)
             }
         }
-        fetchMe(active)
+        coroutineScope {
+            launch { fetchServer(active) }
+            fetchMe(active)
+        }
+    }
+
+    /** The server's language, for the profiles that haven't chosen their own (GET /api/server). */
+    private suspend fun fetchServer(active: String) {
+        try {
+            val info = meApi(active).server()
+            if (origin == active) serverLanguage.value = ServerLanguage(active, info.language)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Unknown until the next time: the language shown stays.
+        }
     }
 
     private suspend fun fetchMe(active: String) {
@@ -194,12 +227,46 @@ internal class SessionManager(
 
     override suspend fun refresh() {
         val active = origin ?: return
-        if (state.value is SessionState.SignedIn) fetchMe(active)
+        if (state.value !is SessionState.SignedIn) return
+        coroutineScope {
+            launch { fetchServer(active) }
+            fetchMe(active)
+        }
+    }
+
+    /**
+     * Makes [language] the profile's (PUT /api/me/language), shown at once
+     * and put back if the server refuses. A server without the route is
+     * remembered ([noLanguageRoute]) while it is in use: what asks next,
+     * as Settings opened again, hears it keeps no account's language.
+     */
+    suspend fun setLanguage(language: String?) {
+        val issuer = issuer() ?: throw IllegalStateException("not signed in")
+        val undo = patchMe { it.copy(language = language) }
+        val me = try {
+            meApi(issuer).setLanguage(language)
+        } catch (e: Throwable) {
+            if (isNoLanguageRoute(e) && origin == issuer) noLanguageRoute.value = issuer
+            undo()
+            throw e
+        }
+        updateMe(issuer, me)
     }
 
     override suspend fun switchProfile(profileId: Long, pin: String?) {
         val active = issuer() ?: throw IllegalStateException("not signed in")
         auth.tokens(active).switchProfile(profileId, pin)
+        switched(active, profileId)
+    }
+
+    override suspend fun switchForCast(profileId: Long, ticket: String) {
+        val active = issuer() ?: throw IllegalStateException("not signed in")
+        auth.tokens(active).switchProfile(profileId, pin = null, ticket = ticket)
+        switched(active, profileId)
+    }
+
+    /** The sign-in on [active] moved to [profileId]: its saved things show, as a profile switch shows them. */
+    private suspend fun switched(active: String, profileId: Long) {
         servers.setProfile(active, profileId)
         val scope = ProfileScope(active, profileId)
         val me = readMe(scope)

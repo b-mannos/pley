@@ -1,11 +1,14 @@
 package app.pley.android.player
 
+import app.pley.android.common.AppLanguage
 import app.pley.android.model.Marker
 import app.pley.android.model.MediaFile
 import app.pley.android.model.MediaStream
 import app.pley.android.model.PlaybackMethod
 import app.pley.android.model.TranscodeInfo
 import app.pley.android.player.sleep.SleepState
+import java.text.DecimalFormatSymbols
+import java.util.Locale
 
 /** Where a playback stands. */
 sealed interface PlayerPhase {
@@ -59,7 +62,21 @@ data class ChapterMark(
     val endMs: Long,
     /** Absolute address of its picture, once the file has seek previews. */
     val imageUrl: String?,
-)
+) {
+    /**
+     * What the chapter is called wherever chapters show: its title, unless
+     * it has none or the title only says where it starts ("00:06:19.212",
+     * as mkvmerge names chapters, or "6:19"), which tells a viewer nothing.
+     * `null` then, and the screens number it: "Chapter 3". A time inside a
+     * real name ("Act 2: 12:00 at Noon") keeps it.
+     */
+    val name: String? = title?.trim()?.takeIf { it.isNotEmpty() && !TIME_ONLY.matches(it) }
+
+    private companion object {
+        /** A title that is only a time: "6:19", "00:06:19", "00:06:19.212", "01:02:03,500". */
+        val TIME_ONLY = Regex("""\d{1,2}(:\d{2}){1,2}([.,]\d+)?""")
+    }
+}
 
 /** One line of the details: "Video", "HEVC 4K HDR10 → H.264 1080p SDR". */
 data class DetailRow(val label: String, val value: String)
@@ -120,12 +137,15 @@ data class UpNextUi(
 object PlaybackSpeeds {
     val ALL: List<Float> = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
 
-    /** "1×", "1.25×", "0.5×". */
-    fun label(speed: Float): String {
+    /** "1×", "1.25×", "0.5×", with [locale]'s decimal separator ("1,25×" in French). */
+    fun label(speed: Float, locale: Locale = AppLanguage.locale): String {
         val text = if (speed == speed.toInt().toFloat()) speed.toInt().toString() else speed.toString().trimEnd('0')
-        return "$text×"
+        return decimals(text, locale) + "×"
     }
 }
+
+/** [number], written with a point, with [locale]'s decimal separator instead. */
+internal fun decimals(number: String, locale: Locale): String = number.replace('.', DecimalFormatSymbols.getInstance(locale).decimalSeparator)
 
 /** The audio delay's range and step. */
 object AudioDelays {
@@ -135,11 +155,11 @@ object AudioDelays {
     /** [ms] within ±5 s, on a 50 ms step. */
     fun clamp(ms: Long): Long = (Math.round(ms.toDouble() / STEP_MS) * STEP_MS).coerceIn(-MAX_MS, MAX_MS)
 
-    /** "+0.25 s", "−1.5 s", "0 s": the sound later (+) or earlier (−) than the picture. */
-    fun label(ms: Long): String {
+    /** "+0.25 s", "−1.5 s", "0 s": the sound later (+) or earlier (−) than the picture, with [locale]'s decimal separator. */
+    fun label(ms: Long, locale: Locale = AppLanguage.locale): String {
         if (ms == 0L) return "0 s"
         val seconds = java.math.BigDecimal(kotlin.math.abs(ms)).movePointLeft(3).stripTrailingZeros().toPlainString()
-        return (if (ms > 0) "+" else "−") + seconds + " s"
+        return (if (ms > 0) "+" else "−") + decimals(seconds, locale) + " s"
     }
 }
 
@@ -192,6 +212,8 @@ data class PlayerUiState(
     val qualities: List<QualityChoice> = emptyList(),
     /** "Direct play", "Direct stream", "Transcoding"; `null` before the server answered. */
     val method: String? = null,
+    /** The way [method] names, for its badge's colour: a download plays as it is ([PlaybackMethod.Direct]). */
+    val playbackMethod: PlaybackMethod? = null,
     /** Why it plays this way when the player chose it: "The original didn't play smoothly on this device." */
     val note: String? = null,
     /** The player switched to a transcode by itself: offer "Play original". */
@@ -214,10 +236,27 @@ data class PlayerUiState(
     val details: PlaybackDetailsUi? = null,
     /** A short message for a toast, until [PlaybackController.dismissNotice]: "This is the last episode". */
     val notice: String? = null,
+    /**
+     * What the profile's remote, on another device, just did here ("Paused",
+     * "+30 s", "Audio: English"), for a toast of a moment, until
+     * [PlaybackController.dismissRemoteNotice]. The screens say it instead
+     * of bringing up their controls: whoever watches sees why it paused or
+     * jumped, without the controls over the picture.
+     */
+    val remoteNotice: String? = null,
+    /** Counts [remoteNotice]s, so the same words twice ("+30 s", "+30 s") are said twice. */
+    val remoteNoticeId: Int = 0,
+    /**
+     * Paused by the remote, and not played since: the screens don't bring up
+     * their controls for this pause, nor keep them for it.
+     */
+    val pausedByRemote: Boolean = false,
     /** How far the subtitles are moved: positive shows them later ([PlaybackController.setSubtitleOffset]). */
     val subtitleOffsetMs: Long = 0,
     /** The subtitles chosen can be moved: text, or pictures drawn by the player from the server's .mks. */
     val subtitleSync: Boolean = false,
+    /** The subtitles chosen are text, which the subtitle style (size, background, font, position) is for: pictures keep their own look. */
+    val subtitleStyled: Boolean = false,
     /** The sleep timer. */
     val sleep: SleepState = SleepState(),
     /** The playback speed, 1 normal ([PlaybackController.setSpeed]). */

@@ -1,0 +1,52 @@
+{
+  "hubs": {
+    "continueWatching": "Seguir viendo",
+    "myList": "Mi lista",
+    "recentlyAddedIn": "Añadido recientemente en {{library}}",
+    "recentlyAdded": "Añadido recientemente",
+    "recentlyAddedShows": "Series añadidas recientemente",
+    "recentlyAddedAlbums": "Álbumes añadidos recientemente",
+    "recentlyReleased": "Estrenos recientes",
+    "topRated": "Mejor valorados"
+  },
+  "tray": {
+    "open": "&Abrir Pley",
+    "scan": "A&nalizar todas las bibliotecas",
+    "logs": "Mostrar &registros",
+    "autostart": "&Iniciar Pley al iniciar sesión",
+    "quit": "&Salir de Pley",
+    "mac": {
+      "scan": "Analizar todas las bibliotecas",
+      "logs": "Mostrar registros",
+      "autostart": "Iniciar Pley al iniciar sesión"
+    },
+    "status": {
+      "idle": "inactivo",
+      "stopping": "deteniéndose",
+      "streams_one": "{{count}} reproducción",
+      "streams_other": "{{count}} reproducciones",
+      "transcoding": "{{streams}} ({{count}} transcodificando)",
+      "scanning": "analizando {{library}}",
+      "scanningLibraries": "analizando bibliotecas"
+    }
+  },
+  "requests": {
+    "addedByHand": "Añadido a mano",
+    "notAnswering": "{{service}} no responde",
+    "unsaved": "Pley no pudo guardar cómo fue el envío: {{why}}",
+    "arr": {
+      "unauthorized": "{{service}} rechazó la clave de API",
+      "unreachable": "No se puede conectar con {{service}}: {{why}}",
+      "refused": "{{service}} lo rechazó: {{why}}",
+      "unexpected": "{{service}} respondió algo inesperado: {{why}}",
+      "redirected": "respondió con una redirección: indica su dirección con su URL base, como la muestran sus propios ajustes",
+      "tooLarge": "su respuesta supera los {{size}} MB",
+      "noMovie": "su búsqueda no encontró ninguna película",
+      "noId": "no hay ningún id en su respuesta",
+      "noShow": "no encontró ninguna serie con el id de TheTVDB {{tvdb}}",
+      "noTvdbId": "TMDB no conoce ningún id de TheTVDB para esta serie, y Sonarr lo necesita: añádela a Sonarr a mano",
+      "qualityProfile": "elige el perfil de calidad de {{service}} en Ajustes → Solicitudes",
+      "rootFolder": "elige la carpeta raíz de {{service}} en Ajustes → Solicitudes"
+    }
+  }
+}

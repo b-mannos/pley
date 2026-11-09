@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { AppWindow, ChevronRight, Laptop, Lock, LogOut, Plus, ShieldAlert, ShieldCheck, Smartphone, Trash2, UserPlus } from "lucide-react";
 import { appKeys, appLabel, scopesLabel, useSignOutUserApp, useUserApps } from "@/api/apps";
@@ -7,6 +8,7 @@ import {
   useCreateUser,
   useDeleteUser,
   useLibraries,
+  useRatingSystems,
   useResetUserTwoStep,
   useServer,
   useSignOutEverywhere,
@@ -23,6 +25,7 @@ import { ConfirmModal, Modal } from "@/components/Modal";
 import { useToast } from "@/components/Toast";
 import { Badge, Button, EmptyState, Field, PageSpinner, Select, TextInput, Toggle } from "@/components/ui";
 import { ageBadge, librariesLabel } from "@/lib/access";
+import { inBoth, sameLabels } from "@/lib/labels";
 import { cn } from "@/lib/cn";
 import { passwordProblem } from "@/lib/passwords";
 import { formatAgo } from "@/lib/format";
@@ -30,6 +33,9 @@ import { useDocumentTitle, useOnChange } from "@/lib/hooks";
 import { mustSetUpTwoStep } from "@/lib/twoStep";
 
 const PIN_RE = /^\d{4,8}$/;
+
+/** The edit dialog's tabs: who the account is, what it may see, where it's signed in. */
+type UserTab = "profile" | "access" | "devices";
 
 function SwitchRow({
   label,
@@ -61,6 +67,7 @@ function SwitchRow({
  * signed out everywhere, and set it up again at their next sign-in.
  */
 function TwoStepReset({ user }: { user: User }) {
+  const { t } = useTranslation("settings");
   const reset = useResetUserTwoStep();
   const server = useServer();
   const toast = useToast();
@@ -69,17 +76,13 @@ function TwoStepReset({ user }: { user: User }) {
   return (
     <section className="flex items-center justify-between gap-3">
       <div>
-        <h3 className="text-sm font-medium">Two-step sign-in</h3>
-        <p className="text-xs text-subtle">
-          {required
-            ? `Signs in with a code from an authenticator app after the password. Turning it off signs ${user.name} out everywhere, to set it up again at the next sign-in.`
-            : "Signs in with a code from an authenticator app after the password."}
-        </p>
+        <h3 className="text-sm font-medium">{t("users.twoStep.title")}</h3>
+        <p className="text-xs text-subtle">{required ? t("users.twoStep.hintRequired", { name: user.name }) : t("users.twoStep.hint")}</p>
       </div>
       {confirming ? (
         <div className="flex shrink-0 gap-1">
           <Button size="sm" variant="ghost" onClick={() => setConfirming(false)} disabled={reset.isPending}>
-            Keep it
+            {t("users.twoStep.keep")}
           </Button>
           <Button
             size="sm"
@@ -88,22 +91,18 @@ function TwoStepReset({ user }: { user: User }) {
             onClick={() =>
               reset.mutate(user.id, {
                 onSuccess: () =>
-                  toast.success(
-                    required
-                      ? `${user.name} is signed out, and sets up two-step sign-in again at the next sign-in`
-                      : `Two-step sign-in is off for ${user.name}`,
-                  ),
+                  toast.success(required ? t("users.twoStep.signedOut", { name: user.name }) : t("users.twoStep.off", { name: user.name })),
                 onError: (e) => toast.error(errorMessage(e)),
                 onSettled: () => setConfirming(false),
               })
             }
           >
-            Turn off
+            {t("users.twoStep.turnOff")}
           </Button>
         </div>
       ) : (
-        <Button size="sm" variant="ghost" onClick={() => setConfirming(true)} title="For someone who lost their phone and their recovery codes">
-          Turn off
+        <Button size="sm" variant="ghost" onClick={() => setConfirming(true)} title={t("users.twoStep.turnOffTitle")}>
+          {t("users.twoStep.turnOff")}
         </Button>
       )}
     </section>
@@ -115,6 +114,7 @@ function isPhone(d: Device) {
 }
 
 function UserDevices({ user, self }: { user: User; self: boolean }) {
+  const { t } = useTranslation(["settings", "common"]);
   const devices = useUserDevices(user.id);
   const apps = useUserApps(user.id);
   const signOut = useSignOutEverywhere();
@@ -126,19 +126,19 @@ function UserDevices({ user, self }: { user: User; self: boolean }) {
   return (
     <section className="space-y-2">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-medium">Signed-in devices</h3>
+        <h3 className="text-sm font-medium">{t("users.devices.title")}</h3>
         {!self && signedIn && !confirming ? (
           <Button size="sm" variant="ghost" icon={<LogOut className="size-4" />} onClick={() => setConfirming(true)}>
-            Sign out everywhere
+            {t("users.devices.signOutEverywhere")}
           </Button>
         ) : null}
       </div>
       {confirming ? (
         <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-surface-2 px-3 py-2.5">
-          <p className="text-sm text-fg">Sign out {user.name} everywhere?</p>
+          <p className="text-sm text-fg">{t("users.devices.confirm", { name: user.name })}</p>
           <div className="flex shrink-0 gap-1">
             <Button size="sm" variant="ghost" onClick={() => setConfirming(false)} disabled={signOut.isPending}>
-              Cancel
+              {t("common:actions.cancel")}
             </Button>
             <Button
               size="sm"
@@ -147,7 +147,7 @@ function UserDevices({ user, self }: { user: User; self: boolean }) {
               onClick={() =>
                 signOut.mutate(user.id, {
                   onSuccess: () => {
-                    toast.success(`${user.name} was signed out everywhere`);
+                    toast.success(t("users.devices.signedOut", { name: user.name }));
                     void qc.invalidateQueries({ queryKey: appKeys.user(user.id) });
                   },
                   onError: (e) => toast.error(errorMessage(e)),
@@ -155,15 +155,15 @@ function UserDevices({ user, self }: { user: User; self: boolean }) {
                 })
               }
             >
-              Sign out everywhere
+              {t("users.devices.signOutEverywhere")}
             </Button>
           </div>
         </div>
       ) : null}
       {devices.isPending ? (
-        <p className="text-sm text-subtle">Loading…</p>
+        <p className="text-sm text-subtle">{t("common:states.loading")}</p>
       ) : list.length === 0 ? (
-        <p className="text-sm text-subtle">No signed-in devices.</p>
+        <p className="text-sm text-subtle">{t("users.devices.none")}</p>
       ) : (
         <ul className="divide-y divide-white/[0.05] rounded-md border border-border">
           {list.map((d) => {
@@ -188,19 +188,20 @@ function UserDevices({ user, self }: { user: User; self: boolean }) {
 
 /** The apps using someone's account, or allowed by them for another profile. */
 function UserApps({ user }: { user: User }) {
+  const { t } = useTranslation(["settings", "common"]);
   const apps = useUserApps(user.id);
   const signOut = useSignOutUserApp();
   const toast = useToast();
   const list = apps.data ?? [];
   return (
     <section className="space-y-2">
-      <h3 className="text-sm font-medium">Apps</h3>
+      <h3 className="text-sm font-medium">{t("users.apps.title")}</h3>
       {apps.isPending ? (
-        <p className="text-sm text-subtle">Loading…</p>
+        <p className="text-sm text-subtle">{t("common:states.loading")}</p>
       ) : apps.isError ? (
         <p className="text-sm text-danger">{errorMessage(apps.error)}</p>
       ) : list.length === 0 ? (
-        <p className="text-sm text-subtle">No apps use this account.</p>
+        <p className="text-sm text-subtle">{t("users.apps.none")}</p>
       ) : (
         <ul className="divide-y divide-white/[0.05] rounded-md border border-border">
           {list.map((a) => {
@@ -214,40 +215,40 @@ function UserApps({ user }: { user: User }) {
                       {label}
                     </span>
                     {a.first_party ? (
-                      <Badge tone="accent">Pley's own app</Badge>
+                      <Badge tone="accent">{t("users.apps.pleyApp")}</Badge>
                     ) : a.name ? (
-                      <span className="truncate text-xs text-subtle">calls itself “{a.name}”</span>
+                      <span className="truncate text-xs text-subtle">{t("users.apps.callsItself", { name: a.name })}</span>
                     ) : null}
                   </div>
                   <div className="truncate text-xs text-muted">
                     {[
-                      a.profile.id !== user.id ? `Using ${a.profile.name}` : null,
-                      a.approved_by.id !== user.id ? `Allowed by ${a.approved_by.name}` : null,
+                      a.profile.id !== user.id ? t("users.apps.using", { name: a.profile.name }) : null,
+                      a.approved_by.id !== user.id ? t("users.apps.allowedBy", { name: a.approved_by.name }) : null,
                       scopesLabel(a.scopes),
                     ]
                       .filter(Boolean)
                       .join(" · ")}
                   </div>
                   <div className="truncate text-xs text-subtle">
-                    {[a.device, a.ip, `last active ${formatAgo(a.last_used_at)}`].filter(Boolean).join(" · ")}
+                    {[a.device, a.ip, t("users.apps.lastActive", { when: formatAgo(a.last_used_at) })].filter(Boolean).join(" · ")}
                   </div>
                 </div>
                 <Button
                   size="sm"
                   variant="ghost"
-                  aria-label={`Sign out ${label}`}
+                  aria-label={t("users.apps.signOut", { name: label })}
                   loading={signOut.isPending && signOut.variables?.app === a.id}
                   onClick={() =>
                     signOut.mutate(
                       { user: user.id, app: a.id },
                       {
-                        onSuccess: () => toast.success(`Signed out ${label}`),
+                        onSuccess: () => toast.success(t("users.apps.signedOut", { name: label })),
                         onError: (e) => toast.error(errorMessage(e)),
                       },
                     )
                   }
                 >
-                  Sign out
+                  {t("common:actions.signOut")}
                 </Button>
               </li>
             );
@@ -261,6 +262,7 @@ function UserApps({ user }: { user: User }) {
 type Kind = "regular" | "managed";
 
 function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open: boolean; onClose: () => void; onDelete: (u: User) => void }) {
+  const { t } = useTranslation(["settings", "common"]);
   const me = useAuth();
   const users = useUsers();
   const create = useCreateUser();
@@ -276,7 +278,15 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
   const [isAdmin, setIsAdmin] = useState(false);
   const [home, setHome] = useState(true);
   const [disabled, setDisabled] = useState(false);
-  const [access, setAccess] = useState<AccessValue>({ all_libraries: true, library_ids: [], max_age: null });
+  const [access, setAccess] = useState<AccessValue>({
+    all_libraries: true,
+    library_ids: [],
+    max_age: null,
+    max_age_system: null,
+    birth_month: null,
+    show_labels: [],
+    hide_labels: [],
+  });
   const [pin, setPin] = useState("");
   const [clearPin, setClearPin] = useState(false);
   // What the Requests select was set to; `null` until then (a new account, or an administrator).
@@ -284,6 +294,7 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
   // Whether it was set in this dialog, not kept from the account.
   const [requestPicked, setRequestPicked] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<UserTab>("profile");
 
   // Reset the form whenever the dialog opens (for someone else); background
   // refetches don't touch what is being edited.
@@ -303,11 +314,19 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
       all_libraries: user?.all_libraries ?? true,
       library_ids: user?.library_ids ?? [],
       max_age: user?.max_age ?? null,
+      max_age_system: user?.max_age_system ?? null,
+      birth_month: user?.birth_month ?? null,
+      show_labels: user?.show_labels ?? [],
+      hide_labels: user?.hide_labels ?? [],
     });
     setPin("");
     setClearPin(false);
     setError(null);
+    setTab("profile");
   });
+  // Devices and apps act at once, not on Save: a new account has none.
+  const tabs: UserTab[] = isNew ? ["profile", "access"] : ["profile", "access", "devices"];
+  const accessProblem = inBoth(access.show_labels, access.hide_labels).length > 0;
 
   const managed = isNew ? kind === "managed" : (user?.managed ?? false) && !password;
   const otherAdmins = (users.data ?? []).filter((u) => u.is_admin && !u.disabled && u.id !== user?.id).length;
@@ -327,7 +346,7 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
       : (requestChoice ?? (managed || access.max_age !== null ? "off" : "ask"));
 
   const validate = (): string | null => {
-    if (isNew && !username.trim()) return "Enter a username.";
+    if (isNew && !username.trim()) return t("users.dialog.enterUsername");
     if (isNew && kind === "regular") {
       const problem = passwordProblem(password, username);
       if (problem) return problem;
@@ -336,8 +355,8 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
       const problem = passwordProblem(password, user?.username);
       if (problem) return problem;
     }
-    if (pin && !PIN_RE.test(pin)) return "The PIN must be 4 to 8 digits.";
-    if (!access.all_libraries && access.library_ids.length === 0) return "Pick at least one library, or allow all of them.";
+    if (pin && !PIN_RE.test(pin)) return t("users.dialog.pinDigits");
+    if (!access.all_libraries && access.library_ids.length === 0) return t("users.dialog.pickLibrary");
     return null;
   };
 
@@ -356,12 +375,15 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
           managed: kind === "managed",
           home,
           ...access,
+          // A limit that follows a birthday is worked out by the server.
+          max_age: access.birth_month ? undefined : access.max_age,
+          birth_month: access.birth_month || undefined,
           pin: pin || undefined,
           request_access: requestsKnown && !asAdmin ? requestAccess : undefined,
         },
         {
           onSuccess: (u) => {
-            toast.success(`Added ${u.name}`);
+            toast.success(t("users.dialog.added", { name: u.name }));
             onClose();
           },
           onError: (e) => setError(errorMessage(e)),
@@ -380,7 +402,15 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
     const sameLibraries =
       access.library_ids.length === user.library_ids.length && access.library_ids.every((id) => user.library_ids.includes(id));
     if (!access.all_libraries && !sameLibraries) patch.library_ids = access.library_ids;
-    if (access.max_age !== user.max_age) patch.max_age = access.max_age;
+    if (access.birth_month) {
+      if (access.birth_month !== user.birth_month) patch.birth_month = access.birth_month;
+    } else if (access.max_age !== user.max_age || user.birth_month) {
+      // A fixed limit (or none) stops one following a birthday.
+      patch.max_age = access.max_age;
+    }
+    if (access.max_age_system !== (user.max_age_system ?? null)) patch.max_age_system = access.max_age_system;
+    if (!sameLabels(access.show_labels, user.show_labels ?? [])) patch.show_labels = access.show_labels;
+    if (!sameLabels(access.hide_labels, user.hide_labels ?? [])) patch.hide_labels = access.hide_labels;
     if (pin) patch.pin = pin;
     else if (clearPin) patch.pin = null;
     // One no longer an administrator keeps what the dialog shows, not what was kept from before.
@@ -391,7 +421,7 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
       { id: user.id, ...patch },
       {
         onSuccess: (u) => {
-          toast.success(`Saved ${u.name}`);
+          toast.success(t("users.dialog.saved", { name: u.name }));
           onClose();
         },
         onError: (e) => setError(errorMessage(e)),
@@ -405,19 +435,21 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
       onClose={onClose}
       locked={busy}
       size="lg"
-      title={isNew ? "Add user" : `Edit ${user?.name ?? ""}`}
+      // Its tabs differ in height: the top stays put as they change.
+      align="top"
+      title={isNew ? t("users.dialog.addTitle") : t("users.dialog.editTitle", { name: user?.name ?? "" })}
       footer={
         <>
           {!isNew && user && !self ? (
             <Button variant="ghost" className="mr-auto" icon={<Trash2 className="size-4 text-danger" />} onClick={() => onDelete(user)}>
-              <span className="text-danger">Delete</span>
+              <span className="text-danger">{t("common:actions.delete")}</span>
             </Button>
           ) : null}
           <Button variant="ghost" onClick={onClose} disabled={busy}>
-            Cancel
+            {t("common:actions.cancel")}
           </Button>
           <Button variant="primary" onClick={save} loading={busy}>
-            {isNew ? "Add user" : "Save"}
+            {isNew ? t("users.dialog.addTitle") : t("common:actions.save")}
           </Button>
         </>
       }
@@ -433,8 +465,8 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
           <div className="grid gap-2 sm:grid-cols-2">
             {(
               [
-                { id: "regular", title: "Regular account", text: "Signs in with a username and password." },
-                { id: "managed", title: "Managed profile", text: "No password: a child or guest you switch to from your profile." },
+                { id: "regular", title: t("users.dialog.regular"), text: t("users.dialog.regularText") },
+                { id: "managed", title: t("users.dialog.managed"), text: t("users.dialog.managedText") },
               ] as const
             ).map((o) => (
               <button
@@ -461,150 +493,179 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
             <div className="min-w-0">
               <div className="truncate font-semibold">{user.name}</div>
               <div className="text-sm text-muted">
-                @{user.username} · {user.managed ? "Managed profile" : user.is_admin ? "Administrator" : "Regular account"}
+                @{user.username} · {user.managed ? t("users.dialog.managed") : user.is_admin ? t("users.dialog.administrator") : t("users.dialog.regular")}
               </div>
             </div>
           </div>
         ) : null}
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          {isNew ? (
-            <Field label="Username" htmlFor="user-username" hint={kind === "managed" ? "Only used internally for managed profiles." : undefined}>
-              <TextInput id="user-username" autoComplete="off" value={username} onChange={(e) => setUsername(e.target.value)} />
-            </Field>
-          ) : null}
-          <Field label="Display name" htmlFor="user-display" hint="Shown in the profile switcher and menus.">
-            <TextInput
-              id="user-display"
-              autoComplete="off"
-              placeholder={username || user?.username}
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-            />
-          </Field>
-          {isNew && kind === "regular" ? (
-            <Field label="Password" htmlFor="user-password">
-              <TextInput id="user-password" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
-            </Field>
-          ) : null}
-          {!isNew && self ? (
-            <p className="text-xs text-subtle">Your own password, PIN and two-step sign-in change in Account, which asks for your current password.</p>
-          ) : null}
-          {!isNew && !self ? (
-            <Field
-              label={user?.managed ? "Password" : "New password"}
-              htmlFor="user-password"
-              hint={
-                user?.managed
-                  ? "Setting one turns this profile into a regular account."
-                  : user?.has_password === false
-                    ? "This account has no password: set one so it can sign in."
-                    : "Leave empty to keep the current one."
-              }
+        <div role="tablist" aria-label={t("users.dialog.tabsLabel")} className="flex gap-1 border-b border-border">
+          {tabs.map((key) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              id={`user-tab-${key}`}
+              aria-selected={tab === key}
+              aria-controls={`user-panel-${key}`}
+              onClick={() => setTab(key)}
+              className={cn(
+                "-mb-px flex h-10 items-center gap-2 border-b-2 px-3 text-sm font-medium transition-colors",
+                tab === key ? "border-accent text-fg" : "border-transparent text-muted hover:text-fg",
+              )}
             >
-              <TextInput id="user-password" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
-            </Field>
-          ) : null}
+              {t(`users.dialog.tabs.${key}`)}
+              {key === "access" && accessProblem ? (
+                <span className="size-1.5 rounded-full bg-danger" aria-label={t("users.dialog.tabNeedsLook")} />
+              ) : null}
+            </button>
+          ))}
         </div>
 
-        <div className="space-y-2">
-          <SwitchRow
-            label="Administrator"
-            description={managed ? "Managed profiles can't be administrators." : "Can manage libraries, users and server settings."}
-            checked={isAdmin && !managed}
-            onChange={setIsAdmin}
-            disabled={managed || (self && isAdmin) || (lastAdmin && isAdmin)}
-          />
-          <SwitchRow
-            label="Member of this home"
-            description="Shown in the profile switcher, so household members can switch to each other."
-            checked={home}
-            onChange={setHome}
-          />
-          {!isNew ? (
-            <SwitchRow
-              label="Disabled"
-              description="Can't sign in or play anything until enabled again."
-              checked={disabled}
-              onChange={setDisabled}
-              disabled={self || (lastAdmin && !disabled)}
-            />
-          ) : null}
-        </div>
-
-        {requestsKnown ? (
-          <Field
-            label="Requests"
-            htmlFor="user-requests"
-            hint={
-              asAdmin
-                ? "Administrators' requests are approved as they make them."
-                : access.max_age !== null
-                  ? "Asking for movies and shows in Discover, which leaves out titles above the age limit."
-                  : "Asking for movies and shows the libraries don't have, in Discover."
-            }
-          >
-            <Select
-              id="user-requests"
-              className="h-10 w-full"
-              value={asAdmin ? "auto" : requestAccess}
-              disabled={asAdmin}
-              onChange={(e) => {
-                setRequestChoice(e.target.value as RequestAccess);
-                setRequestPicked(true);
-              }}
-            >
-              <option value="ask">May ask, for an administrator to approve</option>
-              <option value="auto">May ask, approved as asked</option>
-              <option value="off">May not ask</option>
-            </Select>
-          </Field>
-        ) : null}
-
-        <AccessFields value={access} onChange={setAccess} idPrefix="user" />
-
-        {self ? null : (
-          <Field
-            label="Profile PIN"
-            htmlFor="user-pin"
-            hint={
-              user?.has_pin && !clearPin
-                ? "This profile has a PIN. Enter a new one to change it."
-                : "Optional, 4 to 8 digits. Needed to switch to this profile."
-            }
-          >
-            <div className="flex gap-2">
-              <TextInput
-                id="user-pin"
-                inputMode="numeric"
-                autoComplete="off"
-                maxLength={8}
-                placeholder={user?.has_pin && !clearPin ? "••••" : ""}
-                value={pin}
-                onChange={(e) => {
-                  setPin(e.target.value.replace(/\D/g, ""));
-                  setClearPin(false);
-                }}
-              />
-              {user?.has_pin ? (
-                <Button
-                  variant="outline"
-                  icon={<Lock className="size-4" />}
-                  onClick={() => {
-                    setPin("");
-                    setClearPin(!clearPin);
-                  }}
+        {tab === "profile" ? (
+          <div role="tabpanel" id="user-panel-profile" aria-labelledby="user-tab-profile" className="space-y-5">
+            <div className="grid gap-4 sm:grid-cols-2">
+              {isNew ? (
+                <Field label={t("users.dialog.username")} htmlFor="user-username" hint={kind === "managed" ? t("users.dialog.usernameManagedHint") : undefined}>
+                  <TextInput id="user-username" autoComplete="off" value={username} onChange={(e) => setUsername(e.target.value)} />
+                </Field>
+              ) : null}
+              <Field label={t("users.dialog.displayName")} htmlFor="user-display" hint={t("users.dialog.displayNameHint")}>
+                <TextInput
+                  id="user-display"
+                  autoComplete="off"
+                  placeholder={username || user?.username}
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                />
+              </Field>
+              {isNew && kind === "regular" ? (
+                <Field label={t("users.dialog.password")} htmlFor="user-password">
+                  <TextInput id="user-password" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+                </Field>
+              ) : null}
+              {!isNew && self ? (
+                <p className="text-xs text-subtle">{t("users.dialog.ownPassword")}</p>
+              ) : null}
+              {!isNew && !self ? (
+                <Field
+                  label={user?.managed ? t("users.dialog.password") : t("users.dialog.newPassword")}
+                  htmlFor="user-password"
+                  hint={
+                    user?.managed
+                      ? t("users.dialog.managedPasswordHint")
+                      : user?.has_password === false
+                        ? t("users.dialog.noPasswordHint")
+                        : t("users.dialog.keepPasswordHint")
+                  }
                 >
-                  {clearPin ? "Keep PIN" : "Remove PIN"}
-                </Button>
+                  <TextInput id="user-password" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+                </Field>
               ) : null}
             </div>
-          </Field>
-        )}
 
-        {!isNew && user?.two_step && !self ? <TwoStepReset user={user} /> : null}
-        {!isNew && user ? <UserDevices key={user.id} user={user} self={self} /> : null}
-        {!isNew && user ? <UserApps user={user} /> : null}
+            <div className="space-y-2">
+              <SwitchRow
+                label={t("users.dialog.administrator")}
+                description={managed ? t("users.dialog.managedNotAdmin") : t("users.dialog.adminHint")}
+                checked={isAdmin && !managed}
+                onChange={setIsAdmin}
+                disabled={managed || (self && isAdmin) || (lastAdmin && isAdmin)}
+              />
+              <SwitchRow
+                label={t("users.dialog.home")}
+                description={t("users.dialog.homeHint")}
+                checked={home}
+                onChange={setHome}
+              />
+              {!isNew ? (
+                <SwitchRow
+                  label={t("users.dialog.disabled")}
+                  description={t("users.dialog.disabledHint")}
+                  checked={disabled}
+                  onChange={setDisabled}
+                  disabled={self || (lastAdmin && !disabled)}
+                />
+              ) : null}
+            </div>
+
+            {self ? null : (
+              <Field
+                label={t("users.dialog.pin")}
+                htmlFor="user-pin"
+                hint={user?.has_pin && !clearPin ? t("users.dialog.pinSet") : t("users.dialog.pinHint")}
+              >
+                <div className="flex gap-2">
+                  <TextInput
+                    id="user-pin"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    maxLength={8}
+                    placeholder={user?.has_pin && !clearPin ? "••••" : ""}
+                    value={pin}
+                    onChange={(e) => {
+                      setPin(e.target.value.replace(/\D/g, ""));
+                      setClearPin(false);
+                    }}
+                  />
+                  {user?.has_pin ? (
+                    <Button
+                      variant="outline"
+                      icon={<Lock className="size-4" />}
+                      onClick={() => {
+                        setPin("");
+                        setClearPin(!clearPin);
+                      }}
+                    >
+                      {clearPin ? t("users.dialog.keepPin") : t("users.dialog.removePin")}
+                    </Button>
+                  ) : null}
+                </div>
+              </Field>
+            )}
+            {!isNew && user?.two_step && !self ? <TwoStepReset user={user} /> : null}
+          </div>
+        ) : null}
+        {tab === "access" ? (
+          <div role="tabpanel" id="user-panel-access" aria-labelledby="user-tab-access" className="space-y-5">
+            <AccessFields value={access} onChange={setAccess} idPrefix="user" birthday />
+
+            {requestsKnown ? (
+              <Field
+                label={t("users.dialog.requests")}
+                htmlFor="user-requests"
+                hint={
+                  asAdmin
+                    ? t("users.dialog.requestsAdmin")
+                    : access.max_age !== null
+                      ? t("users.dialog.requestsAgeLimit")
+                      : t("users.dialog.requestsHint")
+                }
+              >
+                <Select
+                  id="user-requests"
+                  className="h-10 w-full"
+                  value={asAdmin ? "auto" : requestAccess}
+                  disabled={asAdmin}
+                  onChange={(e) => {
+                    setRequestChoice(e.target.value as RequestAccess);
+                    setRequestPicked(true);
+                  }}
+                >
+                  <option value="ask">{t("users.dialog.requestAsk")}</option>
+                  <option value="auto">{t("users.dialog.requestAuto")}</option>
+                  <option value="off">{t("users.dialog.requestOff")}</option>
+                </Select>
+              </Field>
+            ) : null}
+          </div>
+        ) : null}
+        {tab === "devices" && !isNew && user ? (
+          <div role="tabpanel" id="user-panel-devices" aria-labelledby="user-tab-devices" className="space-y-5">
+            <UserDevices key={user.id} user={user} self={self} />
+            <UserApps user={user} />
+          </div>
+        ) : null}
 
         {error ? <p className="text-sm text-danger">{error}</p> : null}
         <button type="submit" className="hidden" />
@@ -614,7 +675,8 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
 }
 
 function UserRow({ user, self, libraries, onOpen }: { user: User; self: boolean; libraries: ReturnType<typeof useLibraries>["data"]; onOpen: () => void }) {
-  const age = ageBadge(user.max_age);
+  const { t } = useTranslation("settings");
+  const age = ageBadge(useRatingSystems().data, user.max_age_system, user.max_age, user.birth_month);
   const server = useServer();
   return (
     <li>
@@ -628,27 +690,27 @@ function UserRow({ user, self, libraries, onOpen }: { user: User; self: boolean;
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className={cn("truncate font-medium", user.disabled && "text-muted")}>{user.name}</span>
             {user.name !== user.username ? <span className="truncate text-xs text-subtle">@{user.username}</span> : null}
-            {self ? <span className="text-xs text-subtle">(you)</span> : null}
+            {self ? <span className="text-xs text-subtle">{t("users.you")}</span> : null}
           </div>
           <div className="mt-1 flex flex-wrap gap-1.5">
-            {user.is_admin ? <Badge tone="accent">Admin</Badge> : null}
-            {user.managed ? <Badge tone="info">Managed</Badge> : null}
-            {user.home ? <Badge>Home</Badge> : null}
-            {user.disabled ? <Badge tone="danger">Disabled</Badge> : null}
+            {user.is_admin ? <Badge tone="accent">{t("users.badges.admin")}</Badge> : null}
+            {user.managed ? <Badge tone="info">{t("users.badges.managed")}</Badge> : null}
+            {user.home ? <Badge>{t("users.badges.home")}</Badge> : null}
+            {user.disabled ? <Badge tone="danger">{t("users.badges.disabled")}</Badge> : null}
             {!user.is_admin && !user.all_libraries ? <Badge>{librariesLabel(user, libraries)}</Badge> : null}
             {age && !user.is_admin ? <Badge>{age}</Badge> : null}
             {user.has_pin ? (
               <Badge>
-                <Lock className="size-3" /> PIN
+                <Lock className="size-3" /> {t("users.badges.pin")}
               </Badge>
             ) : null}
             {user.two_step ? (
               <Badge tone="success">
-                <ShieldCheck className="size-3" /> 2FA
+                <ShieldCheck className="size-3" /> {t("users.badges.twoStep")}
               </Badge>
             ) : mustSetUpTwoStep(user, server.data) && !user.disabled ? (
               <Badge tone="danger">
-                <ShieldAlert className="size-3" /> 2FA not set up
+                <ShieldAlert className="size-3" /> {t("users.badges.twoStepMissing")}
               </Badge>
             ) : null}
           </div>
@@ -660,7 +722,8 @@ function UserRow({ user, self, libraries, onOpen }: { user: User; self: boolean;
 }
 
 export function UsersSettings() {
-  useDocumentTitle("Users");
+  const { t } = useTranslation(["settings", "common"]);
+  useDocumentTitle(t("users.title"));
   const me = useAuth();
   const users = useUsers();
   const libs = useLibraries();
@@ -671,7 +734,13 @@ export function UsersSettings() {
 
   if (users.isPending) return <PageSpinner />;
   if (users.isError) {
-    return <EmptyState title="Couldn't load users" description={errorMessage(users.error)} action={<Button onClick={() => void users.refetch()}>Retry</Button>} />;
+    return (
+      <EmptyState
+        title={t("users.couldntLoad")}
+        description={errorMessage(users.error)}
+        action={<Button onClick={() => void users.refetch()}>{t("common:actions.retry")}</Button>}
+      />
+    );
   }
 
   // Keep the dialog's user in sync with refetched data.
@@ -681,16 +750,16 @@ export function UsersSettings() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">Users</h2>
-          <p className="text-sm text-muted">Who can sign in, what each person can see, and the profiles of your home.</p>
+          <h2 className="text-lg font-semibold">{t("users.title")}</h2>
+          <p className="text-sm text-muted">{t("users.description")}</p>
         </div>
         <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setDialog({ user: null })}>
-          Add user
+          {t("users.add")}
         </Button>
       </div>
 
       {users.data.length === 0 ? (
-        <EmptyState icon={<UserPlus />} title="No users" />
+        <EmptyState icon={<UserPlus />} title={t("users.empty")} />
       ) : (
         <ul className="divide-y divide-white/[0.05] overflow-hidden rounded-lg border border-border bg-surface">
           {users.data.map((u) => (
@@ -711,21 +780,18 @@ export function UsersSettings() {
       <ConfirmModal
         open={!!deleting}
         onClose={() => setDeleting(null)}
-        title="Delete user?"
+        title={t("users.deleteTitle")}
         danger
-        confirmLabel="Delete"
+        confirmLabel={t("common:actions.delete")}
         loading={del.isPending}
         message={
-          <>
-            <strong className="text-fg">{deleting?.name}</strong> will lose access, and their watch history and settings will be
-            deleted.
-          </>
+          <Trans t={t} i18nKey="users.deleteMessage" values={{ name: deleting?.name ?? "" }} components={{ name: <strong className="text-fg" /> }} />
         }
         onConfirm={() => {
           if (!deleting) return;
           del.mutate(deleting.id, {
             onSuccess: () => {
-              toast.success(`Deleted ${deleting.name}`);
+              toast.success(t("users.deleted", { name: deleting.name }));
               setDeleting(null);
             },
             onError: (e) => toast.error(errorMessage(e)),

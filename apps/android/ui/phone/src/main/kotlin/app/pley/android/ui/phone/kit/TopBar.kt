@@ -10,10 +10,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -25,8 +25,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
@@ -35,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyMotion
+import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.designsystem.reducedMotion
 import app.pley.android.ui.phone.R
@@ -76,7 +80,12 @@ fun PleyTopAppBar(
     )
 }
 
-/** [PleyTopAppBar] with any [title] content: the pley mark and wordmark on Home. */
+/**
+ * [PleyTopAppBar] with any [title] content: the pley mark and wordmark on
+ * Home. Over a banner (Home's), [solid] says how far the bar has come
+ * back, 0 to 1 (read only while drawing): clear at 0 with a scrim behind
+ * its icons, [bg][PleyColors.Bg] at 1.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PleyTopAppBar(
@@ -85,10 +94,21 @@ fun PleyTopAppBar(
     onBack: (() -> Unit)? = null,
     scrolled: () -> Boolean = { false },
     windowInsets: WindowInsets = TopAppBarDefaults.windowInsets,
+    solid: (() -> Float)? = null,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     val margin = LocalPhoneMetrics.current.margin
-    Column(modifier.fillMaxWidth()) {
+    val container = if (solid == null) PleyColors.Bg else Color.Transparent
+    val over = if (solid == null) {
+        Modifier
+    } else {
+        Modifier.drawBehind {
+            drawRect(Brush.verticalGradient(0f to PleyColors.Bg.copy(alpha = 0.6f), 1f to Color.Transparent))
+            val a = solid()
+            if (a > 0f) drawRect(PleyColors.Bg.copy(alpha = a))
+        }
+    }
+    Column(modifier.fillMaxWidth().then(over)) {
         TopAppBar(
             title = title,
             navigationIcon = {
@@ -102,8 +122,8 @@ fun PleyTopAppBar(
             },
             windowInsets = windowInsets,
             colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = PleyColors.Bg,
-                scrolledContainerColor = PleyColors.Bg,
+                containerColor = container,
+                scrolledContainerColor = container,
                 titleContentColor = PleyColors.Fg,
                 navigationIconContentColor = PleyColors.Fg,
                 actionIconContentColor = PleyColors.Fg,
@@ -123,10 +143,10 @@ fun PleyTopAppBar(
 }
 
 /**
- * "Showing what pley had saved. Reconnecting…" (design spec §3.4): a
- * [surface3][PleyColors.Surface3] strip under the top bar while
- * [LocalOffline] holds, announced when it appears, with the way to the
- * downloads at its end ([LocalOfflineAction]).
+ * "Pley is offline" (design spec §3.4): a [surface3][PleyColors.Surface3]
+ * strip under the top bar while [LocalOffline] holds, announced when it
+ * appears, with the way to the downloads at its end ([LocalOfflineAction]).
+ * The app tries the server again by itself; the strip goes when it answers.
  */
 @Composable
 fun OfflineBanner(modifier: Modifier = Modifier) {
@@ -146,7 +166,9 @@ fun OfflineBanner(modifier: Modifier = Modifier) {
                 .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            BusyLine(stringResource(R.string.shell_offline), Modifier.weight(1f))
+            Icon(PleyIcons.ServerOff, contentDescription = null, size = 20.dp, tint = PleyColors.Muted)
+            Spacer(Modifier.width(12.dp))
+            Text(stringResource(R.string.shell_offline), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = PleyColors.Fg)
             LocalOfflineAction.current?.let { action ->
                 PleyTextButton(action.label, onClick = action.onClick)
             }

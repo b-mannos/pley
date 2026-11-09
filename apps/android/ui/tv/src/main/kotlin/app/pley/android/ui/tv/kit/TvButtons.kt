@@ -132,7 +132,9 @@ fun TvPillButton(
  * on [surface3][PleyColors.Surface3]. Its [label] is
  * always what screen readers hear; on screen it fades in 6 dp below while
  * the button has focus. The button keeps that room ([PleyTv.ButtonLabelRoom])
- * under itself, so a row of buttons never jumps.
+ * under itself, so a row of buttons never jumps. Without [showLabel] (a
+ * star that says it all) the label is only heard, and the button is the
+ * square alone.
  */
 @Composable
 fun TvRoundButton(
@@ -143,6 +145,7 @@ fun TvRoundButton(
     onArt: Boolean = true,
     enabled: Boolean = true,
     onLongClick: (() -> Unit)? = null,
+    showLabel: Boolean = true,
 ) {
     val interactions = remember { MutableInteractionSource() }
     val focused by interactions.collectIsFocusedAsState()
@@ -182,16 +185,18 @@ fun TvRoundButton(
             Icon(icon, contentDescription = null, size = PleyTv.IconSize, tint = androidx.tv.material3.LocalContentColor.current)
         }
         // The visible label, under the button; the button above already says it to screen readers.
-        BasicText(
-            label,
-            style = PleyType.Tv.Caption.copy(color = PleyColors.Fg, textAlign = TextAlign.Center),
-            maxLines = 1,
-            softWrap = false,
-            modifier = Modifier
-                .padding(top = PleyTv.ButtonHeight + 6.dp)
-                .graphicsLayer { alpha = labelAlpha }
-                .wrapContentWidthUnbounded(),
-        )
+        if (showLabel) {
+            BasicText(
+                label,
+                style = PleyType.Tv.Caption.copy(color = PleyColors.Fg, textAlign = TextAlign.Center),
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier
+                    .padding(top = PleyTv.ButtonHeight + 6.dp)
+                    .graphicsLayer { alpha = labelAlpha }
+                    .wrapContentWidthUnbounded(),
+            )
+        }
     }
 }
 
@@ -199,7 +204,8 @@ fun TvRoundButton(
  * A text button: Change server, Cancel, Clear filters. 40 tall, its label
  * on a faint fill, quieter than a pill's (no edge), so beside a focused
  * button it still reads as one. A [link] (an album's artist, in a column
- * of text) has no fill until focused.
+ * of text) has no fill until focused. An [icon] goes before the label (the
+ * globe of the screens before signing in).
  */
 @Composable
 fun TvTextButton(
@@ -209,6 +215,7 @@ fun TvTextButton(
     enabled: Boolean = true,
     color: Color = PleyColors.Fg,
     link: Boolean = false,
+    icon: PleyIcon? = null,
 ) {
     val interactions = remember { MutableInteractionSource() }
     val focused by interactions.collectIsFocusedAsState()
@@ -237,6 +244,10 @@ fun TvTextButton(
         glow = ButtonDefaults.glow(Glow.None, Glow.None, Glow.None),
         contentPadding = PaddingValues(horizontal = 16.dp),
     ) {
+        if (icon != null) {
+            Icon(icon, contentDescription = null, size = PleyTv.IconSize, tint = androidx.tv.material3.LocalContentColor.current)
+            Spacer(Modifier.width(8.dp))
+        }
         Text(label, style = PleyType.Tv.Label)
     }
 }

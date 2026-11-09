@@ -1,11 +1,15 @@
 package app.pley.android
 
 import android.app.Application
+import android.content.Context
+import android.content.res.Configuration
 import android.os.Bundle
 import android.os.StrictMode
 import androidx.tracing.trace
 import app.pley.android.common.AppBuild
+import app.pley.android.common.AppLanguage
 import app.pley.android.common.TraceNames
+import app.pley.android.common.perf.FrameRate
 import app.pley.android.common.perf.StartupSignals
 import app.pley.android.designsystem.PleyImageLoader
 import app.pley.android.downloads.AppDownloads
@@ -29,7 +33,8 @@ import kotlinx.coroutines.launch
 /**
  * The app. Starting builds nothing on the main thread: it starts the one
  * disk read the first screen needs, and the graph's warm-up (AppGraph)
- * beside it, and returns (15 ms at most).
+ * beside it, and returns (15 ms at most). Before that, the language the
+ * app is shown in is set (AppLanguage); LanguageSync keeps it.
  */
 class PleyApplication : Application(), PleyGraphOwner, DownloadsOwner, SingletonImageLoader.Factory {
     val graph: AppGraph by lazy { AppGraph(this) }
@@ -39,6 +44,12 @@ class PleyApplication : Application(), PleyGraphOwner, DownloadsOwner, Singleton
     private lateinit var startup: Deferred<StartupState>
 
     private val windows = AtomicInteger()
+
+    private lateinit var language: LanguageSync
+
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(AppLanguage.attach(base))
+    }
 
     override val screensGraph: ScreensGraph
         get() = graph
@@ -50,7 +61,11 @@ class PleyApplication : Application(), PleyGraphOwner, DownloadsOwner, Singleton
         trace(TraceNames.APP_ON_CREATE) {
             super.onCreate()
             AppBuild.commit = BuildConfig.COMMIT
+            AppLanguage.started(this)
+            language = LanguageSync(this)
             if (BuildConfig.DEBUG) watchForSlowCalls()
+            // The frame-rate counter's switch, read in the background; off, it only follows the activities.
+            FrameRate.watch(this, shells = setOf(TvActivity::class.java, MainActivity::class.java))
             startup = StartupRead.start(this)
             restartDemoServer()
             warmGraph()
@@ -91,6 +106,7 @@ class PleyApplication : Application(), PleyGraphOwner, DownloadsOwner, Singleton
                 runCatching { SingletonImageLoader.get(this@PleyApplication).diskCache?.openSnapshot(WARM_UP_KEY)?.close() }
             }
             graph.data
+            launch { language.follow(graph.data.language) }
             val start = startup.await()
             val server = start.server
             if (server != null && start.signedIn) {
@@ -128,6 +144,12 @@ class PleyApplication : Application(), PleyGraphOwner, DownloadsOwner, Singleton
 
         /** A key no picture has: looking it up opens the picture cache and finds nothing. */
         const val WARM_UP_KEY = "pley-warm-up"
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        AppLanguage.configurationChanged()
+        language.configurationChanged()
     }
 
     /** Coil's one loader, on the images client; made with the first picture. */

@@ -59,8 +59,15 @@ public abstract record DevicePoll
 /// </summary>
 public sealed class DeviceSignIn
 {
-    /// <summary>Everything Pley's own TV apps may ask for (docs/API.md, "Scopes").</summary>
+    /// <summary>What this app asks for (docs/API.md, "Scopes"), as the Android app does.</summary>
     public static readonly string[] AllScopes = { "library", "play", "playlists", "profiles" };
+
+    /// <summary>
+    /// What it asks for too, only where the server lists it in <c>scopes_supported</c>: asking for
+    /// movies and shows, and approving them on an administrator's account. A server that doesn't
+    /// know a scope refuses the whole sign-in for it.
+    /// </summary>
+    public static readonly string[] ListedScopes = { "requests", "approvals" };
 
     /// <summary>RFC 8628 §3.2: without an interval, 5 seconds.</summary>
     public const int DefaultIntervalSeconds = 5;
@@ -71,7 +78,7 @@ public sealed class DeviceSignIn
     /// <summary>The waits after network failures in a row.</summary>
     public static readonly long[] BackoffMs = { 2_000, 4_000, 8_000, 16_000, 30_000 };
 
-    const string Unreadable = "the server's answer can't be read: try again";
+    static string Unreadable => Strings.T("signin.errors.unreadable");
 
     readonly Transport http;
     readonly string clientId;
@@ -90,20 +97,22 @@ public sealed class DeviceSignIn
     }
 
     /// <summary>
-    /// The scope to ask for: what the server offers of Pley's own. Servers without profile
-    /// switching don't know "profiles" and would refuse the whole sign-in for it; one that offers
-    /// none of them is asked for "library".
+    /// The scope to ask for: what the server offers of Pley's own, and those of
+    /// <see cref="ListedScopes"/> it lists. Servers without profile switching don't know "profiles",
+    /// nor older ones "requests", and would refuse the whole sign-in for them; one that offers none
+    /// of the first is asked for "library".
     /// </summary>
     public static string ScopeFor(ServerMetadata metadata)
     {
         var offered = metadata.ScopesSupported;
         var asked = offered == null ? AllScopes : AllScopes.Where(offered.Contains).ToArray();
-        return string.Join(" ", asked.Length == 0 ? new[] { "library" } : asked);
+        var listed = offered == null ? Array.Empty<string>() : ListedScopes.Where(offered.Contains);
+        return string.Join(" ", (asked.Length == 0 ? new[] { "library" } : asked).Concat(listed));
     }
 
     public async Task<DeviceCode> Start(string server)
     {
-        var home = Addresses.Origin(server) ?? throw new AuthException("that isn't a server address");
+        var home = Addresses.Origin(server) ?? throw new AuthException(Metadata.NotAnAddress);
         PlainHttp.Check(home);
         var metadata = await Metadata.Fetch(http, home).ConfigureAwait(false);
         if (!metadata.SignsInWithCodes) throw new AuthException(Metadata.NoCodes);
@@ -181,7 +190,7 @@ public sealed class DeviceSignIn
                         break;
                     // invalid_grant: the code is unknown, or was collected already.
                     case "invalid_grant":
-                        outcome = new DevicePoll.Failed("this code doesn't work anymore: get a new one");
+                        outcome = new DevicePoll.Failed(Strings.T("signin.errors.codeSpent"));
                         break;
                     default:
                         outcome = new DevicePoll.Failed(e.Message);
@@ -240,7 +249,7 @@ public sealed class DeviceSignIn
         if (userCode.Length == 0) throw bad;
         var uri = Link(Json.String(o, "verification_uri")) ?? throw bad;
         // The page to open must be this server's own: a code typed elsewhere would sign someone else's TV in.
-        if (Addresses.Origin(uri) != metadata.Issuer) throw new AuthException("this server sends people to another address to approve TVs: Pley doesn't");
+        if (Addresses.Origin(uri) != metadata.Issuer) throw new AuthException(Strings.T("signin.errors.approveElsewhere"));
         var complete = Link(Json.String(o, "verification_uri_complete"));
         if (complete != null && Addresses.Origin(complete) != metadata.Issuer) complete = null;
         // Without a lifetime the code can't be shown honestly: Pley's servers always send one.

@@ -27,7 +27,11 @@ pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<i
     let resume = resume_ms(&row);
     let mut detail = catalog::item_detail(&state.db, row).await?;
     detail.locked_fields = crate::overrides::locked_fields(&state.db, id).await?;
+    detail.nfo_fields = crate::overrides::nfo_fields(&state.db, id).await?;
     detail.in_watchlist = catalog::in_watchlist(&state.db, user.id, id).await?;
+    if crate::labels::shown_to(&user) {
+        detail.labels = Some(crate::labels::for_items(&state.db, &[id]).await?.remove(&id).unwrap_or_default());
+    }
     if matches!(detail.summary.kind.as_str(), "movie" | "show") {
         detail.extras = catalog::extras(&state.db, user.id, id).await?.iter().map(ItemRow::to_summary).collect();
     }
@@ -223,6 +227,16 @@ pub struct Progress {
     /// happened to the item since.
     #[serde(default)]
     age_ms: Option<i64>,
+    /// The audio track the player plays, and the subtitles it shows (`-1`:
+    /// none), by stream index: kept on the session for the user's remotes.
+    #[serde(default)]
+    audio_index: Option<i64>,
+    #[serde(default)]
+    subtitle_index: Option<i64>,
+    /// The quality its Quality menu has picked, by id: kept on the session
+    /// for the user's remotes.
+    #[serde(default)]
+    quality: Option<String>,
 }
 
 fn playing() -> String {
@@ -265,6 +279,16 @@ pub async fn progress(
     {
         return Ok(StatusCode::NO_CONTENT);
     }
+    // A report of another profile's session went with this profile's token:
+    // its device switched profiles, for a cast, as it was sent. The place
+    // is that profile's, not this one's, so nothing is kept.
+    if let Some(sid) = body.session_id.as_deref()
+        && let Some(owner) =
+            state.sessions.get(sid).map(|s| s.user_id).or_else(|| state.sessions.stopped(sid).map(|s| s.user_id))
+        && owner != user.id
+    {
+        return Ok(StatusCode::NO_CONTENT);
+    }
     let duration = body.duration_ms.filter(|d| *d > 0).or(row.duration_ms).unwrap_or(0);
     let device = crate::accounts::device_name(headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok()));
     let recorded = catalog::record_progress(
@@ -294,7 +318,9 @@ pub async fn progress(
     if let Some(session) = body.session_id.as_deref().and_then(|sid| state.sessions.get(sid))
         && session.user_id == user.id
     {
-        let changed = session.update(body.position_ms, &body.state);
+        let moved = session.update(body.position_ms, &body.state);
+        let switched = session.report_tracks(body.audio_index, body.subtitle_index);
+        let switched = session.report_quality(body.quality.as_deref()) || switched;
         if session.should_touch_transcoder()
             && let Some(job) = session.job_id()
         {
@@ -303,8 +329,8 @@ pub async fn progress(
                 let _ = transcoder.touch_job(&job).await;
             });
         }
-        if changed {
-            state.events.send(ServerEvent::SessionsChanged);
+        if moved || switched {
+            state.events.send(ServerEvent::SessionsChanged { user_id: session.user_id });
         }
     }
     Ok(StatusCode::NO_CONTENT)
@@ -410,7 +436,21 @@ pub async fn image(
         return Err(AppError::not_found(format!("item {id} not found")));
     }
     let width = query.get("w").and_then(|w| w.parse::<u32>().ok()).filter(|w| *w > 0);
-    let path = resolve_artwork(&state, id, &kind).await?;
+    artwork(&state, id, &kind, width, query.contains_key("v"), &headers).await
+}
+
+/// An item's `poster`, `backdrop` or `thumb` at `width` (or as it is), for a
+/// caller that checked it may be seen; `versioned`: asked for at an address
+/// that changes with the artwork.
+pub(crate) async fn artwork(
+    state: &AppState,
+    id: i64,
+    kind: &str,
+    width: Option<u32>,
+    versioned: bool,
+    headers: &HeaderMap,
+) -> ApiResult<Response> {
+    let path = resolve_artwork(state, id, kind).await?;
     let image = state.images.load(&path, width).await?;
     if headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) == Some(image.etag.as_str()) {
         return Ok(StatusCode::NOT_MODIFIED.into_response());
@@ -418,7 +458,7 @@ pub async fn image(
     let mut out = HeaderMap::new();
     out.insert(header::CONTENT_TYPE, HeaderValue::from_static(image.content_type));
     // Versioned URLs (`?v=<updated_at>`) change whenever the artwork does.
-    let cache = if query.contains_key("v") { "private, max-age=31536000, immutable" } else { "private, max-age=300" };
+    let cache = if versioned { "private, max-age=31536000, immutable" } else { "private, max-age=300" };
     out.insert(header::CACHE_CONTROL, HeaderValue::from_static(cache));
     if let Ok(etag) = HeaderValue::from_str(&image.etag) {
         out.insert(header::ETAG, etag);

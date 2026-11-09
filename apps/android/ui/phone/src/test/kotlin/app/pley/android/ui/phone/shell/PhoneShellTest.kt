@@ -1,20 +1,37 @@
 package app.pley.android.ui.phone.shell
 
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.semantics.SemanticsPropertiesAndroid
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import app.pley.android.auth.SignOutReason
+import app.pley.android.common.TestTags
+import app.pley.android.data.OtherDevice
+import app.pley.android.data.RemoteSession
 import app.pley.android.data.SessionState
+import app.pley.android.model.CastKind
+import app.pley.android.model.DeviceKind
+import app.pley.android.model.PlayingChannel
+import app.pley.android.model.PlayingKind
+import app.pley.android.model.PlayingSession
+import app.pley.android.model.RemoteDevice
 import app.pley.android.network.ApiException
 import app.pley.android.screens.PleyKey
 import app.pley.android.testing.screens.onboarding.FakeOnboardingSource
 import app.pley.android.ui.phone.item.ITEM_SKELETON
 import app.pley.android.ui.phone.onboarding.LocalOnboardingSource
+import app.pley.android.ui.phone.remote.REMOTE_BAR
+import app.pley.android.ui.phone.remote.REMOTE_BUTTON
 import app.pley.android.ui.phone.theme.PhoneTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -81,6 +98,19 @@ class PhoneShellTest {
     class Shell(val graph: TestGraph) {
         lateinit var state: PhoneShellState
         lateinit var navigation: PhoneNavigation
+    }
+
+    @Test
+    fun itsTagsAreResourceIdsForTheBenchmarks() {
+        val graph = TestGraph(null)
+        TestApplication.graph = graph
+        val start = PhoneStart(server = null, signedIn = false)
+        compose.setContent {
+            CompositionLocalProvider(LocalOnboardingSource provides FakeOnboardingSource()) {
+                PhoneApp(start, awaitStart = { start }, graph = { graph })
+            }
+        }
+        compose.onNodeWithTag(TestTags.PHONE_ROOT).assert(SemanticsMatcher.expectValue(SemanticsPropertiesAndroid.TestTagsAsResourceId, true))
     }
 
     @Test
@@ -223,6 +253,28 @@ class PhoneShellTest {
         showsHome()
         tab(PhoneTab.Libraries).performClick()
         showsLibraries()
+    }
+
+    @Test
+    fun theRemotesButtonShowsInHomesHeaderWhileAnotherDeviceIsOn() {
+        val shell = show(PhoneStart(TestGraph.SERVER, signedIn = true))
+        showsHome()
+        compose.onNodeWithTag(REMOTE_BUTTON).assertDoesNotExist()
+        val session = RemoteSession(PlayingSession("s1", PlayingKind.Live, "Living room TV", "app-12", channel = PlayingChannel(1, "Pley News HD")), 0)
+        compose.runOnIdle { shell.graph.remoteDevices.value = listOf(OtherDevice("app-12", session = session)) }
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag(REMOTE_BUTTON).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithContentDescription("Remote, 1 device playing").assertExists()
+        // Playing there, not controlled from here: no bar above the tabs.
+        compose.onNodeWithTag(REMOTE_BAR).assertDoesNotExist()
+        // On, playing nothing: still there.
+        compose.runOnIdle {
+            shell.graph.remoteDevices.value = listOf(OtherDevice("app-12", RemoteDevice("tv-1", "app-12", "Living room TV", DeviceKind.Tv, listOf(CastKind.Item))))
+        }
+        compose.waitUntil(5_000) { compose.onAllNodesWithContentDescription("Remote, 1 device ready to play").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag(REMOTE_BUTTON).performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Your devices").fetchSemanticsNodes().isNotEmpty() }
+        compose.runOnIdle { shell.graph.remoteDevices.value = emptyList() }
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag(REMOTE_BUTTON).fetchSemanticsNodes().isEmpty() }
     }
 
     private companion object {

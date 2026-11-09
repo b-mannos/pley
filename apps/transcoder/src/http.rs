@@ -23,7 +23,7 @@ use tokio_util::io::ReaderStream;
 
 use crate::convert::Conversions;
 use crate::error::{ApiError, ApiResult};
-use crate::extract::Extractor;
+use crate::extract::{Extractor, PictureStart};
 use crate::fingerprint::Fingerprinter;
 use crate::job::{JobFile, JobManager};
 use crate::keyframes::KeyframeStore;
@@ -295,8 +295,12 @@ async fn subtitles(State(state): Shared, Json(req): Json<SubtitleRequest>) -> Ap
 
 async fn subtitles_matroska(State(state): Shared, Json(req): Json<SubtitleRequest>) -> ApiResult<Response> {
     if req.partial {
+        let start = PictureStart::new(req.from_ms, req.media);
+        // A player that reads the track once waits as long for the whole of
+        // it as the server waits for Kodi's `.sup`.
+        let wait = Duration::from_secs(if req.rest { 8 } else { 2 });
         let (bytes, complete) =
-            state.extractor.subtitle_matroska_so_far(&req.path, req.stream_index, Duration::from_secs(2)).await?;
+            state.extractor.subtitle_matroska_so_far(&req.path, req.stream_index, wait, start, req.rest).await?;
         let complete = if complete { "1" } else { "0" };
         return Ok((
             [
@@ -479,7 +483,16 @@ async fn job_file(State(state): Shared, Path((id, file)): Path<(String, String)>
     let job = state.jobs.get(&id).ok_or_else(|| ApiError::JobNotFound(format!("job {id} not found")))?;
     let unknown = || ApiError::NotFound(format!("unknown file {file}"));
     let (k, n) = match JobFile::parse(&file).ok_or_else(unknown)? {
-        JobFile::Segment(k, n) => (k, n),
+        // A segment in a format the job doesn't make names nothing.
+        JobFile::Segment(k, n, format) if format == job.plan.segment_format => (k, n),
+        JobFile::Segment(..) => return Err(unknown()),
+        JobFile::Init(k) => {
+            let (_, path) = state.jobs.rendition_init(&job, k).await?;
+            let bytes = tokio::fs::read(&path).await?;
+            return Ok(
+                ([(header::CONTENT_TYPE, "video/mp4"), (header::CACHE_CONTROL, "no-cache")], bytes).into_response()
+            );
+        }
         playlist => {
             job.touch();
             let mut headers = HeaderMap::new();
@@ -500,7 +513,7 @@ async fn job_file(State(state): Shared, Path((id, file)): Path<(String, String)>
     state.metrics.bytes_served.fetch_add(len, Ordering::Relaxed);
     let body = Body::from_stream(ReaderStream::with_capacity(handle, 256 * 1024));
     Response::builder()
-        .header(header::CONTENT_TYPE, "video/mp2t")
+        .header(header::CONTENT_TYPE, job.plan.segment_format.content_type())
         .header(header::CONTENT_LENGTH, len)
         .header(header::CACHE_CONTROL, "no-cache")
         .body(body)
@@ -567,12 +580,18 @@ mod tests {
 
     /// A transcoder whose FFmpeg is missing, on a free local port.
     async fn serve(dir: &std::path::Path, token: Option<&str>) -> SocketAddr {
-        let ff = Arc::new(Ffmpeg {
+        let ff = Ffmpeg {
             ffmpeg: dir.join("no-ffmpeg"),
             ffprobe: dir.join("no-ffprobe"),
             caps: Capabilities::default(),
             segment_times_relative: true,
-        });
+        };
+        serve_with(dir, token, ff).await
+    }
+
+    /// A transcoder with `ff`, on a free local port.
+    async fn serve_with(dir: &std::path::Path, token: Option<&str>, ff: Ffmpeg) -> SocketAddr {
+        let ff = Arc::new(ff);
         let metrics = Arc::new(Metrics::default());
         let prober = Arc::new(Prober::new(ff.clone(), metrics.clone(), 1));
         let background = crate::background::Background::new();
@@ -600,8 +619,8 @@ mod tests {
             limits.clone(),
             background,
         );
-        let info =
-            TranscoderInfo { version: "1.2.3".into(), capabilities: ff.caps.clone(), limits, ..Default::default() };
+        let capabilities = crate::own_capabilities(&ff.caps);
+        let info = TranscoderInfo { version: "1.2.3".into(), capabilities, limits, ..Default::default() };
         let conversions =
             Conversions::new(ff.clone(), prober.clone(), jobs.slots.clone(), None, dir.join("conversions"));
         let state = Arc::new(AppState::new(
@@ -682,7 +701,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_conversions_file_comes_whole_or_from_where_a_download_stopped() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let addr = serve(dir.path(), None).await;
         let id = "0123456789abcdef0123456789abcdef";
         std::fs::create_dir_all(dir.path().join("conversions")).unwrap();
@@ -718,7 +737,7 @@ mod tests {
 
     #[tokio::test]
     async fn conversions_need_ffmpeg_and_their_input() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let addr = serve(dir.path(), None).await;
         let input = dir.path().join("movie.mkv");
         std::fs::write(&input, b"x").unwrap();
@@ -729,7 +748,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_token_guards_everything_but_health() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let addr = serve(dir.path(), Some("s3cret")).await;
         let health = request(addr, "GET", "/health", None, None).await;
         assert_eq!((health.status, health.body.as_str()), (200, "ok"));
@@ -748,12 +767,14 @@ mod tests {
         }
         let info = request(addr, "GET", "/v1/info", Some("Bearer s3cret"), None).await;
         assert_eq!(info.status, 200);
-        assert_eq!(serde_json::from_str::<TranscoderInfo>(&info.body).unwrap().version, "1.2.3");
+        let info = serde_json::from_str::<TranscoderInfo>(&info.body).unwrap();
+        assert_eq!(info.version, "1.2.3");
+        assert!(info.capabilities.fmp4_segments && info.capabilities.hls_variants, "{:?}", info.capabilities);
     }
 
     #[tokio::test]
     async fn without_a_token_only_requests_to_this_computer_are_answered() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let addr = serve(dir.path(), None).await;
         let at_addr = addr.to_string();
         for host in ["localhost", "LocalHost:7540", "127.0.0.1", at_addr.as_str(), "[::1]", "[::1]:7540"] {
@@ -782,7 +803,7 @@ mod tests {
         assert_eq!((health.status, health.body.as_str()), (200, "ok"), "nothing to read there");
 
         // With a token, the token decides: other machines use its name.
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let addr = serve(dir.path(), Some("s3cret")).await;
         let headers = [("Host", "nas.lan:7540"), ("Authorization", "Bearer s3cret")];
         assert_eq!(request_with(addr, "GET", "/v1/info", &headers, None).await.status, 200);
@@ -800,7 +821,7 @@ mod tests {
 
     #[tokio::test]
     async fn status_and_metrics() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let addr = serve(dir.path(), None).await;
         let status = request(addr, "GET", "/v1/status", None, None).await;
         assert_eq!(status.status, 200, "no token configured: open");
@@ -820,7 +841,7 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_jobs_are_reported_as_gone() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let addr = serve(dir.path(), None).await;
         for (method, path) in [
             ("GET", "/v1/jobs/nope"),
@@ -837,7 +858,7 @@ mod tests {
 
     #[tokio::test]
     async fn missing_files_and_bad_names_are_plain_not_found() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let addr = serve(dir.path(), None).await;
         let missing = serde_json::json!({"path": dir.path().join("missing.mkv")}).to_string();
         for path in ["/v1/probe", "/v1/keyframes", "/v1/trickplay", "/v1/prefetch"] {
@@ -855,7 +876,7 @@ mod tests {
 
     #[tokio::test]
     async fn preview_sheets_go_once_all_have_been_fetched() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let addr = serve(dir.path(), None).await;
         let id = "0123abcd-2000-320-v1";
         let set = dir.path().join("trickplay").join(id);
@@ -891,7 +912,7 @@ mod tests {
 
     #[tokio::test]
     async fn prefetches_say_what_they_read() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let addr = serve(dir.path(), None).await;
         let input = dir.path().join("clip.ts");
         std::fs::write(&input, vec![0x47u8; 3 << 20]).unwrap();
@@ -906,7 +927,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_hold_keeps_background_work_waiting() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let addr = serve(dir.path(), None).await;
         let input = dir.path().join("clip.ts");
         std::fs::write(&input, vec![0x47u8; 1 << 20]).unwrap();
@@ -920,7 +941,7 @@ mod tests {
 
     #[tokio::test]
     async fn jobs_need_a_working_ffmpeg() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let addr = serve(dir.path(), None).await;
         let input = dir.path().join("movie.mkv");
         std::fs::write(&input, b"not really a movie").unwrap();
@@ -929,5 +950,96 @@ mod tests {
         assert_eq!((answer.status, answer.code()), (500, "ffmpeg_failed".to_owned()));
         let jobs = request(addr, "GET", "/v1/jobs", None, None).await;
         assert_eq!(jobs.body, "[]", "nothing was left behind");
+    }
+
+    /// A transcoder whose only encoder is libx264, with a 10 s clip to make
+    /// segments of; `None` without FFmpeg.
+    async fn serve_ffmpeg(dir: &std::path::Path) -> Option<(SocketAddr, std::path::PathBuf)> {
+        use pley_transcoder_api::{EncoderInfo, HwAccel, VideoCodec};
+        let ok =
+            |tool: &str| std::process::Command::new(tool).arg("-version").output().is_ok_and(|o| o.status.success());
+        if !(ok("ffmpeg") && ok("ffprobe")) {
+            eprintln!("ffmpeg not found: skipped");
+            return None;
+        }
+        let input = dir.join("clip.mkv");
+        let made = std::process::Command::new("ffmpeg")
+            .args(["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i"])
+            .arg("testsrc2=size=320x180:rate=25:duration=10")
+            .args(["-c:v", "libx264", "-preset", "ultrafast", "-g", "25"])
+            .arg(&input)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let x264 = EncoderInfo {
+            name: "libx264".into(),
+            codec: VideoCodec::H264,
+            hardware: false,
+            accel: HwAccel::None,
+            main10: false,
+        };
+        let caps = Capabilities {
+            ffmpeg_available: true,
+            ffprobe_available: true,
+            encoders: vec![x264],
+            ..Default::default()
+        };
+        let ff = Ffmpeg { ffmpeg: "ffmpeg".into(), ffprobe: "ffprobe".into(), caps, segment_times_relative: true };
+        Some((serve_with(dir, None, ff).await, input))
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fmp4_jobs_serve_mp4_and_only_their_own_names() {
+        let dir = crate::testing::tempdir();
+        let Some((addr, input)) = serve_ffmpeg(dir.path()).await else { return };
+        let job = |format: &str| {
+            serde_json::json!({
+                "input": input,
+                "video": {},
+                "segment_seconds": 2.0,
+                "options": {"throttle": false},
+                "segment_format": format,
+            })
+            .to_string()
+        };
+        let answer = request(addr, "POST", "/v1/jobs", None, Some(job("fmp4"))).await;
+        assert_eq!(answer.status, 201, "{}", answer.body);
+        let created: JobCreated = serde_json::from_str(&answer.body).unwrap();
+        assert_eq!(created.segment_format, pley_transcoder_api::SegmentFormat::Fmp4);
+        let file = |name: &str| format!("/v1/jobs/{}/{name}", created.id);
+
+        // Asked for as soon as the job is made: it waits for its process.
+        let init = request(addr, "GET", &file("init.mp4"), None, None).await;
+        assert_eq!(init.status, 200, "{}", init.body);
+        assert!(init.head.contains("content-type: video/mp4"), "{}", init.head);
+        assert!(init.body.get(4..8) == Some("ftyp") && init.body.contains("moov"));
+        let segment = request(addr, "GET", &file("1.m4s"), None, None).await;
+        assert_eq!(segment.status, 200, "{}", segment.body);
+        assert!(segment.head.contains("content-type: video/mp4"), "{}", segment.head);
+        assert!(segment.body.contains("moof") && !segment.body.contains("ftyp"));
+        let playlist = request(addr, "GET", &file("index.m3u8"), None, None).await;
+        assert!(playlist.body.contains("#EXT-X-MAP:URI=\"init.mp4\"\n") && playlist.body.contains("\n1.m4s\n"));
+        // Names of the other format, and of renditions it hasn't, name nothing.
+        for name in ["1.ts", "v1-init.mp4", "v1-1.m4s"] {
+            let answer = request(addr, "GET", &file(name), None, None).await;
+            assert_eq!((answer.status, answer.code()), (404, "not_found".to_owned()), "{name}");
+        }
+        // What it served counts segments only.
+        let status = request(addr, "GET", &format!("/v1/jobs/{}", created.id), None, None).await;
+        let status: JobStatus = serde_json::from_str(&status.body).unwrap();
+        assert_eq!(status.served_segments, 1);
+
+        // An MPEG-TS job has no init.
+        let answer = request(addr, "POST", "/v1/jobs", None, Some(job("ts"))).await;
+        let created: JobCreated = serde_json::from_str(&answer.body).unwrap();
+        assert_eq!(created.segment_format, pley_transcoder_api::SegmentFormat::Ts);
+        let file = |name: &str| format!("/v1/jobs/{}/{name}", created.id);
+        for name in ["init.mp4", "0.m4s"] {
+            let answer = request(addr, "GET", &file(name), None, None).await;
+            assert_eq!(answer.status, 404, "{name}");
+        }
+        let segment = request(addr, "GET", &file("0.ts"), None, None).await;
+        assert_eq!(segment.status, 200);
+        assert!(segment.head.contains("content-type: video/mp2t"), "{}", segment.head);
     }
 }

@@ -1,5 +1,6 @@
 package app.pley.android
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -8,7 +9,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import app.pley.android.common.AppLanguage
 import app.pley.android.common.Tier
+import app.pley.android.common.perf.FrameRate
 import app.pley.android.data.SessionState
 import app.pley.android.designsystem.image.LocalArtworkImageLoader
 import app.pley.android.player.PlayRequest
@@ -39,6 +42,9 @@ import kotlinx.coroutines.withContext
  * adb shell am start -n app.pley.android/.TvActivity --ez demo true --es tier T2
  * ```
  *
+ * Every build takes `--ez frames true` (or `false`), the frame-rate
+ * counter for this run (FrameRate), also when the app is already open.
+ *
  * A program of the home screen's Watch Next row opens it with its server,
  * profile and item ([WatchNextLink]): when that profile is the one signed
  * in, the item's page opens and it plays from where it was; otherwise the
@@ -51,6 +57,10 @@ class TvActivity : ComponentActivity() {
 
     /** The item of [link], once its profile is the one signed in. */
     private val opened = MutableStateFlow<Long?>(null)
+
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(AppLanguage.wrap(newBase))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -90,6 +100,7 @@ class TvActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        FrameRate.read(intent)
         WatchNextLink.read(intent)?.let { link.value = it }
     }
 

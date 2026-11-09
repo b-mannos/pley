@@ -32,6 +32,8 @@ namespace Pley.Tv.Tizen.Screens;
 /// scrubbing or in a panel.</item>
 /// <item><b>Back</b> walks out: a panel, then Up Next, then the chapters, then the controls, then the player.</item>
 /// <item><b>Media keys</b> work whatever shows; CAPTIONS turns the subtitles off and on.</item>
+/// <item><b>The remote</b> on another device shows no controls: what it did is toasted at the top
+/// right. Its pause keeps none showing either, until a key here makes the pause the person's.</item>
 /// </list>
 /// The model reports to the server through the app's reporter, so the last report goes out after
 /// the screen closed. A playback the server stopped says why and leaves after 20 s; paused by the
@@ -98,9 +100,7 @@ sealed class PlayerScreen : Sheet
     readonly FocusItem scrubber;
     readonly FocusGroup row = new FocusGroup(Axis.Row, "controls");
     readonly PlayerButton previous;
-    readonly PlayerButton back10;
     readonly PlayerButton playPause;
-    readonly PlayerButton forward10;
     readonly PlayerButton next;
     readonly PlayerButton chapters;
     readonly PlayerButton sleep;
@@ -147,11 +147,20 @@ sealed class PlayerScreen : Sheet
     Animation? scrimFade;
     Animation? coverFade;
     long hideAt;
+    /// <summary>The remote's pause, as the state last said it (<see cref="PlayerState.PausedByRemote"/>).</summary>
+    bool pausedByRemote;
+    /// <summary>
+    /// Paused by the remote and no key pressed here since: the controls showing go on time, as while
+    /// it plays. A key makes the pause the person's, which keeps them.
+    /// </summary>
+    bool remotePause;
 
     /// <param name="reporter">The app's reports queue: the last "stopped" goes out after the screen closed.</param>
     /// <param name="closed">The screen went (Home asks again for the resume points).</param>
     /// <param name="localFile">A video on a drive to play, as it is (<see cref="LocalPlayerSource"/>); null: the request's item, from the server.</param>
-    public PlayerScreen(Shell shell, AppState state, PlayRequest request, IReporter reporter, Images images, KeyRepeatGate gate, Action closed, string? localFile = null) : base("player")
+    /// <param name="playingFrom">"Playing from …", shown at the top right as it starts: where a cast came from.</param>
+    public PlayerScreen(Shell shell, AppState state, PlayRequest request, IReporter reporter, Images images, KeyRepeatGate gate, Action closed, string? localFile = null,
+        string? playingFrom = null) : base("player")
     {
         Covers = true;
         this.shell = shell;
@@ -165,8 +174,11 @@ sealed class PlayerScreen : Sheet
         seeker = new Seeker(model.LivePositionMs, () => model.Clock.Value.DurationMs, SeekTo);
         // Asked for before the screen is made, which holds the UI half a second: the server answers
         // meanwhile. Its answer comes after (the UI thread's), and the watches below take the state as it is.
+        var part = Profile.Start();
         Profile.Mark("player: asking");
         model.Start();
+        Profile.Took("player screen: asked", part);
+        part = Profile.Start();
 
         // Black until the first picture: the video plane under it shows nothing of the page meanwhile.
         black = new View { Size = Canvas(), BackgroundColor = Color.Black };
@@ -248,22 +260,22 @@ sealed class PlayerScreen : Sheet
         controls.Add(thumbRing);
         thumb = new View { Size = new Size(Ui.Dp(Thumb), Ui.Dp(Thumb)), CornerRadius = Ui.Dp(Thumb / 2), BackgroundColor = PleyColors.Fg };
         controls.Add(thumb);
-        chapterStrip = new ChapterStrip(images, model.Preview, GoToChapter, CloseChapters);
+        chapterStrip = new ChapterStrip(images, model.Preview, GoToChapter, CloseChapters, gate);
         chapterStrip.PositionY = Ui.Dp(ChaptersTop);
         controls.Add(chapterStrip);
         preview = new SeekPreviewView(images);
         preview.Hide();
         controls.Add(preview);
 
-        // The control row: Chapters · Sleep timer · Speed at the left; Previous · Back 10 ·
-        // Play/Pause · Forward 10 · Next centred; Subtitles · Audio · Quality · Info at the right.
+        Profile.Took("player screen: its picture layers, banner and scrubber", part);
+        part = Profile.Start();
+        // The control row: Chapters · Sleep timer · Speed at the left; Previous · Play/Pause ·
+        // Next centred; Subtitles · Audio · Quality · Info at the right.
         chapters = new PlayerButton(PlayerText.Chapters, "list-video", Button, PleyTv.IconSize, OpenChapters);
         sleep = new PlayerButton(PlayerText.Sleep, "moon", Button, PleyTv.IconSize, () => OpenPanel(PlayerPanelKind.Sleep));
         speed = new PlayerButton(PlayerText.Speed, "fast-forward", Button, PleyTv.IconSize, () => OpenPanel(PlayerPanelKind.Speed));
         previous = new PlayerButton(PlayerText.Previous, "skip-back", Button, TransportIcon, () => model.Previous(seeker.Target ?? model.LivePositionMs()));
-        back10 = new PlayerButton(PlayerText.Back10, "rotate-ccw", Button, TransportIcon, () => Jump(-1));
         playPause = new PlayerButton(PlayerText.Pause, "pause", PlayButton, PlayIcon, PlayPause);
-        forward10 = new PlayerButton(PlayerText.Forward10, "rotate-cw", Button, TransportIcon, () => Jump(1));
         next = new PlayerButton(PlayerText.Next, "skip-forward", Button, TransportIcon, () => model.Next(seeker.Target ?? model.LivePositionMs()));
         subtitlesButton = new PlayerButton(PlayerText.Subtitles, "captions", Button, PleyTv.IconSize, () => OpenPanel(PlayerPanelKind.Subtitles));
         audio = new PlayerButton(PlayerText.Audio, "audio-lines", Button, PleyTv.IconSize, () => OpenPanel(PlayerPanelKind.Audio));
@@ -285,6 +297,8 @@ sealed class PlayerScreen : Sheet
         foreach (var item in upNext.Group.Children.OfType<FocusItem>()) item.Shown = false;
         View.Add(upNext);
 
+        Profile.Took("player screen: its control row, Skip, Up Next", part);
+        part = Profile.Start();
         spinner = Spinner();
         spinner.Position = new Position(Ui.Dp(PleyTv.CanvasWidth / 2 - 20), Ui.Dp(PleyTv.CanvasHeight / 2 - 20));
         spinner.Hide();
@@ -355,6 +369,8 @@ sealed class PlayerScreen : Sheet
         Back = OnBack;
         Gone += Ended;
 
+        Profile.Took("player screen: spinner, focus and keys", part);
+        part = Profile.Start();
         tick = new Timer(250);
         tick.Tick += (_, _) =>
         {
@@ -366,14 +382,19 @@ sealed class PlayerScreen : Sheet
         watches.Add(model.Cues.Watch(subtitles.Show));
         watches.Add(model.Picture.Watch(pictures.Show));
         watches.Add(state.Settings.Watch(subtitles.Restyle));
+        if (playingFrom != null) Notice(playingFrom, Casts.BannerMs);
+        Profile.Took("player screen: its first render", part);
     }
+
+    /// <summary>A notice at the top right for <paramref name="ms"/>, as the playback's own.</summary>
+    public void Notice(string text, long ms) => ShowToast(new PlayerToast(text, ms));
 
     bool Disposed => gone;
 
     /// <summary>Starting or between sessions: Left, Right and OK wait, as on Android.</summary>
     bool Busy => model.State.Value.Phase.Kind == PhaseKind.Preparing;
 
-    IEnumerable<PlayerButton> RowButtons => new[] { chapters, sleep, speed, previous, back10, playPause, forward10, next, subtitlesButton, audio, quality, info };
+    IEnumerable<PlayerButton> RowButtons => new[] { chapters, sleep, speed, previous, playPause, next, subtitlesButton, audio, quality, info };
 
     static Size Canvas() => new Size(Ui.Dp(PleyTv.CanvasWidth), Ui.Dp(PleyTv.CanvasHeight));
 
@@ -421,6 +442,11 @@ sealed class PlayerScreen : Sheet
         if (s.Method != null) method.Set(s.Method);
         method.SetVisible(s.Method != null);
         PlaceMethod();
+        if (s.PausedByRemote != pausedByRemote)
+        {
+            pausedByRemote = s.PausedByRemote;
+            remotePause = s.PausedByRemote;
+        }
         var wantsToPlay = s.Phase.WantsToPlay;
         if (wants != wantsToPlay)
         {
@@ -454,7 +480,7 @@ sealed class PlayerScreen : Sheet
         if (s.StoppedByServer && !stoppedLeaving)
         {
             stoppedLeaving = true;
-            After(PlayerText.StoppedLeaveMs, Close);
+            After(PlayerText.StoppedLeaveMs, () => Close("playback stopped from elsewhere"));
         }
         // Paused by the sleep timer for 10 minutes: the player leaves.
         var asleep = s.Sleep.Fired && s.Phase.Kind == PhaseKind.Paused;
@@ -464,7 +490,7 @@ sealed class PlayerScreen : Sheet
             var token = ++sleepToken;
             After(SleepTimer.LeaveAfterMs, () =>
             {
-                if (token == sleepToken) Close();
+                if (token == sleepToken) Close("the sleep timer");
             });
         }
         else if (!asleep && sleepLeaving)
@@ -473,7 +499,7 @@ sealed class PlayerScreen : Sheet
             sleepToken++;
         }
         // The end, with nothing next: back to where playing started.
-        if (s.Phase.Kind == PhaseKind.Ended) OnUi(Close);
+        if (s.Phase.Kind == PhaseKind.Ended) OnUi(() => Close("the end, nothing next"));
         if (shown) Layout();
     }
 
@@ -499,11 +525,13 @@ sealed class PlayerScreen : Sheet
         {
             spinner.Show();
             spin.Play();
+            Profile.Mark($"player screen: spinner on ({model.State.Value.Phase.Kind}{(covered ? ", under the black" : "")})");
         }
         else if (!on && spinner.Visibility)
         {
             spinner.Hide();
             spin.Stop();
+            Profile.Mark($"player screen: spinner off ({model.State.Value.Phase.Kind})");
         }
         if (on && model.State.Value.Reconnecting) reconnecting.Show();
         else reconnecting.Hide();
@@ -530,9 +558,7 @@ sealed class PlayerScreen : Sheet
         if (options.Speed) left.Add(speed);
         var centre = new List<PlayerButton>();
         if (options.PreviousNext) centre.Add(previous);
-        centre.Add(back10);
         centre.Add(playPause);
-        centre.Add(forward10);
         if (options.PreviousNext) centre.Add(next);
         var right = new List<PlayerButton>();
         if (options.Subtitles) right.Add(subtitlesButton);
@@ -716,8 +742,9 @@ sealed class PlayerScreen : Sheet
     {
         if (gone) return;
         var now = Environment.TickCount64;
-        // The controls go 5 s after the last key, unless paused, scrubbing or in a panel.
-        if (shown && panel == null && model.State.Value.Phase.WantsToPlay && hideAt > 0 && now >= hideAt && seeker.Target == null && !chapterStrip.Open) ShowControls(false);
+        // The controls go 5 s after the last key, unless paused (here, not by the remote), scrubbing or in a panel.
+        var paused = !model.State.Value.Phase.WantsToPlay && !remotePause;
+        if (shown && panel == null && !paused && hideAt > 0 && now >= hideAt && seeker.Target == null && !chapterStrip.Open) ShowControls(false);
         Waiting();
         if (shown) Layout();
     }
@@ -731,7 +758,7 @@ sealed class PlayerScreen : Sheet
         var at = chapterAt ?? seeker.Target ?? position;
         elapsed.Text = PlayerText.Time(at);
         remaining.Text = PlayerText.Remaining(at, duration);
-        var time = DateTime.Now.ToString("t", CultureInfo.CurrentCulture);
+        var time = DateTime.Now.ToString("t", Strings.Culture);
         if (time != clockText)
         {
             clockText = time;
@@ -739,7 +766,7 @@ sealed class PlayerScreen : Sheet
             PlaceMethod();
         }
         ends.Text = s.Phase.Kind == PhaseKind.Paused
-            ? PlayerText.EndsAt(DateTime.Now.AddMilliseconds(Math.Max(0, duration - position)).ToString("t", CultureInfo.CurrentCulture))
+            ? PlayerText.EndsAt(DateTime.Now.AddMilliseconds(Math.Max(0, duration - position)).ToString("t", Strings.Culture))
             : "";
         if (!ReferenceEquals(s.Chapters, segmentsOf) || duration != segmentsFor) Segments(s.Chapters, duration);
         var width = track.SizeWidth;
@@ -929,7 +956,7 @@ sealed class PlayerScreen : Sheet
                 model.Previous(seeker.Target ?? model.LivePositionMs());
                 break;
             case MediaAction.Stop:
-                Close();
+                Close("the Stop key");
                 break;
         }
     }
@@ -978,7 +1005,7 @@ sealed class PlayerScreen : Sheet
         Layout();
     }
 
-    /// <summary>Back and Forward: a step of 10 s each, as Left and Right; fast forward and rewind 30 s. They seek without waiting for OK.</summary>
+    /// <summary>Fast forward and rewind: 30 s, three of Left and Right's steps. They seek without waiting for OK.</summary>
     void Jump(int steps)
     {
         if (Busy) return;
@@ -1095,8 +1122,12 @@ sealed class PlayerScreen : Sheet
         if (!on) Refocus();
     }
 
-    /// <summary>A key came: the controls stay a while longer.</summary>
-    void Poke() => hideAt = Environment.TickCount64 + PlayerText.HideAfterMs;
+    /// <summary>A key came: the controls stay a while longer, and a pause the remote made is the person's from now on.</summary>
+    void Poke()
+    {
+        hideAt = Environment.TickCount64 + PlayerText.HideAfterMs;
+        remotePause = false;
+    }
 
     bool OnBack()
     {
@@ -1159,9 +1190,9 @@ sealed class PlayerScreen : Sheet
         if (phase.CanRetry)
         {
             first = buttons.Add(new ButtonView(PlayerText.TryAgain, ButtonKind.Pill, model.Retry, iconName: "refresh-cw"));
-            buttons.Add(new ButtonView(PlayerText.BackLabel, ButtonKind.Text, Close));
+            buttons.Add(new ButtonView(PlayerText.BackLabel, ButtonKind.Text, () => Close("the error's Back")));
         }
-        else first = buttons.Add(new ButtonView(PlayerText.BackLabel, ButtonKind.Pill, Close, iconName: "arrow-left"));
+        else first = buttons.Add(new ButtonView(PlayerText.BackLabel, ButtonKind.Pill, () => Close("the error's Back"), iconName: "arrow-left"));
         var block = PleyType.PageTitle.Line + 12 + messageHeight + 32 + PleyTv.ButtonHeight;
         var top = (PleyTv.CanvasHeight - block) / 2;
         heading.Position = new Position(Ui.Dp(160), Ui.Dp(top));
@@ -1198,9 +1229,11 @@ sealed class PlayerScreen : Sheet
 
     // ---- leaving
 
-    void Close()
+    /// <summary>Leaves the player, its panel first (Back, Stop, a cast playing something else in its place).</summary>
+    public void Close(string why = "Back")
     {
         if (gone) return;
+        Profile.Mark($"player screen: closed by {why}");
         ClosePanel();
         shell.Pop(this);
     }

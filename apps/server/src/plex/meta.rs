@@ -2,6 +2,8 @@
 //! `Directory` (shows, seasons, artists, albums) and `Track`, with their
 //! `Media`/`Part`/`Stream`, `Genre` and `Guid` children.
 
+pub use crate::languages::language;
+pub use crate::listing::{kind_for_number, kinds_of, type_name as plex_type, type_number, view_count};
 use crate::people::{Credit, Role};
 use std::collections::HashMap;
 use std::path::Path;
@@ -14,20 +16,6 @@ use crate::db::Db;
 use crate::library::LibraryRow;
 use crate::library::sidecar::EXTERNAL_INDEX_BASE;
 use crate::markers::Marker;
-
-/// Plex type of a pley item kind (they happen to match).
-pub fn plex_type(kind: &str) -> &'static str {
-    match kind {
-        "movie" => "movie",
-        "show" => "show",
-        "season" => "season",
-        "episode" => "episode",
-        "artist" => "artist",
-        "album" => "album",
-        "extra" => "clip",
-        _ => "track",
-    }
-}
 
 /// Plex's `extraType` number and `subtype` of pley's extra types.
 fn plex_extra(extra_type: &str) -> (i64, &'static str) {
@@ -43,48 +31,12 @@ fn plex_extra(extra_type: &str) -> (i64, &'static str) {
     }
 }
 
-/// Plex search type number (`type=` in queries).
-pub fn type_number(kind: &str) -> i64 {
-    match kind {
-        "movie" => 1,
-        "show" => 2,
-        "season" => 3,
-        "episode" => 4,
-        "artist" => 8,
-        "album" => 9,
-        "track" => 10,
-        _ => 0,
-    }
-}
-
-pub fn kind_for_number(number: &str) -> Option<&'static str> {
-    Some(match number.trim() {
-        "1" => "movie",
-        "2" => "show",
-        "3" => "season",
-        "4" => "episode",
-        "8" => "artist",
-        "9" => "album",
-        "10" => "track",
-        _ => return None,
-    })
-}
-
 /// The Plex section type of a library (`movie`, `show`, `artist`).
 pub fn section_type(lib: &LibraryRow) -> &'static str {
     match lib.kind() {
         crate::library::LibraryKind::Movies => "movie",
         crate::library::LibraryKind::Shows => "show",
         crate::library::LibraryKind::Music => "artist",
-    }
-}
-
-/// Item kinds that live in a library of this kind.
-pub fn kinds_of(lib: &LibraryRow) -> &'static [&'static str] {
-    match lib.kind() {
-        crate::library::LibraryKind::Movies => &["movie"],
-        crate::library::LibraryKind::Shows => &["show", "season", "episode"],
-        crate::library::LibraryKind::Music => &["artist", "album", "track"],
     }
 }
 
@@ -101,7 +53,7 @@ pub fn item_key(row: &ItemRow) -> String {
 }
 
 pub fn guid(kind: &str, id: i64) -> String {
-    format!("plex://{}/{id:024x}", plex_type(kind))
+    crate::listing::own_guid(kind, id)
 }
 
 /// Columns not carried by [`ItemRow`].
@@ -325,6 +277,9 @@ pub struct Detail {
     pub media: bool,
     /// `Marker`s: intro and credits (`includeMarkers=1` in details).
     pub markers: bool,
+    /// `Label`s, in full details, for those told them (see
+    /// `labels::shown_to`).
+    pub labels: bool,
 }
 
 /// `/api/items/{id}/images/{kind}?v={v}` → `(id, version)`.
@@ -353,13 +308,6 @@ fn title_sort(row: &ItemRow) -> Option<String> {
     let trimmed = row.title.trim();
     let cut = trimmed.char_indices().map(|(i, _)| i).find(|&i| trimmed[i..].to_lowercase() == row.sort_title);
     Some(cut.map(|i| trimmed[i..].to_owned()).unwrap_or_else(|| row.sort_title.clone()))
-}
-
-/// Plex's `viewCount`: plays of a watched item, 0 once it is marked
-/// unplayed (pley keeps the lifetime count, clients read `viewCount > 0` as
-/// "played").
-pub fn view_count(row: &ItemRow) -> i64 {
-    if row.watched { row.play_count.max(1) } else { 0 }
 }
 
 pub fn item_node(
@@ -608,7 +556,7 @@ pub fn item_node(
             for (id, title) in &extras.collections {
                 node.push(Node::new("Collection").attr("id", *id).attr("tag", title));
             }
-            for label in &extras.labels {
+            for label in extras.labels.iter().filter(|_| detail.labels) {
                 node.push(Node::new("Label").attr("tag", label));
             }
             for name in &extras.locked {
@@ -698,7 +646,7 @@ pub fn stream_id(file_id: i64, index: i64) -> i64 {
 
 /// The file stream index behind a Plex stream id of `file_id`.
 pub fn stream_index(file_id: i64, stream_id: i64) -> Option<i64> {
-    let index = stream_id - file_id * 10_000;
+    let index = stream_id.checked_sub(file_id.checked_mul(10_000)?)?;
     (0..10_000).contains(&index).then_some(index)
 }
 
@@ -880,78 +828,9 @@ pub fn channel_label(channels: i64) -> String {
     }
 }
 
-/// `(ISO 639-2, ISO 639-1, English name)` for a language tag in any of
-/// those forms (ffprobe uses 639-2, sidecar files often 639-1).
-pub fn language(tag: &str) -> Option<(&'static str, &'static str, &'static str)> {
-    const LANGUAGES: &[(&str, &str, &str, &str)] = &[
-        ("eng", "en", "English", ""),
-        ("fre", "fr", "French", "fra"),
-        ("ger", "de", "German", "deu"),
-        ("spa", "es", "Spanish", ""),
-        ("ita", "it", "Italian", ""),
-        ("jpn", "ja", "Japanese", ""),
-        ("chi", "zh", "Chinese", "zho"),
-        ("kor", "ko", "Korean", ""),
-        ("rus", "ru", "Russian", ""),
-        ("por", "pt", "Portuguese", ""),
-        ("dut", "nl", "Dutch", "nld"),
-        ("swe", "sv", "Swedish", ""),
-        ("nor", "no", "Norwegian", "nob"),
-        ("dan", "da", "Danish", ""),
-        ("fin", "fi", "Finnish", ""),
-        ("pol", "pl", "Polish", ""),
-        ("tur", "tr", "Turkish", ""),
-        ("ara", "ar", "Arabic", ""),
-        ("heb", "he", "Hebrew", ""),
-        ("hin", "hi", "Hindi", ""),
-        ("tha", "th", "Thai", ""),
-        ("vie", "vi", "Vietnamese", ""),
-        ("cze", "cs", "Czech", "ces"),
-        ("hun", "hu", "Hungarian", ""),
-        ("gre", "el", "Greek", "ell"),
-        ("rum", "ro", "Romanian", "ron"),
-        ("ukr", "uk", "Ukrainian", ""),
-        ("ind", "id", "Indonesian", ""),
-        ("may", "ms", "Malay", "msa"),
-        ("per", "fa", "Persian", "fas"),
-        ("bul", "bg", "Bulgarian", ""),
-        ("hrv", "hr", "Croatian", ""),
-        ("srp", "sr", "Serbian", ""),
-        ("slo", "sk", "Slovak", "slk"),
-        ("slv", "sl", "Slovenian", ""),
-        ("est", "et", "Estonian", ""),
-        ("lav", "lv", "Latvian", ""),
-        ("lit", "lt", "Lithuanian", ""),
-        ("cat", "ca", "Catalan", ""),
-        ("ice", "is", "Icelandic", "isl"),
-        ("fil", "tl", "Filipino", "tgl"),
-        ("tam", "ta", "Tamil", ""),
-        ("tel", "te", "Telugu", ""),
-        ("ben", "bn", "Bengali", ""),
-        ("urd", "ur", "Urdu", ""),
-    ];
-    let tag = tag.trim().to_ascii_lowercase();
-    let tag = tag.split(['-', '_']).next().unwrap_or_default();
-    LANGUAGES
-        .iter()
-        .find(|(b, one, name, t)| {
-            tag == *b || tag == *one || (!t.is_empty() && tag == *t) || tag == name.to_ascii_lowercase()
-        })
-        .map(|(b, one, name, _)| (*b, *one, *name))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn languages() {
-        assert_eq!(language("eng"), Some(("eng", "en", "English")));
-        assert_eq!(language("fr"), Some(("fre", "fr", "French")));
-        assert_eq!(language("deu"), Some(("ger", "de", "German")));
-        assert_eq!(language("pt-BR"), Some(("por", "pt", "Portuguese")));
-        assert_eq!(language("xx"), None);
-    }
 
     #[test]
     fn resolutions_and_stream_ids() {

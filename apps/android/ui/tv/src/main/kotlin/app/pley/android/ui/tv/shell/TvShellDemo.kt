@@ -2,6 +2,7 @@ package app.pley.android.ui.tv.shell
 
 import android.content.Context
 import android.graphics.Bitmap
+import androidx.compose.foundation.focusGroup
 import androidx.core.graphics.createBitmap
 import android.graphics.Canvas
 import android.graphics.LinearGradient
@@ -68,6 +69,7 @@ import app.pley.android.ui.tv.kit.TvRowColumn
 import app.pley.android.ui.tv.kit.initialFocus
 import app.pley.android.ui.tv.kit.rememberFocusMemory
 import app.pley.android.ui.tv.kit.rememberRested
+import app.pley.android.ui.tv.kit.tvRowColumnHero
 import coil3.ImageLoader
 import coil3.Uri
 import coil3.asImage
@@ -211,7 +213,7 @@ private fun DemoHome() {
             heroHeight = HeroHeight,
             modifier = Modifier.fillMaxSize(),
         ) {
-            // At rest the first header sits at y = 432, under the hero; in the rows it moves up to 188.
+            // At rest the first header sits at y = 432, under the hero; in the rows it moves up to 172.
             item("hero") {
                 Hero(
                     DemoData.hero,
@@ -220,6 +222,7 @@ private fun DemoHome() {
                         .height(HeroHeight)
                         .wrapContentHeight(Alignment.Top, unbounded = true)
                         .graphicsLayer { alpha = heroAlpha }
+                        .tvRowColumnHero()
                         .onFocusChanged { if (it.hasFocus) inRows = false },
                 )
             }
@@ -251,7 +254,7 @@ private val HeroHeight = 432.dp - PleyTv.RowGap
 /** The hero's stack at x = 96 (design spec §2.2): title, context, metadata, progress, summary, buttons. */
 @Composable
 private fun Hero(details: DemoDetails, memory: app.pley.android.ui.tv.kit.FocusMemory, modifier: Modifier) {
-    Column(modifier.padding(start = PleyTv.Gutter, top = 58.dp)) {
+    Column(modifier.focusGroup().padding(start = PleyTv.Gutter, top = 58.dp)) {
         Box(Modifier.height(84.dp), contentAlignment = Alignment.BottomStart) {
             BasicText(details.title, style = PleyType.Tv.HeroTitle.copy(color = PleyColors.Fg), maxLines = 1)
         }

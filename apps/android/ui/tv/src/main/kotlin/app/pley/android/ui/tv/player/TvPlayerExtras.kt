@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
@@ -35,6 +36,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -43,6 +45,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Border
 import androidx.tv.material3.Button
@@ -58,9 +61,11 @@ import app.pley.android.designsystem.TvSafeArea
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcon
 import app.pley.android.designsystem.icon.PleyIcons
+import app.pley.android.designsystem.text.shownLocale
 import app.pley.android.player.AudioDelays
 import app.pley.android.player.PlayerUiState
 import app.pley.android.player.sleep.SleepTexts
+import app.pley.android.player.sleep.SleepTimer
 import app.pley.android.player.subtitles.SubtitleSync
 import app.pley.android.ui.tv.R
 
@@ -76,7 +81,7 @@ internal val MoonIcon = PleyIcon("moon", false, "M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9
 internal fun SyncRow(offsetMs: Long, onChange: (Long) -> Unit, modifier: Modifier = Modifier) = StepRow(
     title = stringResource(R.string.tv_player_sync),
     hint = stringResource(R.string.tv_player_sync_hint),
-    value = SubtitleSync.label(offsetMs),
+    value = SubtitleSync.label(offsetMs, shownLocale()),
     onStep = { onChange(offsetMs + it * SubtitleSync.STEP_MS) },
     onReset = { onChange(0) },
     tag = TAG_SYNC,
@@ -91,7 +96,7 @@ internal fun SyncRow(offsetMs: Long, onChange: (Long) -> Unit, modifier: Modifie
 internal fun AudioDelayRow(delayMs: Long, onChange: (Long) -> Unit, modifier: Modifier = Modifier) = StepRow(
     title = stringResource(R.string.tv_player_audio_delay),
     hint = stringResource(R.string.tv_player_sync_hint),
-    value = AudioDelays.label(delayMs),
+    value = AudioDelays.label(delayMs, shownLocale()),
     onStep = { onChange(delayMs + it * AudioDelays.STEP_MS) },
     onReset = { onChange(0) },
     tag = TAG_AUDIO_DELAY,
@@ -152,8 +157,9 @@ private fun StepRow(
 /**
  * The sleep timer's notice, 30 s before it pauses: "Pausing in 28 s" and
  * Keep watching, at the bottom left (Skip and Up Next keep the right). The
- * count steps once a second; the button takes focus while the controls
- * are hidden, as Skip does.
+ * count steps once a second, as wide as "Pausing in 30 s" all the way down,
+ * so Keep watching stays put as it goes under 10; the button takes focus
+ * while the controls are hidden, as Skip does.
  */
 @Composable
 internal fun BoxScope.TvSleepNotice(state: State<PlayerUiState>, visible: Boolean, controlsShown: Boolean, ui: TvPlayerUi, onKeep: () -> Unit) {
@@ -161,6 +167,7 @@ internal fun BoxScope.TvSleepNotice(state: State<PlayerUiState>, visible: Boolea
     var last by remember { mutableIntStateOf(0) }
     secondsLeft?.let { last = it }
     val resources = LocalResources.current
+    val countStyle = PleyType.Tv.Label.copy(color = PleyColors.Fg)
     AnimatedVisibility(
         visible = visible,
         modifier = Modifier
@@ -169,6 +176,13 @@ internal fun BoxScope.TvSleepNotice(state: State<PlayerUiState>, visible: Boolea
         enter = fadeIn(tween(NOTICE_FADE_MS)),
         exit = fadeOut(tween(NOTICE_FADE_MS)),
     ) {
+        // Measured as the notice shows: most playbacks never have one.
+        val measurer = rememberTextMeasurer()
+        val density = LocalDensity.current
+        val countWidth = remember(resources, measurer, density) {
+            val widest = SleepTexts.notice(resources, (SleepTimer.NOTICE_MS / 1_000).toInt())
+            with(density) { measurer.measure(widest, countStyle, maxLines = 1).size.width.toDp() }
+        }
         Row(
             Modifier
                 .background(PleyColors.Surface3, PleyShape.Control)
@@ -180,8 +194,9 @@ internal fun BoxScope.TvSleepNotice(state: State<PlayerUiState>, visible: Boolea
             Icon(MoonIcon, contentDescription = null, size = 20.dp, tint = PleyColors.Muted)
             BasicText(
                 SleepTexts.notice(resources, last),
-                style = PleyType.Tv.Label.copy(color = PleyColors.Fg),
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                style = countStyle,
+                maxLines = 1,
+                modifier = Modifier.widthIn(min = countWidth).semantics { liveRegion = LiveRegionMode.Polite },
             )
             Button(
                 onClick = onKeep,

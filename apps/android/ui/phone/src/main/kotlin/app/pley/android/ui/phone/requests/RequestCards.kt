@@ -61,6 +61,7 @@ import app.pley.android.designsystem.icon.PleyIcon
 import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.designsystem.image.Artwork
 import app.pley.android.designsystem.image.ArtworkImage
+import app.pley.android.designsystem.text.formatWords
 import app.pley.android.model.Approval
 import app.pley.android.model.MediaRequest
 import app.pley.android.model.RequestStatus
@@ -68,9 +69,11 @@ import app.pley.android.model.format.formatBytes
 import app.pley.android.screens.R
 import app.pley.android.screens.requests.ApproveDialog
 import app.pley.android.screens.requests.CardAction
+import app.pley.android.screens.requests.DECLINE_REASON_MAX
 import app.pley.android.screens.requests.RequestTexts
 import app.pley.android.screens.requests.cardActions
 import app.pley.android.screens.requests.confirms
+import app.pley.android.screens.requests.declineReasonEnd
 import app.pley.android.screens.requests.readyElsewhere
 import app.pley.android.ui.phone.kit.ConfirmDialog
 import app.pley.android.ui.phone.kit.DelayedSpinner
@@ -149,7 +152,7 @@ internal fun RequestCard(
             )
             val reason = request.reason?.trim()?.takeIf { it.isNotEmpty() && request.status == RequestStatus.Declined }
             if (reason != null) {
-                Text("“$reason”", style = MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic), color = PleyColors.Muted)
+                Text(stringResource(R.string.requests_reason_quoted, reason), style = MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic), color = PleyColors.Muted)
             }
             request.note?.takeIf { manage && it.isNotBlank() }?.let { note ->
                 Text(note, style = MaterialTheme.typography.bodySmall, color = PleyColors.Muted)
@@ -361,7 +364,7 @@ internal fun ApproveDialogView(dialog: ApproveDialog, texts: RequestTexts, onApp
                             Heading(stringResource(R.string.requests_approve_folder))
                             if (dialog.folder == null) ChoiceRow(stringResource(R.string.requests_approve_default), null, folder == null) { folder = null }
                             options.rootFolders.forEach { f ->
-                                val free = f.freeBytes?.let { stringResource(R.string.requests_folder_free, formatBytes(it)) }
+                                val free = f.freeBytes?.let { stringResource(R.string.requests_folder_free, formatBytes(it, formatWords())) }
                                 ChoiceRow(f.path, free, folder == f.path) { folder = f.path }
                             }
                         }
@@ -484,13 +487,11 @@ internal fun CountBadge(count: Int, alarm: Boolean, description: String, modifie
 /** What a badge counts to before it says "99+". */
 private const val MAX_COUNT = 99
 
-/** The longest reason a decline takes (the server's limit). */
-private const val REASON_MAX = 500
-
-/** A reason past [REASON_MAX] characters (pasted, say) keeps its first ones. */
+/** A reason past [DECLINE_REASON_MAX] characters (pasted, say) keeps its first ones ([declineReasonEnd]). */
 private object ReasonLength : InputTransformation {
     override fun TextFieldBuffer.transformInput() {
-        if (length > REASON_MAX) replace(REASON_MAX, length, "")
+        val end = declineReasonEnd(asCharSequence())
+        if (end < length) replace(end, length, "")
     }
 }
 

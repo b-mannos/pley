@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { connectionLost, eventsLive } from "@/lib/connection";
 import { apiError, mockApi, testQueryClient } from "@/test/render";
 import { makeDetail, makeRequest, makeRequestList, makeShowDetail, makeSummary, makeTitle } from "@/test/requests";
-import { LOST_AFTER_MS, onServerEvent, useServerEvents } from "./events";
+import { LOST_AFTER_MS, onServerEvent, setReceiver, useServerEvents } from "./events";
 import { keys } from "./hooks";
 import { EVERY_REQUEST, requestKeys, type DiscoverPage, type DiscoverTitle } from "./requests";
 import type { Activity, Library, ServerEvent } from "./types";
@@ -209,6 +209,30 @@ describe("useServerEvents", () => {
       vi.advanceTimersByTime(1);
     });
     expect(FakeEventSource.all).toHaveLength(3);
+  });
+
+  it("refreshes the user's own sessions and devices, for the remote, as sessions change or stop", () => {
+    const { client, source } = setup();
+    client.setQueryData(keys.sessions, []);
+    client.setQueryData(keys.remoteDevices, []);
+    client.setQueryData(keys.activity, { scans: [], sessions: [] });
+
+    // A device that takes casts coming or going says so too.
+    act(() => source().send({ type: "sessions_changed" }));
+    expect(invalidated(client, keys.sessions)).toBe(true);
+    expect(invalidated(client, keys.remoteDevices)).toBe(true);
+    expect(invalidated(client, keys.activity)).toBe(true);
+
+    client.setQueryData(keys.sessions, []);
+    act(() => source().send({ type: "session_stopped", session_id: "s1", message: null, by_admin: false }));
+    expect(invalidated(client, keys.sessions)).toBe(true);
+
+    // A command is for the player: nothing to fetch.
+    client.setQueryData(keys.sessions, []);
+    act(() =>
+      source().send({ type: "player_command", session_id: "s1", command: "pause", position_ms: null, offset_ms: null, stream_index: null }),
+    );
+    expect(invalidated(client, keys.sessions)).toBe(false);
   });
 
   it("refreshes My List when it changed on another device", () => {
@@ -491,6 +515,24 @@ describe("useServerEvents", () => {
     stop();
     act(() => source().send({ type: "sessions_changed" }));
     expect(heard).toEqual([stopped]);
+  });
+
+  it("opens again as a receiver of casts, and as a plain stream once it takes none", () => {
+    const { source } = setup();
+    act(() => source().open());
+    expect(source().url).toBe("/api/events");
+    const plain = source();
+
+    act(() => setReceiver("receiver=desktop-1&casts=item"));
+    expect(plain.readyState).toBe(FakeEventSource.CLOSED);
+    expect(source().url).toBe("/api/events?receiver=desktop-1&casts=item");
+    // The same again opens nothing.
+    const count = FakeEventSource.all.length;
+    act(() => setReceiver("receiver=desktop-1&casts=item"));
+    expect(FakeEventSource.all).toHaveLength(count);
+
+    act(() => setReceiver(null));
+    expect(source().url).toBe("/api/events");
   });
 
   it("ignores events it can't read", () => {

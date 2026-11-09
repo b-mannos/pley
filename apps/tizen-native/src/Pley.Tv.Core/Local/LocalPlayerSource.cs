@@ -200,7 +200,7 @@ public sealed class LocalPlayerSource : IPlayerSource
     {
         var mode = body.TryGetValue("mode", out var m) ? m as string : null;
         if (mode != null && mode != "auto")
-            return Task.FromException<PlaybackInfo>(new LocalPlaybackException("This TV can't play this file as it is, and a file on a drive has no server to convert it"));
+            return Task.FromException<PlaybackInfo>(new LocalPlaybackException(Strings.T("storage.playback.cantConvert")));
         var file = detail?.Files.FirstOrDefault();
         var asked = body.TryGetValue("audio_index", out var a) && a is int i ? i : (int?)null;
         return Task.FromResult(new PlaybackInfo
@@ -251,8 +251,8 @@ public sealed class LocalPlayerSource : IPlayerSource
 
     public Task StopPlayback(string session) => Task.CompletedTask;
 
-    /// <summary>Where it stopped, kept on the TV; near the end, it was watched and starts over next time.</summary>
-    public Task Progress(long itemId, long positionMs, long? durationMs, string state, string session)
+    /// <summary>Where it stopped, kept on the TV; near the end, it was watched and starts over next time. No remote hears of its tracks.</summary>
+    public Task Progress(long itemId, long positionMs, long? durationMs, string state, string session, PlayingTracks? tracks = null, string? quality = null)
     {
         var key = ResumeKey();
         if (durationMs is long d && d > 0 && positionMs >= d * WatchedShare) Storage.Remove(key);
@@ -293,13 +293,23 @@ public sealed class LocalPlayerSource : IPlayerSource
     const int ExtractWaitMs = 1_000;
 
     /// <summary>
+    /// A subtitle file beside the video larger than this isn't read, as in the Android app: a
+    /// film's SubRip file is some 100 KB, and its text is copied a few times on the way to WebVTT.
+    /// </summary>
+    const long SidecarMost = 2L * 1024 * 1024;
+
+    /// <summary>
     /// A subtitle file beside the video, as WebVTT, whole; or a text track of the file's own, as
     /// much of it as is read out yet (asked again until all is).
     /// </summary>
     public Task<SubtitleText> Subtitles(string url)
     {
         if (!url.StartsWith(EmbeddedPrefix, StringComparison.Ordinal))
-            return Task.Run(() => new SubtitleText(LocalFolder.ToWebVtt(LocalFolder.Decode(File.ReadAllBytes(url))), true));
+            return Task.Run(() =>
+            {
+                if (new FileInfo(url).Length > SidecarMost) throw new IOException("A subtitle file too large to read");
+                return new SubtitleText(LocalFolder.ToWebVtt(LocalFolder.Decode(File.ReadAllBytes(url))), true);
+            });
         return Task.Run(async () =>
         {
             var x = Extract(int.Parse(url.Substring(EmbeddedPrefix.Length), System.Globalization.CultureInfo.InvariantCulture));
@@ -307,6 +317,9 @@ public sealed class LocalPlayerSource : IPlayerSource
             return new SubtitleText(MatroskaSubtitles.WebVtt(x.Now(), x.Track.CodecId), x.Done.IsCompleted);
         });
     }
+
+    /// <summary>A drive's tracks are read out as the film plays, not in parts: the presenter reads them whole.</summary>
+    public Task<SubtitlePart> PictureSubtitlesPart(string url, long from, long to) => Task.FromException<SubtitlePart>(new NotSupportedException());
 
     /// <summary>A picture track of the file's own (".../subtitles/4.mks"): as much as is read out yet, handed over as it is.</summary>
     public Task<SubtitlePictures> PictureSubtitles(string url)

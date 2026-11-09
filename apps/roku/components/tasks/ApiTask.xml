@@ -8,6 +8,7 @@
         <field id="ready" type="boolean" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/tasks/ApiTask.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/I18n.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Auth.brs" />
@@ -17,7 +18,9 @@
     <script type="text/brightscript" uri="pkg:/components/lib/Caps.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Format.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Player.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Pictures.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Content.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Home.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Pages.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Music.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Requests.brs" />
@@ -25,6 +28,7 @@
     <script type="text/brightscript" uri="pkg:/components/lib/Transfer.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/AutoQuality.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Live.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Remote.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Library.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Search.brs" />
 </component>

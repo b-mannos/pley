@@ -107,7 +107,7 @@ internal fun CategoryList(
                         ) { open = if (expanded) null else r.region }
                     }
                     if (expanded) {
-                        items(r.groups, key = { "group:${it.name}" }) { g ->
+                        items(r.groups, key = { "group:${it.name}" }, contentType = { "group" }) { g ->
                             val category = LiveCategory.Group(g.name)
                             Entry(null, g.label, g.count, selected == category, indent = GROUP_INSET + 20.dp) { onSelect(category) }
                         }
@@ -119,7 +119,7 @@ internal fun CategoryList(
                 item(key = "others") {
                     Heading(stringResource(if (regions.isEmpty()) R.string.livetv_groups else R.string.livetv_more_groups), others.size)
                 }
-                items(others, key = { "group:${it.name}" }) { g ->
+                items(others, key = { "group:${it.name}" }, contentType = { "group" }) { g ->
                     val category = LiveCategory.Group(g.name)
                     Entry(null, g.name.ifEmpty { stringResource(R.string.livetv_no_group_name) }, g.count, selected == category, indent = GROUP_INSET) { onSelect(category) }
                 }
@@ -133,7 +133,7 @@ internal fun CategoryList(
 private fun Heading(text: String, count: Int) {
     Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 16.dp, bottom = 4.dp)) {
         Text(text.uppercase(), style = MaterialTheme.typography.labelSmall, color = PleyColors.Subtle, modifier = Modifier.weight(1f))
-        Text("%,d".format(count), style = MaterialTheme.typography.labelSmall, color = PleyColors.Subtle)
+        Text(formatCount(count), style = MaterialTheme.typography.labelSmall, color = PleyColors.Subtle)
     }
 }
 
@@ -164,7 +164,7 @@ private fun Entry(icon: PleyIcon?, name: String, count: Int?, selected: Boolean,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        if (count != null) Text("%,d".format(count), style = MaterialTheme.typography.bodySmall, color = PleyColors.Subtle)
+        if (count != null) Text(formatCount(count), style = MaterialTheme.typography.bodySmall, color = PleyColors.Subtle)
     }
 }
 

@@ -10,14 +10,17 @@ makes the sound AAC stereo, and starts a few segments behind.
 
 The plugin's play route first asks to watch (`POST …/watch`), which tunes
 the channel, says when every connection is in use (409), and gives what is
-on for the player's info; then hands Kodi the stream, whose reader ends the
-`watch` (the same `client_id`). A device watches one channel at a time:
-changing channel lets go of the one before.
+on for the player's info; then hands Kodi the stream, read for that watch
+session (`<client_id>-stream`), which stays while it is read. A device
+watches one channel at a time: changing channel lets go of the one before.
+The service leaves the session (`DELETE /api/live/sessions/{session}`)
+once Kodi stops reading it, rather than the server waiting 45 s.
 """
 
 from __future__ import annotations
 
 import datetime
+import json
 import re
 import time
 from urllib.parse import urlencode
@@ -25,7 +28,7 @@ from urllib.parse import urlencode
 import xbmc
 import xbmcgui
 
-from . import api, kodi, words
+from . import api, i18n, kodi, remote, words
 from .listing import image
 
 SUMMARY = "/api/live"
@@ -46,12 +49,9 @@ PLAY_ROUTE = "live_play"
 # Channels queued either side of the one played.
 QUEUED = 100
 
-# Kodi's own strings: the short names of the days (Mon…Sun) and months
-# (Jan…Dec), in Kodi's language.
-SHORT_DAYS = 41
-SHORT_MONTHS = 51
-ENGLISH_DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-ENGLISH_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+# A language's own clock where Kodi is in another: 24 hours in French and
+# Spanish, 12 in English.
+CLOCKS = {"en": "%I:%M %p", "fr": "%H:%M", "es": "%H:%M"}
 
 
 # ------------------------------------------------------------ the server
@@ -116,17 +116,24 @@ def watch(client, channel_id: int, client_id: str, take_over=None) -> dict:
     the channel, with what is on. Raises ApiError, 409 when every
     connection of its source is in use (its `details` say what holds
     each, `connections`); `take_over`, the channel whose connection to take
-    then, where the server lets this account."""
-    asked = {"client_id": client_id}
+    then, where the server lets this account. The session is the one the
+    user's remote lists and commands (its stream is read for it,
+    stream_path): the service is told it (kodi.LIVE)."""
+    asked = {"client_id": client_id, "controls": remote.controls("live", has_order=len(queued_channels() or []) > 1)}
+    asked.update(remote.device())
     if take_over is not None:
         asked["take_over"] = int(take_over)
     answer = client.post("%s/%d/watch" % (CHANNELS, channel_id), asked) or {}
+    if answer.get("session_id"):
+        kodi.set_property(kodi.LIVE, json.dumps({"session_id": answer["session_id"], "channel_id": channel_id}))
     return answer.get("channel") or {"id": channel_id, "name": ""}
 
 
 def stream_path(channel_id: int, client_id: str, take_over=None) -> str:
-    """The channel's MPEG-TS as the provider sends it, on the server."""
-    asked = {"client_id": client_id}
+    """The channel's MPEG-TS as the provider sends it, on the server, read
+    for this device's watch session (`<client_id>-stream`), which stays
+    while it is read: the remote reaches Kodi through that session."""
+    asked = {"client_id": client_id + "-stream", "device_kind": remote.device()["device_kind"]}
     if take_over is not None:
         asked["take_over"] = int(take_over)
     return "%s/%d/stream.ts?%s" % (CHANNELS, channel_id, urlencode(asked))
@@ -172,7 +179,14 @@ def progress(program: dict, now: float) -> float:
 
 
 def time_format() -> str:
-    """Kodi's time format, without seconds ("%H:%M", "%I:%M %p")."""
+    """Kodi's time format, without seconds ("%H:%M", "%I:%M %p"): its region
+    is the person's, unless Kodi is in another of Pley's languages than the
+    one shown, which then has its own clock. A Kodi in a language Pley
+    doesn't have keeps its region's."""
+    language = kodi.language()
+    kodi_language = i18n.supported(kodi.kodi_language())
+    if kodi_language and kodi_language != language:
+        return CLOCKS[language]
     region = getattr(xbmc, "getRegion", None)
     found = region("time") if region else ""
     return (found or "%H:%M").replace(":%S", "").strip()
@@ -190,11 +204,6 @@ def span(program: dict) -> str:
     return "%s – %s" % (clock(program["start"]), clock(program["stop"]))
 
 
-def kodi_string(number: int, english: str) -> str:
-    found = getattr(xbmc, "getLocalizedString", None)
-    return (found(number) if found else "") or english
-
-
 def day(ts: float, now: float) -> str:
     """"Today", "Tomorrow", "Yesterday", or "Fri 30 Oct"."""
     # Dates apart, not 24-hour steps: a day is 23 or 25 hours when daylight
@@ -204,9 +213,9 @@ def day(ts: float, now: float) -> str:
     if name:
         return kodi.text(name)
     when = time.localtime(ts)
-    weekday = kodi_string(SHORT_DAYS + when.tm_wday, ENGLISH_DAYS[when.tm_wday])
-    month = kodi_string(SHORT_MONTHS + when.tm_mon - 1, ENGLISH_MONTHS[when.tm_mon - 1])
-    return "%s %d %s" % (weekday, when.tm_mday, month)
+    return kodi.text("day_in_guide").format(
+        weekday=kodi.text_of(kodi.WEEKDAYS[when.tm_wday]), day=when.tm_mday, month=words.month(when.tm_mon)
+    )
 
 
 def left(program: dict, now: float) -> str:
@@ -249,7 +258,7 @@ def headline(program: dict) -> str:
     Briefing: Part 7"."""
     title = program.get("title") or ""
     subtitle = program.get("subtitle")
-    return "%s: %s" % (title, subtitle) if subtitle and subtitle != title else title
+    return kodi.text("label_value") % (title, subtitle) if subtitle and subtitle != title else title
 
 
 def plot(channel: dict, now: float) -> str:
@@ -421,12 +430,42 @@ def is_ours(playlist) -> bool:
         return False
 
 
+def queued_channels():
+    """The channels of Kodi's video queue, in order, when it is a queue of
+    pley's channels; None otherwise."""
+    playlist = xbmc.PlayList(xbmc.PLAYLIST_VIDEO)
+    if not is_ours(playlist):
+        return None
+    found = []
+    for at in range(playlist.size()):
+        params = remote.entry_params(playlist, at)
+        if params.get("route") == PLAY_ROUTE and params.get("id", "").isdigit():
+            found.append(int(params["id"]))
+    return found
+
+
 def forget_queue() -> None:
     """Empties Kodi's video queue when it is pley's channels: after a
     channel that can't be watched, Kodi would try each one after it."""
     playlist = xbmc.PlayList(xbmc.PLAYLIST_VIDEO)
     if is_ours(playlist):
         playlist.clear()
+
+
+def channel_of(path: str):
+    """The channel a stream's address (stream_path, or the proxy's address
+    of it) plays; None for anything else."""
+    found = re.search(r"/api/live/channels/(\d+)/stream\.ts", path or "")
+    return int(found.group(1)) if found else None
+
+
+def taken_over(message) -> bool:
+    """Someone took over the connection of the channel that played: the
+    server's words under "Live TV stopped", with OK and Watch again: whether
+    to watch it again (as any channel is watched: every connection in use
+    says so)."""
+    body = message or kodi.text("live_stopped_body")
+    return bool(xbmcgui.Dialog().yesno(kodi.text("live_stopped"), body, nolabel=kodi.text("ok"), yeslabel=kodi.text("watch_again")))
 
 
 def who(connection: dict) -> str:
@@ -437,7 +476,7 @@ def who(connection: dict) -> str:
     if connection.get("watchers"):
         return ", ".join(connection["watchers"])
     people = connection.get("people") or 0
-    return kodi.text("people_watching") % people if people > 1 else kodi.text("someone_else")
+    return kodi.count("people", people) if people > 1 else kodi.text("someone_else")
 
 
 def busy(message: str, connections=()) -> object:

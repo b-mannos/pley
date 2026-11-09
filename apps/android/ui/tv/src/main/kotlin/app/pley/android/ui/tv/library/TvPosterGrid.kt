@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridItemInfo
 import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -22,38 +23,50 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.layout.LazyLayoutCacheWindow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusDirection
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.draw.CacheDrawScope
+import androidx.compose.ui.draw.DrawResult
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.focus.FocusEventModifierNode
+import androidx.compose.ui.focus.FocusState
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.node.CompositionLocalConsumerModifierNode
+import androidx.compose.ui.node.ModifierNodeElement
+import androidx.compose.ui.node.currentValueOf
+import androidx.compose.ui.platform.InspectorInfo
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.pley.android.common.TestTags
+import app.pley.android.designsystem.PleyFocus
 import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.PleyTv
 import app.pley.android.designsystem.TvSafeArea
 import app.pley.android.designsystem.image.ArtworkImage
 import app.pley.android.designsystem.image.rememberImagePrefetcher
+import app.pley.android.designsystem.reducedMotion
 import app.pley.android.designsystem.tile.ArtworkTile
 import app.pley.android.designsystem.tile.ArtworkTileModel
 import app.pley.android.designsystem.tile.QualityBadge
@@ -64,10 +77,21 @@ import app.pley.android.designsystem.tile.TileStyle
 import app.pley.android.designsystem.tile.skeleton
 import app.pley.android.designsystem.tile.tvTileSize
 import app.pley.android.ui.tv.kit.FocusMemory
+import app.pley.android.ui.tv.kit.FocusSlots
+import app.pley.android.ui.tv.kit.KeyRepeatGate
 import app.pley.android.ui.tv.kit.LocalKeyRepeatGate
+import app.pley.android.ui.tv.kit.LocalTileQuiet
+import app.pley.android.ui.tv.kit.TileQuiet
 import app.pley.android.ui.tv.kit.TvTileFrame
+import app.pley.android.ui.tv.kit.drawStillRing
+import app.pley.android.ui.tv.kit.focusSlot
+import app.pley.android.ui.tv.kit.TvGlide
+import app.pley.android.ui.tv.kit.HeldEnds
+import app.pley.android.ui.tv.kit.heldKeyStaysIn
 import app.pley.android.ui.tv.kit.rememberedFocus
 import app.pley.android.ui.tv.theme.LocalTvTier
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
@@ -79,11 +103,307 @@ internal class TvGridFocus {
     /** The focused cell's position; -1 before any. Read by what follows it (the jump control's letter). */
     var focused by mutableIntStateOf(-1)
 
-    internal val cells = HashMap<Int, FocusRequester>()
+    internal val slots = FocusSlots()
 
     /** Focuses the cell at [position], if it is composed. */
-    fun focus(position: Int): Boolean = cells[position]?.let { runCatching { it.requestFocus() }.isSuccess } ?: false
+    fun focus(position: Int): Boolean = slots.focus(position)
 }
+
+/**
+ * How a TV grid moves (design spec §4.2, D-pad rules 4 and 5), as the
+ * native Samsung app's GridView moves it. Focus on a cell brings its top
+ * to [anchor] from the grid's top, or as far as the grid goes: over 150 ms,
+ * eased out, for a press; evenly over [KeyRepeatGate.GLIDE_MS] for a held
+ * key's step, so the steps run into each other. Under a held Up or Down
+ * the rows glide under one ring that stays still where focus is going, the
+ * tiles keeping their resting look ([TileQuiet]): a tile growing and
+ * shrinking at each row, its ring with it, would make the page stutter.
+ * The key coming up gives them their looks back.
+ */
+@Stable
+internal class GridMotion(private val state: LazyGridState, private val gate: KeyRepeatGate, private val scope: CoroutineScope) {
+    val quiet = TileQuiet()
+
+    /** Where the grid is laid out, for where its cells are. */
+    var coordinates: LayoutCoordinates? = null
+
+    /** The focused cell's position while a cell has focus; -1 while focus is elsewhere (a header), which Compose scrolls to. */
+    var inCell = -1
+        private set
+
+    var anchor = 0f
+    var columns = 1
+    var reduced = false
+
+    /** The cells' keys by position ([TvPosterGrid]'s keyAt), and how many there are. */
+    var keyAt: (Int) -> Any = { it }
+    var total = 0
+
+    /** The lazy grid's index of the first cell: 0, or after a header's items; -1 until a cell is seen laid out then. */
+    var lead = 0
+
+    /** The still ring's top left, in the grid: where the focused cell's well comes to rest. */
+    private var ringX by mutableFloatStateOf(0f)
+    private var ringY by mutableFloatStateOf(0f)
+    private var row = -1
+    private val glide = TvGlide(state, scope)
+    private var looks: Job? = null
+    private val landing: () -> Unit = { land() }
+
+    /** Whether focus is in the header's hero ([tvGridHero]), which the grid takes back to its start itself. */
+    var inHero = false
+        private set
+
+    /**
+     * Focus came into the hero: the grid glides back to its start, as a page
+     * of rows goes back to its hero. With the hero still showing, how far
+     * that is is known; otherwise Compose scrolls there.
+     */
+    fun heroFocused() {
+        if (state.firstVisibleItemIndex != 0) return
+        inHero = true
+        glide.move(-state.firstVisibleItemScrollOffset.toFloat(), gate.holding, reduced)
+    }
+
+    /** Focus left the hero. */
+    fun heroLeft() {
+        inHero = false
+    }
+
+    /** The cell at [position] took focus, laid out at [cell]. */
+    fun focused(position: Int, cell: LayoutCoordinates?) {
+        inCell = position
+        val newRow = position / columns != row
+        row = position / columns
+        val grid = coordinates
+        if (grid == null || cell == null || !grid.isAttached || !cell.isAttached) return
+        // Along a row the grid goes on as it was.
+        if (!newRow && glide.moving) return
+        val at = grid.localPositionOf(cell, Offset.Zero)
+        var by = minOf(at.y - anchor, forwardRoom())
+        if (by < 0f && state.firstVisibleItemIndex == 0) by = maxOf(by, -state.firstVisibleItemScrollOffset.toFloat())
+        val held = gate.holding
+        if (held && newRow && !reduced) {
+            ringX = at.x
+            ringY = at.y - by
+            quieten()
+        }
+        glide.move(by, held, reduced)
+    }
+
+    /** Focuses the cell at [position] once it is laid out ([column]). */
+    private var bringing: Job? = null
+
+    /** A held step waiting for its row ([column]). */
+    private var waiting: Job? = null
+    private val stopWaiting: () -> Unit = { waiting?.cancel() }
+
+    /**
+     * Up or Down from the focused cell, [from], to [position] in its
+     * column, as the Samsung app's grid moves; whether the key is used.
+     * Only a cell laid out on the grid takes focus. The cache window
+     * composes rows off the screen without placing them: focus on one of
+     * those was measured where it wasn't, the grid scrolled wrong, and the
+     * next step left Compose's own search to drift to another column or
+     * lose focus. A cell not laid out (a held key outrunning the rows on
+     * the screen) is scrolled just into the grid and focused once it is.
+     *
+     * A held step that comes while the last one's glide still runs waits a
+     * frame or two for the row it brings onto the screen ([rowMade]), then
+     * goes all the same: the glide is spread over the wait
+     * ([TvGlide.linger]), so the grid goes on gliding meanwhile. The first
+     * step of a hold, the grid at rest, goes at once. The key coming up
+     * ends the wait without the step: focus stays where the hold left it.
+     *
+     * Held steps wait for a step under way; a key [pressed] doesn't: it
+     * ends whatever a step left waiting or bringing in, and goes from the
+     * focused cell.
+     */
+    fun column(from: Int, position: Int, focus: TvGridFocus, pressed: Boolean): Boolean {
+        if (pressed) {
+            waiting?.cancel()
+            bringing?.cancel()
+        } else if (waiting?.isActive == true || bringing?.isActive == true) {
+            return true
+        }
+        val down = position > from
+        if (!gate.holding || !glide.moving || rowMade(down, focus)) return step(from, position, focus)
+        glide.linger(ROW_WAIT_FRAMES * FRAME_MS)
+        waiting = scope.launch {
+            var frames = 0
+            while (frames < ROW_WAIT_FRAMES && !rowMade(down, focus)) {
+                withFrameNanos { }
+                frames++
+            }
+            if (inCell == from) step(from, position, focus)
+        }
+        gate.onRelease(stopWaiting)
+        return true
+    }
+
+    /**
+     * Whether the row a held step brings onto the screen (the next past the
+     * bottom going down, past the top going up) is made. The grid makes
+     * rows ahead of the screen between frames; a held key's step, every
+     * 45 ms, made the next one itself, in the frame, when they fell behind:
+     * on a Google TV Streamer a row took 18 ms, and the steps never left the
+     * frames the time to get ahead again. A step waiting a frame or two for
+     * its row gives them that time, and the steps after it find theirs made.
+     */
+    private fun rowMade(down: Boolean, focus: TvGridFocus): Boolean {
+        val visible = state.layoutInfo.visibleItemsInfo
+        if (visible.isEmpty()) return true
+        val edge = (if (down) visible.last().index else visible.first().index) - leadNow()
+        if (edge < 0) return true
+        val row = edge / columns + if (down) 1 else -1
+        if (row < 0 || row * columns >= total) return true
+        val first = row * columns
+        return focus.slots.has(first) && focus.slots.has(minOf(first + columns, total) - 1)
+    }
+
+    /** [column]'s step: to [position], laid out or brought in. */
+    private fun step(from: Int, position: Int, focus: TvGridFocus): Boolean {
+        val target = keyAt(position)
+        if (laidOut(target) && focus.focus(position)) return true
+        val info = state.layoutInfo
+        // Where the target's row is, from a cell laid out now: the focused one, or any other.
+        val (cell, at) = reference(from) ?: return false
+        val top = cell.offset.y + (position / columns - at / columns) * (cell.size.height + info.mainAxisItemSpacing)
+        val by = when {
+            top + cell.size.height <= info.viewportStartOffset -> (top + cell.size.height - info.viewportStartOffset - 1).toFloat()
+            top >= info.viewportEndOffset -> (top - info.viewportEndOffset + 1).toFloat()
+            else -> 0f
+        }
+        bringing = scope.launch {
+            if (by != 0f) state.scrollBy(by)
+            repeat(BRING_FRAMES) {
+                withFrameNanos { }
+                if (laidOut(target) && focus.focus(position)) return@launch
+            }
+        }
+        return true
+    }
+
+    /**
+     * [lead], worked out from what is laid out while it isn't known yet: the
+     * cell whose key is that of the position as many items back as a header
+     * has ([MAX_LEAD] at most). 0 until a cell is laid out.
+     */
+    fun leadNow(): Int {
+        if (lead >= 0) return lead
+        for (item in state.layoutInfo.visibleItemsInfo) {
+            for (back in 0..minOf(item.index, MAX_LEAD)) {
+                val position = item.index - back
+                if (position < total && keyAt(position) == item.key) {
+                    lead = back
+                    return back
+                }
+            }
+        }
+        return 0
+    }
+
+    /** Whether the cell keyed [key] is laid out on the grid, not only composed off it. */
+    private fun laidOut(key: Any): Boolean = state.layoutInfo.visibleItemsInfo.any { it.key == key }
+
+    /** A cell laid out now, and its position: [from]'s when it is, or any other's. */
+    private fun reference(from: Int): Pair<LazyGridItemInfo, Int>? {
+        val items = state.layoutInfo.visibleItemsInfo
+        val key = keyAt(from)
+        items.firstOrNull { it.key == key }?.let {
+            lead = it.index - from
+            return it to from
+        }
+        if (lead < 0) return null
+        return items.firstOrNull { it.index - lead in 0 until total }?.let { it to it.index - lead }
+    }
+
+    /** The cell at [position] lost focus. */
+    fun lost(position: Int) {
+        if (inCell == position) inCell = -1
+    }
+
+    /** The ring that stays still while the rows glide under a held key. */
+    fun drawRing(cache: CacheDrawScope, kind: TileKind): DrawResult = with(cache) {
+        val stroke = Stroke(PleyFocus.RingStroke.toPx())
+        onDrawWithContent {
+            drawContent()
+            if (quiet.on) drawStillRing(kind, Offset(ringX, ringY), stroke)
+        }
+    }
+
+    /** How much further the grid scrolls forward: up to its end, once its last row is laid out. */
+    private fun forwardRoom(): Float {
+        val info = state.layoutInfo
+        val items = info.visibleItemsInfo
+        if (items.isEmpty() || items.last().index < info.totalItemsCount - 1) return Float.MAX_VALUE
+        val end = items.maxOf { it.offset.y + it.size.height } + info.afterContentPadding
+        return (end - info.viewportEndOffset).coerceAtLeast(0).toFloat()
+    }
+
+    private fun quieten() {
+        if (quiet.on) return
+        looks?.cancel()
+        quiet.start()
+        gate.onRelease(landing)
+    }
+
+    /** The key came up: the tiles take their looks back as the still ring goes. */
+    private fun land() {
+        looks?.cancel()
+        looks = scope.launch { quiet.end(reduced) }
+    }
+
+    private companion object {
+        /** How many frames a cell scrolled into the grid has to be laid out in and take focus. */
+        const val BRING_FRAMES = 3
+
+        /** How many frames a held step waits for the row it brings onto the screen ([rowMade]). */
+        const val ROW_WAIT_FRAMES = 2
+
+        /** A frame at 60 Hz, in milliseconds, rounded up. */
+        const val FRAME_MS = 17
+    }
+}
+
+/** The grid's own spec for what isn't a cell (a page's header); nothing for a cell, which the grid moves to itself. */
+@Stable
+private class CellSpec(private val page: BringIntoViewSpec, private val motion: GridMotion) : BringIntoViewSpec {
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float =
+        if (motion.inCell >= 0 || motion.inHero) 0f else page.calculateScrollDistance(offset, size, containerSize)
+}
+
+/**
+ * Marks a [TvPosterGrid] header's hero (a collection's top): focus coming
+ * into it takes the grid back to its start over 150 ms, eased out, as a
+ * page of rows goes back to its hero ([tvRowColumnHero]), where Compose's
+ * own scrolling would spring there.
+ */
+internal fun Modifier.tvGridHero(): Modifier = this then TvGridHeroElement
+
+private data object TvGridHeroElement : ModifierNodeElement<TvGridHeroNode>() {
+    override fun create() = TvGridHeroNode()
+
+    override fun update(node: TvGridHeroNode) = Unit
+
+    override fun InspectorInfo.inspectableProperties() {
+        name = "tvGridHero"
+    }
+}
+
+private class TvGridHeroNode : Modifier.Node(), FocusEventModifierNode, CompositionLocalConsumerModifierNode {
+    private var hadFocus = false
+
+    override fun onFocusEvent(focusState: FocusState) {
+        if (focusState.hasFocus == hadFocus) return
+        hadFocus = focusState.hasFocus
+        val motion = currentValueOf(LocalGridMotion) ?: return
+        if (hadFocus) motion.heroFocused() else motion.heroLeft()
+    }
+}
+
+/** The motion of the grid a header is in; none outside a grid. */
+private val LocalGridMotion = staticCompositionLocalOf<GridMotion?> { null }
 
 /**
  * A TV grid of tiles (design spec §4.2): [columns] wells of [kind] from
@@ -95,14 +415,19 @@ internal class TvGridFocus {
  * - Scrolling keeps the focused row's top [contentTop] below the grid's
  *   top, so the next row always peeks in; focus in the [header] (a page's
  *   top) scrolls back to the start.
+ * - The grid moves itself ([GridMotion]): over 150 ms, eased out, for a
+ *   press; under a held Up or Down it glides a row per step, the tiles at
+ *   rest under one still ring (rule 5).
  * - It is one focus group that comes back to the tile it had; each tile
  *   is remembered in [memory] (as `"<memoryPrefix>/<id>"`), so Back from
  *   a title lands on it.
- * - While a key repeats, Up and Down move a row at a time without
- *   animating (rule 5).
- * - Right from the last column calls [onRight] (the jump control).
+ * - Up and Down keep the column, held too. Right from the last column
+ *   calls [onRight] (the jump control). A held Right stops there, and a
+ *   held Up at the first row: the jump, and the chips or a page's header
+ *   above, take a press of their own.
  * - Pictures load about a row ahead; [badge] puts a count on a tile's
  *   top right (collections).
+ * - [footer] adds cells after the [total] (a grid's Show more).
  */
 @Composable
 internal fun TvPosterGrid(
@@ -125,16 +450,21 @@ internal fun TvPosterGrid(
     header: (LazyGridScope.() -> Unit)? = null,
     badge: ((Int) -> String?)? = null,
     onRight: (() -> Boolean)? = null,
+    footer: (LazyGridScope.() -> Unit)? = null,
 ) {
     val density = LocalDensity.current
     val gate = LocalKeyRepeatGate.current
-    val focusManager = LocalFocusManager.current
     val scope = rememberCoroutineScope()
-    val spec = remember(density, contentTop, heroHeight, state) {
-        GridSpec(with(density) { contentTop.toPx() }, with(density) { heroHeight.toPx() }, state)
+    val motion = remember(state, gate) { GridMotion(state, gate, scope).apply { if (header != null) lead = -1 } }
+    motion.anchor = with(density) { contentTop.toPx() }
+    motion.columns = columns
+    motion.keyAt = keyAt
+    motion.total = total
+    motion.reduced = reducedMotion()
+    val spec = remember(density, contentTop, heroHeight, state, motion) {
+        CellSpec(GridSpec(with(density) { contentTop.toPx() }, with(density) { heroHeight.toPx() }, state), motion)
     }
-    val pitch = with(density) { (kind.tvHeight + PleyTv.TilesToCaption + PleyTv.CaptionHeight + RowGap).toPx() }
-    val images = remember(total, tileAt) { TvImages(total, tileAt) }
+    val images = remember(total, tileAt, motion) { TvImages(total, tileAt, motion::leadNow) }
     rememberImagePrefetcher(
         state = state,
         images = images,
@@ -142,38 +472,32 @@ internal fun TvPosterGrid(
         heightPx = with(density) { kind.tvHeight.roundToPx() },
         tier = LocalTvTier.current,
     )
-    CompositionLocalProvider(LocalBringIntoViewSpec provides spec) {
+    CompositionLocalProvider(LocalBringIntoViewSpec provides spec, LocalTileQuiet provides motion.quiet, LocalGridMotion provides motion) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(columns),
             state = state,
             modifier = modifier
                 .testTag(TestTags.LIBRARY_GRID)
-                .focusRestorer()
+                .comeBackTo(focus)
+                .heldKeyStaysIn(HeldEnds.All)
                 .focusGroup()
+                .onPlaced { motion.coordinates = it }
                 .onPreviewKeyEvent { event ->
                     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                    val from = focus.focused
+                    val from = motion.inCell
                     if (from < 0) return@onPreviewKeyEvent false
+                    // The gate's held moves are repeats; a press is the key's first down.
+                    val pressed = event.nativeKeyEvent.repeatCount == 0
                     when (event.key) {
-                        Key.DirectionRight -> {
-                            val last = from % columns == columns - 1 || from == total - 1
-                            last && onRight?.invoke() == true
-                        }
-                        Key.DirectionUp, Key.DirectionDown -> {
-                            if (!gate.holding) return@onPreviewKeyEvent false
-                            val down = event.key == Key.DirectionDown
-                            val target = from + if (down) columns else -columns
-                            if (target !in 0 until total) return@onPreviewKeyEvent false
-                            scope.launch {
-                                state.scrollBy(if (down) pitch else -pitch)
-                                withFrameNanos { }
-                                focusManager.moveFocus(if (down) FocusDirection.Down else FocusDirection.Up)
-                            }
-                            true
-                        }
+                        // A held key stays in the grid (rule 5): the A to Z jump and what is above take a press of their own.
+                        Key.DirectionRight -> (from % columns == columns - 1 || from == total - 1) && (gate.holding || onRight?.invoke() == true)
+                        Key.DirectionUp -> if (from < columns) gate.holding else motion.column(from, from - columns, focus, pressed)
+                        // Held, no cell below in the column (the last row, or a short one below): it stays.
+                        Key.DirectionDown -> if (from + columns >= total) gate.holding else motion.column(from, from + columns, focus, pressed)
                         else -> false
                     }
-                },
+                }
+                .drawWithCache { motion.drawRing(this, kind) },
             contentPadding = PaddingValues(
                 start = PleyTv.Gutter,
                 end = PleyTv.CanvasWidth - PleyTv.Gutter - (kind.tvWidth + PleyTv.TileGap) * columns + PleyTv.TileGap,
@@ -188,11 +512,6 @@ internal fun TvPosterGrid(
             // frame turns from a skeleton into the tile, so a focused cell keeps
             // its focus (and the grid its scroll anchor) when its page arrives.
             items(count = total, key = keyAt, contentType = { kind }) { position ->
-                val requester = remember { FocusRequester() }
-                DisposableEffect(position, requester) {
-                    focus.cells[position] = requester
-                    onDispose { if (focus.cells[position] === requester) focus.cells.remove(position) }
-                }
                 val tile = tileAt(position)
                 GridCell(
                     tile = tile,
@@ -201,12 +520,38 @@ internal fun TvPosterGrid(
                     badge = if (tile != null) badge?.invoke(position) else null,
                     onClick = { if (tile != null) onOpen(position, tile) },
                     onLongClick = if (tile != null) onActions?.let { { it(tile) } } else null,
-                    modifier = Modifier.onFocusChanged { if (it.hasFocus) focus.focused = position },
+                    modifier = Modifier.onFocusChanged {
+                        if (it.hasFocus) {
+                            focus.focused = position
+                            motion.focused(position, focus.slots.coordinates(position))
+                        } else {
+                            motion.lost(position)
+                        }
+                    },
                     focusModifier = Modifier
-                        .focusRequester(requester)
+                        .focusSlot(focus.slots, position)
                         .rememberedFocus(memory, "$memoryPrefix/${tile?.id ?: "cell$position"}", initial = initialFocus && position == 0),
                 )
             }
+            footer?.invoke(this)
+        }
+    }
+}
+
+/**
+ * Focus coming into the grid (from the chips, Back from a tile's actions or
+ * a title, Right from the rail) lands on the cell it had, by position, as
+ * the Samsung app's grid comes back to its last child. A focusRestorer
+ * goes by the cell's composition, under the lazy grid's own focus group,
+ * and landed on the first cell composed: the first tile, or one in the
+ * row above the screen.
+ */
+private fun Modifier.comeBackTo(focus: TvGridFocus): Modifier = focusProperties {
+    onEnter = {
+        val at = focus.focused
+        if (at >= 0 && focus.slots.has(at)) {
+            cancelFocusChange()
+            focus.focus(at)
         }
     }
 }
@@ -251,28 +596,36 @@ private fun GridCell(
     ) {
         if (tile == null) {
             Box(Modifier.tvTileSize(kind).skeleton(skeleton, TileStyle.Tv.shape(kind)))
+        } else if (badge == null) {
+            // No box around the tile without a count: one node less in each cell a held key brings in.
+            ArtworkTile(tile, kind, TileStyle.Tv, Modifier.tvTileSize(kind))
         } else {
             Box(Modifier.tvTileSize(kind)) {
                 ArtworkTile(tile, kind, TileStyle.Tv, Modifier.tvTileSize(kind))
-                if (badge != null) {
-                    QualityBadge(
-                        badge,
-                        TileStyle.Tv,
-                        onArt = true,
-                        modifier = Modifier.align(Alignment.TopEnd).padding(TileStyle.Tv.inset).clearAndSetSemantics { },
-                    )
-                }
+                QualityBadge(
+                    badge,
+                    TileStyle.Tv,
+                    onArt = true,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(TileStyle.Tv.inset).clearAndSetSemantics { },
+                )
             }
         }
     }
 }
 
-/** A grid's pictures by position, for the prefetcher. */
-private class TvImages(private val total: Int, private val tileAt: (Int) -> ArtworkTileModel?) : AbstractList<ArtworkImage?>() {
-    override val size: Int get() = total
+/**
+ * A grid's pictures by the lazy grid's index, for the prefetcher: a
+ * header's items ([lead] of them) come before the cells, and have none.
+ */
+private class TvImages(private val total: Int, private val tileAt: (Int) -> ArtworkTileModel?, private val lead: () -> Int) :
+    AbstractList<ArtworkImage?>() {
+    override val size: Int get() = lead() + total
 
-    override fun get(index: Int): ArtworkImage? = tileAt(index)?.image
+    override fun get(index: Int): ArtworkImage? = (index - lead()).takeIf { it >= 0 }?.let(tileAt)?.image
 }
+
+/** The most items a grid's header has before its cells. */
+private const val MAX_LEAD = 4
 
 /**
  * Keeps the focused row's top [anchor] from the grid's top; while focus

@@ -66,7 +66,8 @@ data class ChannelDigits(val typed: String = "", val notFound: String? = null)
  * at a time for the channel list, which can show another category's (a
  * channel tuned from there makes channel up and down go through that one,
  * as the web's does); watched as it airs, without pausing or going back; a
- * favourite. The channel and its category are kept with the screen's saved
+ * favourite; the profile's remote changes channel as channel up and down
+ * do. The channel and its category are kept with the screen's saved
  * state, and the channel for the profile too: the guide opens back at it.
  * The playback ends with the ViewModel.
  */
@@ -76,15 +77,18 @@ class LivePlayerViewModel(
     private val saved: SavedStateHandle,
     channelId: Long,
     categoryKey: String,
+    /** What the page that opened the player knew of [channelId] ([ChannelHandoff]): shown at once. */
+    seen: LiveChannel? = ChannelHandoff.take(channelId),
 ) : ViewModel() {
-    private val playback = deps.playback(viewModelScope)
+    // The remote's next and previous are channel up and down, as here.
+    private val playback = deps.playback(viewModelScope).also { it.zap = { by -> step(by) } }
     private val mutableDigits = MutableStateFlow(ChannelDigits())
     private var digitsJob: Job? = null
     private var zapping: Job? = null
     private val current = MutableStateFlow(saved[CHANNEL] ?: channelId)
 
     /** What the lists knew of channels tuned from them: shown at once, before the server's own answer. */
-    private val known = HashMap<Long, LiveChannel>()
+    private val known = HashMap<Long, LiveChannel>().apply { if (seen != null) put(seen.id, seen) }
 
     /** Recently watched's order as the player opened: watching changes it, zapping through it shouldn't. */
     private var recentOrder: List<LiveChannel>? = null
@@ -135,7 +139,7 @@ class LivePlayerViewModel(
     /** A channel number being typed. */
     val digits: StateFlow<ChannelDigits> = mutableDigits.asStateFlow()
 
-    private val panel = ChannelPaging(deps.live, listed, mutableListQuery, viewModelScope)
+    private val panel = ChannelPaging(deps.live, listed, mutableListQuery, viewModelScope, deps.clock)
 
     /** [listed]'s channels for the channel list (those its search finds), as far as they are loaded. */
     val list: StateFlow<ChannelPages> = panel.pages
@@ -313,7 +317,18 @@ class LivePlayerViewModel(
                 val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as Application
                 val deps = LivePlayerDeps(
                     live = graph.data.liveTv,
-                    playback = { scope -> LivePlayback.create(app, graph.data.liveTv, graph.player.engines, graph.device, scope) },
+                    playback = { scope ->
+                        LivePlayback.create(
+                            app,
+                            graph.data.liveTv,
+                            graph.player.engines,
+                            graph.device,
+                            scope,
+                            graph.data.liveUpdates.events,
+                            graph.data.liveUpdates::playing,
+                            graph.data.remote::here,
+                        ) { graph.caps.capabilities.snapshot.value }
+                    },
                     origin = graph.data.servers.active,
                     views = graph.data.liveTvViews,
                 )

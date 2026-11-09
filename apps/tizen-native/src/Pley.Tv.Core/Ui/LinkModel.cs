@@ -56,7 +56,11 @@ public abstract record LinkStatus
     public sealed record Failed(string Message) : LinkStatus;
 }
 
-public sealed record LinkState(string Server, LinkCode? Code = null, LinkStatus? Status = null)
+/// <param name="TwoStepRequired">
+/// The server requires two-step sign-in: the phone that approves the code sets it up for whoever
+/// hasn't. False until the server says so.
+/// </param>
+public sealed record LinkState(string Server, LinkCode? Code = null, LinkStatus? Status = null, bool TwoStepRequired = false)
 {
     public LinkStatus Shown => Status ?? new LinkStatus.Starting();
 
@@ -73,6 +77,19 @@ public interface ILinkSource
 
     /// <summary>Signed in: who the app is now, by name, once known (null after a few seconds without).</summary>
     Task<string?> SignedIn(string server);
+
+    /// <summary>
+    /// Whether <paramref name="server"/> requires two-step sign-in (GET /api/server), for the screen
+    /// to say so: false when it says nothing of it or can't be asked, and for a profile's approval.
+    /// </summary>
+    Task<bool> TwoStepRequired(string server);
+}
+
+/// <summary>What the link screen says that the model decides (the Android app's strings_tv_onboarding.xml).</summary>
+public static class LinkText
+{
+    /// <summary>Under the title, signing in, when the server requires two-step sign-in.</summary>
+    public static string TwoStepRequired => Strings.T("signin.link.twoStepRequired");
 }
 
 /// <summary>The link screen's source in the app: <see cref="AppState"/>'s sign-in, then its account.</summary>
@@ -104,6 +121,24 @@ public sealed class AppLinkSource : ILinkSource
         await Task.WhenAny(account, Task.Delay(LinkModel.NameWaitMs));
         return app.Me.Value?.Name;
     }
+
+    public async Task<bool> TwoStepRequired(string server)
+    {
+        // A profile's approval is about the household, not the server's sign-in.
+        if (profile != null) return false;
+        try
+        {
+            // On the UI thread: the server's language, in the same answer, may change the app's.
+            var info = await Servers.Probe(app.Http, server);
+            if (info != null) app.HeardServer(server, info.Language);
+            return info?.TwoStepRequired == true;
+        }
+        catch (Exception)
+        {
+            // Out of reach, or an odd answer: the screen says nothing of it.
+            return false;
+        }
+    }
 }
 
 /// <summary>
@@ -115,6 +150,9 @@ public sealed class AppLinkSource : ILinkSource
 /// is renewed silently up to three times, then waits for OK; network trouble counts down to the
 /// next try (2, 4, 8, 16, then 30 s). A code that expired while the screen was away is replaced at
 /// once. Once approved, "Signed in as &lt;name&gt;" shows for half a second, then Home.
+///
+/// Signing in, the server is asked once whether it requires two-step sign-in, for the screen to
+/// say so; the code never waits for the answer.
 /// </summary>
 public sealed class LinkModel
 {
@@ -139,9 +177,19 @@ public sealed class LinkModel
         this.source = source;
         this.scheduler = scheduler;
         State = new Signal<LinkState>(new LinkState(server));
+        Plays.When(scheduler, () => source.TwoStepRequired(server), required =>
+        {
+            if (required) Update(s => s with { TwoStepRequired = true });
+        }, _ => { });
     }
 
     public Signal<LinkState> State { get; }
+
+    /// <summary>
+    /// The code was approved: the app is signing in, and Home comes next. The screen isn't drawn
+    /// again meanwhile (another language), as that would ask about a code already spent.
+    /// </summary>
+    public bool Approved { get; private set; }
 
     /// <summary>Signed in, and the moment of saying so is over: Home.</summary>
     public event Action? Done;
@@ -279,6 +327,7 @@ public sealed class LinkModel
 
     async void SignedIn()
     {
+        Approved = true;
         job = null;
         string? name = null;
         try

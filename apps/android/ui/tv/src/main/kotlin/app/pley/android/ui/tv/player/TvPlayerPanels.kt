@@ -37,11 +37,10 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.onKeyEvent
-import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -55,10 +54,11 @@ import app.pley.android.designsystem.PleyType
 import app.pley.android.designsystem.TvSafeArea
 import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.designsystem.reducedMotion
+import app.pley.android.designsystem.text.shownLocale
 import app.pley.android.player.PlaybackController
 import app.pley.android.player.PlaybackSpeeds
-import app.pley.android.player.SubtitleSearchUi
 import app.pley.android.player.PlayerUiState
+import app.pley.android.player.SubtitleSearchUi
 import app.pley.android.player.engine.EngineState
 import app.pley.android.player.sleep.SleepChoice
 import app.pley.android.player.sleep.SleepState
@@ -71,16 +71,16 @@ import app.pley.android.ui.tv.item.PanelRow
 import app.pley.android.ui.tv.kit.focusRow
 import app.pley.android.ui.tv.settings.fontLabel
 import app.pley.android.ui.tv.settings.raiseLabel
+import java.util.Locale
 import kotlin.math.abs
 import kotlinx.coroutines.launch
-import java.util.Locale
 
 /**
  * The player's side panels (design spec §2.7): Subtitles (with Sync while
  * the subtitles chosen can move, Find subtitles… while the file streams
- * from the server, and their size, background, font and position when
- * [onSubtitleStyle] saves them), Find subtitles' results, Audio (with the
- * audio delay), Quality, Chapters, Sleep timer, Speed and Info. 360 dp (Info 440 dp) from the right edge, full height, surface2
+ * from the server, and their size, background, font and position while
+ * they are text, when [onSubtitleStyle] saves them), Find subtitles' results, Audio (with the
+ * audio delay), Quality, Sleep timer, Speed and Info. 360 dp (Info 440 dp) from the right edge, full height, surface2
  * with 16 dp left corners. It slides in on its own layer over 200 ms (in
  * place with reduced motion) and the scrim behind it fades by its colour
  * while drawing, so no layer covers the video. Focus starts on the current
@@ -143,7 +143,6 @@ private fun ChoicePanel(
             PlayerPanel.Subtitles -> R.string.tv_player_subtitles
             PlayerPanel.Audio -> R.string.tv_player_audio
             PlayerPanel.Quality -> R.string.tv_player_quality
-            PlayerPanel.Chapters -> R.string.tv_player_chapters
             PlayerPanel.Info -> R.string.tv_player_info_title
             PlayerPanel.Sleep -> R.string.tv_player_sleep
             PlayerPanel.Speed -> R.string.tv_player_speed
@@ -166,6 +165,7 @@ private fun ChoicePanel(
     val searching = stringResource(R.string.tv_player_searching)
     val adding = stringResource(R.string.tv_player_adding)
     val resources = LocalResources.current
+    val locale = shownLocale()
     // Each panel's own list: its current choice may be further down than shows.
     val list = remember(panel) { LazyListState() }
     LaunchedEffect(panel, ui.panel != null) {
@@ -216,7 +216,8 @@ private fun ChoicePanel(
                         )
                     }
                 }
-                if (onSubtitleStyle != null) subtitleStyle(captionLook, style, onSubtitleStyle)
+                // Pictures keep their own look, and subtitles off have none.
+                if (onSubtitleStyle != null && s.subtitleStyled) subtitleStyle(captionLook, style, onSubtitleStyle)
             }
             PlayerPanel.FindSubtitles -> when (val search = s.subtitleSearch) {
                 null, SubtitleSearchUi.Searching -> item(key = "searching") { PanelNote(searching, Modifier.focusRequester(focus).focusable()) }
@@ -232,7 +233,7 @@ private fun ChoicePanel(
             }
             PlayerPanel.Speed -> {
                 s.speedNote?.let { note -> item(key = "note") { PanelNote(note) } }
-                choices(PlaybackSpeeds.ALL.map { Row(PlaybackSpeeds.label(it), it == s.speed, null) }, focus) { i ->
+                choices(PlaybackSpeeds.ALL.map { Row(PlaybackSpeeds.label(it, locale), it == s.speed, null) }, focus) { i ->
                     controller.setSpeed(PlaybackSpeeds.ALL[i])
                     ui.closePanel()
                 }
@@ -267,16 +268,6 @@ private fun ChoicePanel(
                 }
                 choices(s.qualities.map { Row(it.label, it.selected, it.hint) }, focus) { i ->
                     controller.selectQuality(s.qualities[i].id)
-                    ui.closePanel()
-                }
-            }
-            PlayerPanel.Chapters -> {
-                val playing = TvPlayerText.chapterAt(s.chapters, s.positionMs)
-                choices(
-                    s.chapters.mapIndexed { i, c -> Row(c.title?.takeIf { it.isNotBlank() } ?: resources.getString(R.string.tv_player_chapter, i + 1), i == playing, TvPlayerText.time(c.startMs)) },
-                    focus,
-                ) { i ->
-                    controller.seekTo(s.chapters[i].startMs)
                     ui.closePanel()
                 }
             }
@@ -352,12 +343,10 @@ private data class PanelData(
     val subtitles: List<app.pley.android.player.TrackChoice>,
     val audio: List<app.pley.android.player.TrackChoice>,
     val qualities: List<app.pley.android.player.QualityChoice>,
-    val chapters: List<app.pley.android.player.ChapterMark>,
     val note: String?,
     val canPlayOriginal: Boolean,
-    /** To the chapter, so the chapters panel ticks the one playing. */
-    val positionMs: Long,
     val subtitleSync: Boolean,
+    val subtitleStyled: Boolean,
     val subtitleOffsetMs: Long,
     val sleep: SleepState,
     val speed: Float,
@@ -371,11 +360,10 @@ private data class PanelData(
             subtitles = s.subtitles,
             audio = s.audio,
             qualities = s.qualities,
-            chapters = s.chapters,
             note = s.note,
             canPlayOriginal = s.canPlayOriginal,
-            positionMs = TvPlayerText.chapterAt(s.chapters, s.positionMs)?.let { s.chapters[it].startMs } ?: 0,
             subtitleSync = s.subtitleSync,
+            subtitleStyled = s.subtitleStyled,
             subtitleOffsetMs = s.subtitleOffsetMs,
             sleep = s.sleep,
             speed = s.speed,

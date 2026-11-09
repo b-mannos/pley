@@ -93,25 +93,38 @@ public sealed record RowOptions(bool PreviousNext, bool Subtitles, bool Audio, b
 /// </summary>
 public static class PlayerPanels
 {
-    public const string SubtitleSize = "Subtitle size";
-    public const string SubtitleBackground = "Subtitle background";
-    public const string SubtitleFont = "Subtitle font";
-    public const string SubtitlePosition = "Subtitle position";
+    public static string SubtitleSize => Strings.T("player.look.size");
+    public static string SubtitleBackground => Strings.T("player.look.background");
+    public static string SubtitleFont => Strings.T("player.look.font");
+    public static string SubtitlePosition => Strings.T("player.look.position");
 
-    /// <summary>Settings' subtitle sizes' names, in <see cref="Settings.SubtitleSizes"/>' order.</summary>
-    public static readonly IReadOnlyList<string> SizeLabels = new[] { "Small", "Normal", "Large", "Huge" };
+    /// <summary>Settings' subtitle sizes' names, in <see cref="Settings.SubtitleSizes"/>' order, in the language shown.</summary>
+    public static IReadOnlyList<string> SizeLabels => new[]
+    {
+        Strings.T("player.look.sizes.small"),
+        Strings.T("player.look.sizes.normal"),
+        Strings.T("player.look.sizes.large"),
+        Strings.T("player.look.sizes.huge"),
+    };
 
-    /// <summary>Settings' positions' names, in <see cref="Settings.SubtitleRaises"/>' order.</summary>
-    public static readonly IReadOnlyList<string> PositionLabels = new[] { "Bottom", "Raised", "Higher", "Highest" };
+    /// <summary>Settings' positions' names, in <see cref="Settings.SubtitleRaises"/>' order, in the language shown.</summary>
+    public static IReadOnlyList<string> PositionLabels => new[]
+    {
+        Strings.T("player.look.positions.bottom"),
+        Strings.T("player.look.positions.raised"),
+        Strings.T("player.look.positions.higher"),
+        Strings.T("player.look.positions.highest"),
+    };
 
-    public static string BackgroundLabel(Core.SubtitleBackground background) => background == Core.SubtitleBackground.DarkBox ? "Dark box" : "None";
+    public static string BackgroundLabel(Core.SubtitleBackground background) =>
+        background == Core.SubtitleBackground.DarkBox ? Strings.T("player.look.backgrounds.darkBox") : Strings.T("player.look.backgrounds.none");
 
     public static string FontLabel(Core.SubtitleFont font) => font switch
     {
-        Core.SubtitleFont.Serif => "Serif",
-        Core.SubtitleFont.Monospace => "Monospace",
-        Core.SubtitleFont.Casual => "Casual",
-        _ => "Sans serif",
+        Core.SubtitleFont.Serif => Strings.T("player.look.fonts.serif"),
+        Core.SubtitleFont.Monospace => Strings.T("player.look.fonts.monospace"),
+        Core.SubtitleFont.Casual => Strings.T("player.look.fonts.casual"),
+        _ => Strings.T("player.look.fonts.sansSerif"),
     };
 
     /// <summary>The panel's title, as the control row's button names it.</summary>
@@ -150,7 +163,8 @@ public static class PlayerPanels
                 if (state.SubtitleSync)
                     rows.Add(new PlayerRow(PlayerRowKind.Step, PlayerText.Sync, Supporting: PlayerText.SyncHint, Value: Player.SubtitleSync.Label(state.SubtitleOffsetMs), Action: new PlayerRowAction.SubtitleSync()));
                 Choices(state.Subtitles.Select(t => new PlayerRow(PlayerRowKind.Choice, t.Label, t.Selected, Action: new PlayerRowAction.Subtitle(t.Index))));
-                if (state.Subtitles.Count > 0) Look(rows, settings, fonts);
+                // Pictures keep their own look, and subtitles off have none.
+                if (state.SubtitleStyled) Look(rows, settings, fonts);
                 break;
             case PlayerPanelKind.Audio:
                 Choices(state.Audio.Where(t => t.Index != null).Select(t => new PlayerRow(PlayerRowKind.Choice, t.Label, t.Selected, Action: new PlayerRowAction.Audio(t.Index!.Value))));
@@ -189,13 +203,14 @@ public static class PlayerPanels
         return new PlayerPanel(kind, Title(kind), rows, focus ?? 0);
     }
 
-    /// <summary>The subtitles' size, background, font and position under the tracks, as Settings has them (and saved there).</summary>
+    /// <summary>The subtitles' size, background, font and position under the tracks while they are text, as Settings has them (and saved there).</summary>
     static void Look(List<PlayerRow> rows, Settings settings, IReadOnlyList<Core.SubtitleFont>? fonts)
     {
         var sizes = Settings.SubtitleSizes;
         var size = Nearest(sizes, settings.SubtitleSize);
+        var sizeLabels = SizeLabels;
         rows.Add(new PlayerRow(PlayerRowKind.Heading, SubtitleSize));
-        rows.AddRange(sizes.Select((s, i) => new PlayerRow(PlayerRowKind.Choice, SizeLabels[i], i == size, Action: new PlayerRowAction.SubtitleSize(s))));
+        rows.AddRange(sizes.Select((s, i) => new PlayerRow(PlayerRowKind.Choice, sizeLabels[i], i == size, Action: new PlayerRowAction.SubtitleSize(s))));
         rows.Add(new PlayerRow(PlayerRowKind.Heading, SubtitleBackground));
         foreach (var background in new[] { Core.SubtitleBackground.None, Core.SubtitleBackground.DarkBox })
             rows.Add(new PlayerRow(PlayerRowKind.Choice, BackgroundLabel(background), settings.SubtitleBackground == background, Action: new PlayerRowAction.SubtitleBackground(background)));
@@ -204,8 +219,9 @@ public static class PlayerPanels
             rows.Add(new PlayerRow(PlayerRowKind.Choice, FontLabel(font), settings.SubtitleFont == font, Action: new PlayerRowAction.SubtitleFont(font)));
         var raises = Settings.SubtitleRaises;
         var raise = Nearest(raises, settings.SubtitleRaise);
+        var positionLabels = PositionLabels;
         rows.Add(new PlayerRow(PlayerRowKind.Heading, SubtitlePosition));
-        rows.AddRange(raises.Select((r, i) => new PlayerRow(PlayerRowKind.Choice, PositionLabels[i], i == raise, Action: new PlayerRowAction.SubtitleRaise(r))));
+        rows.AddRange(raises.Select((r, i) => new PlayerRow(PlayerRowKind.Choice, positionLabels[i], i == raise, Action: new PlayerRowAction.SubtitleRaise(r))));
     }
 
     static int Nearest(IReadOnlyList<float> values, float value)

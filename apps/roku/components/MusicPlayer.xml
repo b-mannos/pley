@@ -4,8 +4,10 @@
      being used, and reports where each got to. Now Playing shows it. -->
 <component name="MusicPlayer" extends="Group">
     <interface>
-        <!-- { queue: [tracks (lib/Music.brs)], at, shuffled }: plays queue
-             from at; shuffled, in a random order that starts there. -->
+        <!-- { queue: [tracks (lib/Music.brs)], at, shuffled, fromMs }:
+             plays queue from at (fromMs into it, a place a cast sent; 0
+             when left out); shuffled, in a random order that starts
+             there. -->
         <field id="play" type="assocarray" alwaysNotify="true" />
         <!-- "toggle", "pause", "resume", "next", "previous", "shuffle",
              "unshuffle", "stop", or "sleep": the sleep timer's button
@@ -13,6 +15,8 @@
         <field id="control" type="string" alwaysNotify="true" />
         <!-- Plays the track at this place in the queue. -->
         <field id="jump" type="integer" alwaysNotify="true" />
+        <!-- Goes to this place (ms) in the track playing. -->
+        <field id="seek" type="integer" alwaysNotify="true" />
         <!-- "stopped", "loading", "playing", "paused". -->
         <field id="state" type="string" value="stopped" />
         <!-- The queue: its tracks in the order they play, and a number
@@ -29,17 +33,28 @@
         <field id="durationMs" type="integer" />
         <!-- What went wrong with the track before, or "". -->
         <field id="message" type="string" />
+        <!-- Its session stopped from another device or by the server's
+             administrator, as the event stream tells it ({ session_id,
+             message, by_admin }); and what the music then says of it
+             (Player.brs's playerStoppedMessage), "" until then. -->
+        <field id="serverStopped" type="assocarray" alwaysNotify="true" />
+        <field id="stoppedBy" type="string" />
+        <!-- A command of the user's remote, on another device ({
+             session_id, command, position_ms, offset_ms }). -->
+        <field id="playerCommand" type="assocarray" alwaysNotify="true" />
         <!-- The sleep timer: { button (what its button says), secondsLeft
              (its last 30 s counting down; -1 otherwise) }. -->
         <field id="sleep" type="assocarray" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/MusicPlayer.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/I18n.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Nav.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Format.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Player.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Remote.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Content.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Music.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Sleep.brs" />

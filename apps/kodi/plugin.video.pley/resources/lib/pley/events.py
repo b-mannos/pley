@@ -1,12 +1,14 @@
 """The server's event stream (docs/API.md, Activity & events), which the
 service holds open: what the person's other devices change shows here too,
-and a stream stopped from elsewhere stops at once."""
+a stream stopped from elsewhere stops at once, and what their remote sends
+this Kodi plays (casting.py)."""
 
 from __future__ import annotations
 
 import json
 import threading
 import time
+import urllib.parse
 
 from . import api, auth, kodi
 from .proxy import hard_close
@@ -51,13 +53,16 @@ def events_of(lines):
 class Events:
     """`GET /api/events` of the server signed in to, held open by a thread
     of its own, which calls `heard(event)` for each event, and `opened()`
-    each time the stream opens (nothing it missed is replayed)."""
+    each time the stream opens (nothing it missed is replayed).
+    `query(server, token)` gives the stream's query, asked afresh each time
+    it opens: what makes this Kodi a receiver of the user's casts."""
 
-    def __init__(self, tokens: auth.Tokens, user_agent: str, heard, retry=RETRY, read_timeout=READ_TIMEOUT, opened=None):
+    def __init__(self, tokens: auth.Tokens, user_agent: str, heard, retry=RETRY, read_timeout=READ_TIMEOUT, opened=None, query=None):
         self.tokens = tokens
         self.user_agent = user_agent
         self.heard = heard
         self.opened = opened
+        self.query = query
         self.retry = retry
         self.read_timeout = read_timeout
         self.stopping = threading.Event()
@@ -82,17 +87,20 @@ class Events:
     def run(self) -> None:
         tries = 0
         while not self.stopping.is_set():
-            server = self.tokens.server()
-            if not server:
+            if not self.tokens.server():
                 # Signed out: the plugin may sign in again.
                 self.stopping.wait(5)
                 continue
             began = time.monotonic()
             try:
-                self.listen(server)
+                self.listen()
             except auth.SignedOut:
+                # Signed out, or in to another server: listened to next.
                 continue
             except Exception as e:  # noqa: BLE001 - whatever broke it, it is tried again
+                if isinstance(e, OSError) or (isinstance(e, api.ApiError) and e.status == 0):
+                    # Nothing answered: the server proves itself again before the next token.
+                    self.tokens.doubt()
                 if tries == 0 and not self.stopping.is_set():
                     kodi.log("event stream: %s" % e)
             if time.monotonic() - began >= HELD:
@@ -100,13 +108,15 @@ class Events:
             self.stopping.wait(self.retry[min(tries, len(self.retry) - 1)])
             tries += 1
 
-    def listen(self, server: str) -> None:
+    def listen(self) -> None:
         """One connection, until the stream ends (the token expired, the
         server stopped) or another sign-in, server or profile takes over:
         then its next line (the server's comment every 15 seconds at the
         latest) ends it, unread."""
         who = self.tokens.identity()
-        token = self.tokens.access()
+        server, token = self.tokens.session()
+        asked = self.query(server, token) if self.query is not None else None
+        path = "/api/events" + ("?" + urllib.parse.urlencode(asked, safe=",") if asked else "")
         for attempt in range(2):
             conn = api.connect(server, self.read_timeout)
             try:
@@ -119,10 +129,10 @@ class Events:
                     "Accept": "text/event-stream",
                     "Authorization": "Bearer " + token,
                 }
-                conn.request("GET", "/api/events", headers=headers)
+                conn.request("GET", path, headers=headers)
                 answer = conn.getresponse()
                 if answer.status == 401 and not attempt:
-                    token = self.tokens.refreshed(token)
+                    token = self.tokens.refreshed(token, server)
                     continue
                 if answer.status != 200:
                     raise api.ApiError(answer.status, "events", "the server answered %d" % answer.status)

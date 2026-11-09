@@ -53,7 +53,8 @@ All in `.env`; [.env.example](.env.example) explains each one.
 | `PLEY_RENDER_GID` | | Intel / AMD: the GPU render node's group |
 | `PLEY_RENDER_DEVICE` | `/dev/dri/renderD128` | Intel / AMD: which GPU |
 | `PLEY_PROXY_NETWORK` | `proxy` | `compose.proxy.yaml`: the proxy's Docker network |
-| `PLEY_PLEX_LISTEN` | `127.0.0.1:32400` | `compose.plex.yaml`: where the compatibility API is published |
+| `PLEY_PLEX_LISTEN` | `127.0.0.1:32400` | `compose.plex.yaml`: where the Plex-compatible API is published |
+| `PLEY_JELLYFIN_LISTEN` | `127.0.0.1:8096` | `compose.jellyfin.yaml`: where the Jellyfin-compatible API is published |
 | `PLEY_IMAGE` | `pley:local` | The image; a release is `ghcr.io/pley-media-server/pley:<version>` |
 | `PLEY_PULL_POLICY` | `build` | `build` from this checkout, or `missing` for a release |
 | `PLEY_SHM_SIZE` | `2gb` | `/dev/shm`, for transcoding in memory |
@@ -61,14 +62,15 @@ All in `.env`; [.env.example](.env.example) explains each one.
 
 **Add-ons** are compose files listed in `COMPOSE_FILE`, separated by `:`
 (`;` on Windows), for example
-`COMPOSE_FILE=compose.yaml:compose.vaapi.yaml:compose.plex.yaml`:
+`COMPOSE_FILE=compose.yaml:compose.vaapi.yaml:compose.jellyfin.yaml`:
 
 | File | What |
 |---|---|
 | `compose.vaapi.yaml` | Intel or AMD hardware transcoding |
 | `compose.nvidia.yaml` | NVIDIA hardware transcoding |
 | `compose.proxy.yaml` | A reverse proxy in Docker: no published port |
-| `compose.plex.yaml` | The [compatibility API](../../docs/COMPATIBILITY.md) on port 32400 (it answers on Pley's port anyway) |
+| `compose.plex.yaml` | The [Plex-compatible API](../../docs/COMPATIBILITY.md) on port 32400 (without it, it answers on Pley's port) |
+| `compose.jellyfin.yaml` | The [Jellyfin-compatible API](../../docs/COMPATIBILITY.md) on port 8096 (without it, Settings → Network can turn it on, on Pley's port) |
 
 Your own changes go in `compose.override.yaml` next to `compose.yaml` (git
 ignores it). Compose reads it by itself unless `COMPOSE_FILE` is set; then
@@ -179,7 +181,10 @@ docker run -d --name pley -p 7539:7539 --shm-size 2g \
   ghcr.io/pley-media-server/pley:latest
 ```
 
-For NVIDIA, use `--gpus all` instead of `--device /dev/dri`.
+For NVIDIA, use `--gpus all` instead of `--device /dev/dri`. For the
+Plex-compatible API on Plex's port, add
+`-p 32400:32400 -e PLEY_PLEX_BIND=0.0.0.0:32400`; it answers on Pley's port
+without them.
 
 ## Security
 
@@ -187,8 +192,12 @@ The container starts locked down; nothing here needs changing for Pley to
 work.
 
 - **One port, on this computer only** (`127.0.0.1`), so the reverse proxy,
-  with its HTTPS and access rules, is the only way in. Network discovery is
-  off, and the transcoder listens inside the container only.
+  with its HTTPS and access rules, is the only way in. Network discovery
+  (the apps' broadcast and Bonjour) is off, since neither reaches a
+  container on Docker's own network; with host networking, remove
+  `PLEY_NO_DISCOVERY`, and turn Bonjour on in Settings → Network for
+  Apple's devices. The transcoder listens inside the
+  container only.
 - **Not root, no privileges.** Pley runs as your user, with every Linux
   capability dropped and `no-new-privileges`; the image has no setuid
   programs.

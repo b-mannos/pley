@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError } from "../../src/api/client";
-import type { LiveChannel, LiveWatching } from "../../src/api/types";
-import { holders, LiveController, type LiveServer } from "../../src/live/session";
+import { ApiError, SessionStoppedError } from "../../src/api/client";
+import type { Control, LiveChannel, LiveWatching, ServerEvent } from "../../src/api/types";
+import { holders, LiveController, troubleOf, type LiveServer } from "../../src/live/session";
 import type { EngineListener, EngineSource, PlayerEngine } from "../../src/player/engine";
 
 function channel(id: number): LiveChannel {
@@ -71,12 +71,17 @@ class FakeEngine implements PlayerEngine {
 /** The server: each watch answered by `answer` (a session and a keyed address unless it says otherwise). */
 function fakeServer(answer?: (id: number, n: number) => Promise<LiveWatching>) {
   const asked: string[] = [];
-  /** Why the server says a session ended, by session. */
+  /** Why the server says a session ended, by session ("" when it gave no words). */
   const ended: Record<string, string> = {};
+  /** Sessions whose playlist answers `410`. */
+  const gone = new Set<string>();
+  /** The remote's commands each watch said the player obeys. */
+  const declared: (Control[] | undefined)[] = [];
   let n = 0;
   const server: LiveServer = {
-    watchChannel: (id, client, _cancel, takeOver) => {
+    watchChannel: (id, client, _cancel, takeOver, controls) => {
       asked.push(`watch ${id} ${client}${takeOver !== undefined ? ` taking ${takeOver}` : ""}`);
+      declared.push(controls);
       n++;
       return answer ? answer(id, n) : Promise.resolve({ session_id: `s${n}`, url: `/api/live/media/pley_mk_${n}/index.m3u8`, kind: "hls", channel: channel(id) });
     },
@@ -86,20 +91,44 @@ function fakeServer(answer?: (id: number, n: number) => Promise<LiveWatching>) {
     },
     media: (method, url) => {
       asked.push(`${method} ${url.replace("http://tv.test", "")}`);
+      const session = /pley_mk_(\d+)/.exec(url)?.[1];
+      // A keyed address only says the session has gone, not why.
+      if (session && gone.has(`s${session}`)) return Promise.reject(new ApiError(410, "gone", "the server refused (HTTP 410)"));
       return Promise.resolve("#EXTM3U");
     },
     whyLiveEnded: (session) => Promise.resolve(ended[session] ?? null),
     url: (path) => `http://tv.test${path}`,
   };
-  return { server, asked, ended };
+  return { server, asked, ended, gone, declared };
 }
 
-function setup(answer?: (id: number, n: number) => Promise<LiveWatching>) {
-  const engine = new FakeEngine();
-  const { server, asked, ended } = fakeServer(answer);
-  const c = new LiveController(channel(1), { server, engine: () => engine, clientId: "webos-tv" });
-  return { c, engine, asked, ended };
+/** The server's event stream: who listens, and the server's sending. */
+function fakeEvents() {
+  const listeners: ((e: ServerEvent) => void)[] = [];
+  const events = (l: (e: ServerEvent) => void) => {
+    listeners.push(l);
+    return () => {
+      listeners.splice(listeners.indexOf(l), 1);
+    };
+  };
+  const send = (e: ServerEvent) => listeners.slice().forEach((l) => l(e));
+  return { events, send, listeners };
 }
+
+function setup(answer?: (id: number, n: number) => Promise<LiveWatching>, step?: (by: 1 | -1) => void) {
+  const engine = new FakeEngine();
+  const { server, asked, ended, gone, declared } = fakeServer(answer);
+  const { events, send, listeners } = fakeEvents();
+  const c = new LiveController(channel(1), { server, engine: () => engine, clientId: "tizen-tv", events, step });
+  return { c, engine, asked, ended, gone, declared, send, listeners };
+}
+
+/** What the server sends each viewer of channel `id` that another's watch ended. */
+function takenOver(id: number, session: string, message: string | null): ServerEvent {
+  return { type: "live_taken_over", session_id: session, channel_id: id, message };
+}
+
+const watches = (asked: string[]) => asked.filter((a) => a.indexOf("watch") === 0);
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -115,7 +144,7 @@ describe("a live channel on the TV's player", () => {
     const { c, engine, asked } = setup();
     c.tune(channel(1));
     await vi.advanceTimersByTimeAsync(0);
-    expect(asked).toEqual(["watch 1 webos-tv", "GET /api/live/media/pley_mk_1/index.m3u8"]);
+    expect(asked).toEqual(["watch 1 tizen-tv", "GET /api/live/media/pley_mk_1/index.m3u8"]);
     expect(engine.sources[0]).toMatchObject({ url: "http://tv.test/api/live/media/pley_mk_1/index.m3u8", hls: true, live: true, startMs: 0 });
     expect(c.state.value.phase).toBe("tuning");
     engine.listener!.firstFrame();
@@ -129,7 +158,7 @@ describe("a live channel on the TV's player", () => {
     engine.listener!.firstFrame();
     c.tune(channel(2));
     await vi.advanceTimersByTimeAsync(0);
-    expect(asked.slice(2)).toEqual(["leave s1", "watch 2 webos-tv", "GET /api/live/media/pley_mk_2/index.m3u8"]);
+    expect(asked.slice(2)).toEqual(["leave s1", "watch 2 tizen-tv", "GET /api/live/media/pley_mk_2/index.m3u8"]);
     expect(engine.calls).toContain("stop");
     expect(c.state.value).toMatchObject({ phase: "tuning", shown: false, tunes: 2 });
     expect(c.state.value.channel.id).toBe(2);
@@ -169,7 +198,7 @@ describe("a live channel on the TV's player", () => {
     expect(c.state.value.trouble?.connections?.map(holders)).toEqual(["You, on another device", "ana, bo"]);
     c.takeOver(7);
     await vi.advanceTimersByTimeAsync(0);
-    expect(asked.filter((a) => a.indexOf("watch") === 0)).toEqual(["watch 1 webos-tv", "watch 1 webos-tv taking 7"]);
+    expect(asked.filter((a) => a.indexOf("watch") === 0)).toEqual(["watch 1 tizen-tv", "watch 1 tizen-tv taking 7"]);
     expect(c.state.value.phase).toBe("tuning");
   });
 
@@ -205,7 +234,7 @@ describe("a live channel on the TV's player", () => {
     await vi.advanceTimersByTimeAsync(0);
     engine.listener!.error({ kind: "stopped", message: "Stopped by the administrator." });
     await vi.advanceTimersByTimeAsync(0);
-    expect(c.state.value.trouble).toMatchObject({ kind: "stopped", message: "Stopped by the administrator." });
+    expect(c.state.value.trouble).toMatchObject({ kind: "stopped", title: "Live TV stopped", message: "Stopped by the administrator." });
   });
 
   it("says who took the connection over, as the server tells it, rather than watching again", async () => {
@@ -213,15 +242,196 @@ describe("a live channel on the TV's player", () => {
     c.tune(channel(1));
     await vi.advanceTimersByTimeAsync(0);
     engine.listener!.firstFrame();
-    ended.s1 = "ana started watching Films on this connection.";
+    ended.s1 = "Sam is watching Films now, on the connection this channel used.";
     engine.listener!.error({ kind: "network", detail: "the playlist went" });
     await vi.advanceTimersByTimeAsync(5_000);
-    expect(c.state.value.trouble).toMatchObject({ kind: "stopped", title: "Watching stopped", message: "ana started watching Films on this connection." });
-    expect(asked.filter((a) => a.indexOf("watch") === 0)).toHaveLength(1);
+    expect(c.state.value.trouble).toMatchObject({ kind: "stopped", title: "Live TV stopped", message: "Sam is watching Films now, on the connection this channel used." });
+    expect(watches(asked)).toHaveLength(1);
     // Its session is gone already: nothing to leave.
     expect(asked).not.toContain("leave s1");
   });
 
+  it("says the channel isn't being watched any more when the server ended it without words", async () => {
+    const { c, engine, ended } = setup();
+    c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    engine.listener!.firstFrame();
+    ended.s1 = "";
+    engine.listener!.error({ kind: "network", detail: "the playlist went" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(c.state.value.trouble).toMatchObject({ kind: "stopped", title: "Live TV stopped", message: "This channel isn't being watched any more.", canRetry: true });
+    // A `410` the playlist answered with no words says the same.
+    expect(troubleOf(new SessionStoppedError(null), "Ch 1").message).toBe("This channel isn't being watched any more.");
+    expect(troubleOf(new SessionStoppedError("Watching moved to Films on another device."), "Ch 1").message).toBe("Watching moved to Films on another device.");
+  });
+
+  it("asks why when the playlist has gone before it plays: the keyed address doesn't say", async () => {
+    const { c, engine, asked, ended, gone } = setup();
+    gone.add("s1");
+    ended.s1 = "Someone else needed this channel's connection to watch another channel.";
+    c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(c.state.value.trouble).toMatchObject({ kind: "stopped", message: "Someone else needed this channel's connection to watch another channel." });
+    expect(engine.sources).toHaveLength(0);
+    expect(asked).not.toContain("leave s1");
+  });
+});
+
+describe("a live channel taken over by another viewer", () => {
+  it("stops at once on the server's event, says its words, and doesn't watch again by itself", async () => {
+    const { c, engine, asked, send } = setup();
+    c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    engine.listener!.firstFrame();
+    send(takenOver(1, "s1", "Sam is watching Two now, on the connection this channel used."));
+    expect(c.state.value.phase).toBe("error");
+    expect(c.state.value.trouble).toEqual({ kind: "stopped", title: "Live TV stopped", message: "Sam is watching Two now, on the connection this channel used.", canRetry: true });
+    expect(engine.calls[engine.calls.length - 1]).toBe("stop");
+    // The stream breaking off after changes nothing: no retry, no other words.
+    engine.listener!.error({ kind: "network", detail: "the stream ended" });
+    engine.listener!.status("ended");
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(watches(asked)).toHaveLength(1);
+    expect(c.state.value.trouble?.message).toBe("Sam is watching Two now, on the connection this channel used.");
+    // Its session is gone on the server: nothing to leave.
+    expect(asked).not.toContain("leave s1");
+  });
+
+  it("matches the channel, not the session: a stream's reader doesn't know its own", async () => {
+    const { c, engine, send } = setup();
+    c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    engine.listener!.firstFrame();
+    send(takenOver(1, "a session of another device", "Watching moved to Two on another device."));
+    expect(c.state.value.trouble).toMatchObject({ kind: "stopped", message: "Watching moved to Two on another device." });
+  });
+
+  it("leaves another channel's take-over alone", async () => {
+    const { c, engine, asked, send } = setup();
+    c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    engine.listener!.firstFrame();
+    send(takenOver(2, "s9", "Sam is watching Two now, on the connection this channel used."));
+    expect(c.state.value.phase).toBe("playing");
+    expect(c.state.value.trouble).toBeNull();
+    expect(asked).toHaveLength(2);
+  });
+
+  it("shows one alert however many of the channel's viewers the server ended", async () => {
+    const { c, engine, asked, send } = setup();
+    c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    engine.listener!.firstFrame();
+    send(takenOver(1, "s1", "Sam is watching Two now, on the connection this channel used."));
+    const shown = c.state.value;
+    send(takenOver(1, "a stream's reader", "Sam is watching Two now, on the connection this channel used."));
+    expect(c.state.value).toBe(shown);
+    expect(engine.calls.filter((call) => call === "stop")).toHaveLength(1);
+    expect(watches(asked)).toHaveLength(1);
+  });
+
+  it("takes the event's words over a 410 that came first without any", async () => {
+    const { c, engine, ended, send } = setup();
+    c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    engine.listener!.firstFrame();
+    ended.s1 = "";
+    engine.listener!.error({ kind: "network", detail: "the playlist went" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(c.state.value.trouble?.message).toBe("This channel isn't being watched any more.");
+    send(takenOver(1, "s1", "Watching moved to Two on another device."));
+    expect(c.state.value.trouble).toMatchObject({ kind: "stopped", message: "Watching moved to Two on another device." });
+  });
+
+  it("keeps the words of a stop that came first when a take-over's event comes after", async () => {
+    const { c, engine, ended, send } = setup();
+    c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    engine.listener!.firstFrame();
+    ended.s1 = "The channel was stopped.";
+    engine.listener!.error({ kind: "network", detail: "the playlist went" });
+    await vi.advanceTimersByTimeAsync(0);
+    const shown = c.state.value;
+    expect(shown.trouble).toMatchObject({ kind: "stopped", message: "The channel was stopped." });
+    // Later, the same account's phone watches the channel and is taken over.
+    send(takenOver(1, "s7", "Watching moved to Two on another device."));
+    expect(c.state.value).toBe(shown);
+  });
+
+  it("keeps its card when the TV hides the app and shows it again, watching nothing until Watch again", async () => {
+    const { c, engine, asked, send } = setup();
+    c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    engine.listener!.firstFrame();
+    send(takenOver(1, "s1", "Watching moved to Two on another device."));
+    const shown = c.state.value;
+    c.suspend();
+    c.resume();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(c.state.value).toBe(shown);
+    expect(watches(asked)).toHaveLength(1);
+    c.retry();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(watches(asked)).toHaveLength(2);
+  });
+
+  it("isn't watched again when the event comes in the second before a failure's retry", async () => {
+    const { c, engine, asked, send } = setup();
+    c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    engine.listener!.firstFrame();
+    // The stream broke off first; the server didn't say yet that watching ended.
+    engine.listener!.error({ kind: "network", detail: "the stream ended" });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(watches(asked)).toHaveLength(1);
+    send(takenOver(1, "s1", "Someone else needed this channel's connection to watch another channel."));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(watches(asked)).toHaveLength(1);
+    expect(c.state.value.trouble).toMatchObject({ kind: "stopped", message: "Someone else needed this channel's connection to watch another channel." });
+  });
+
+  it("stops a channel still tuning, whose watch the take-over ended", async () => {
+    let answer: ((w: LiveWatching) => void) | null = null;
+    const { c, engine, asked, send } = setup(() => new Promise((resolve) => (answer = resolve)));
+    c.tune(channel(1));
+    send(takenOver(1, "s1", "Watching moved to Two on another device."));
+    expect(c.state.value.trouble).toMatchObject({ kind: "stopped" });
+    answer!({ session_id: "late", url: "/api/live/media/pley_mk_late/index.m3u8", kind: "hls", channel: channel(1) });
+    await vi.advanceTimersByTimeAsync(0);
+    // The watch that answers after is let go, never played.
+    expect(engine.sources).toHaveLength(0);
+    expect(asked).toEqual(["watch 1 tizen-tv", "leave late"]);
+  });
+
+  it("watches again only when asked, as any watch: never taking a connection over by itself", async () => {
+    const connections = [{ channel_id: 2, channel_name: "Two", watchers: ["sam"], people: 1, yours: false, can_take_over: false }];
+    const { c, engine, asked, send } = setup((id, n) =>
+      n === 1
+        ? Promise.resolve({ session_id: "s1", url: "/api/live/media/pley_mk_1/index.m3u8", kind: "hls", channel: channel(id) })
+        : Promise.reject(new ApiError(409, "conflict", "Provider allows one connection at once, and it is in use: watching Two.", { code: "conflict", message: "", connections })),
+    );
+    c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    engine.listener!.firstFrame();
+    send(takenOver(1, "s1", "Sam is watching Two now, on the connection this channel used."));
+    c.retry();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(watches(asked)).toEqual(["watch 1 tizen-tv", "watch 1 tizen-tv"]);
+    expect(c.state.value.trouble).toMatchObject({ kind: "busy", connections });
+  });
+
+  it("stops listening when the player closes", async () => {
+    const { c, listeners } = setup();
+    c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(listeners).toHaveLength(1);
+    c.close();
+    expect(listeners).toHaveLength(0);
+  });
+
+});
+
+describe("a live channel that stalls or fails", () => {
   it("asks the server why a stall lasts, the TV's player saying nothing of a playlist gone", async () => {
     const { c, engine, asked, ended } = setup();
     c.tune(channel(1));
@@ -288,7 +498,7 @@ describe("a live channel on the TV's player", () => {
     expect(asked[asked.length - 1]).toBe("leave s1");
     c.resume();
     await vi.advanceTimersByTimeAsync(0);
-    expect(asked.slice(-2)).toEqual(["watch 1 webos-tv", "GET /api/live/media/pley_mk_2/index.m3u8"]);
+    expect(asked.slice(-2)).toEqual(["watch 1 tizen-tv", "GET /api/live/media/pley_mk_2/index.m3u8"]);
   });
 
   it("tells the server at once when the player closes, and drops a watch that answers after", async () => {
@@ -298,7 +508,169 @@ describe("a live channel on the TV's player", () => {
     c.close();
     answer!({ session_id: "late", url: "/api/live/media/pley_mk_late/index.m3u8", kind: "hls", channel: channel(1) });
     await vi.advanceTimersByTimeAsync(0);
-    expect(asked).toEqual(["watch 1 webos-tv", "leave late"]);
+    expect(asked).toEqual(["watch 1 tizen-tv", "leave late"]);
     expect(engine.sources).toHaveLength(0);
+  });
+});
+
+describe("a live channel and the user's remote, on another device", () => {
+  const command = (session: string, what: Control): ServerEvent => ({ type: "player_command", session_id: session, command: what, position_ms: null, offset_ms: null });
+  const stopped = (session: string, message: string | null, byAdmin: boolean): ServerEvent => ({ type: "session_stopped", session_id: session, message, by_admin: byAdmin });
+
+  it("is told the player changes channel, when it has an order to go through, and nothing else", async () => {
+    const zaps: number[] = [];
+    const ordered = setup(undefined, (by) => zaps.push(by));
+    ordered.c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ordered.declared).toEqual([["next", "previous"]]);
+    const alone = setup();
+    alone.c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(alone.declared).toEqual([[]]);
+  });
+
+  it("goes up and down the channels for its own session's next and previous, and nothing else", async () => {
+    const zaps: number[] = [];
+    const { c, engine, send } = setup(undefined, (by) => zaps.push(by));
+    c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    engine.listener!.firstFrame();
+    send(command("s1", "next"));
+    send(command("s1", "previous"));
+    send(command("s1", "pause"));
+    send(command("s9", "next"));
+    expect(zaps).toEqual([1, -1]);
+    expect(engine.calls).not.toContain("pause");
+  });
+
+  it("stops when its session is stopped from another device, saying so with the message", async () => {
+    const { c, engine, asked, send } = setup();
+    c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    engine.listener!.firstFrame();
+    send(stopped("s1", " Dinner's ready ", false));
+    expect(c.state.value.trouble).toEqual({ kind: "stopped", title: "Live TV stopped", message: "Live TV was stopped from another device.\nDinner's ready", canRetry: true });
+    expect(engine.calls[engine.calls.length - 1]).toBe("stop");
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(watches(asked)).toHaveLength(1);
+    // Its session is gone on the server: nothing to leave.
+    expect(asked).not.toContain("leave s1");
+  });
+
+  it("says when the server's administrator stopped it, and leaves another session's stop alone", async () => {
+    const { c, engine, send } = setup();
+    c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    engine.listener!.firstFrame();
+    send(stopped("s9", null, true));
+    expect(c.state.value.phase).toBe("playing");
+    send(stopped("s1", null, true));
+    expect(c.state.value.trouble?.message).toBe("Live TV was stopped by the server's administrator.");
+  });
+
+  it("says who stopped it when the event comes after a 410 without words", async () => {
+    const { c, engine, ended, send } = setup();
+    c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    engine.listener!.firstFrame();
+    ended.s1 = "";
+    engine.listener!.error({ kind: "network", detail: "the playlist went" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(c.state.value.trouble?.message).toBe("This channel isn't being watched any more.");
+    send(stopped("s1", null, false));
+    expect(c.state.value.trouble?.message).toBe("Live TV was stopped from another device.");
+  });
+
+  it("obeys nothing once it has stopped", async () => {
+    const zaps: number[] = [];
+    const { c, engine, send } = setup(undefined, (by) => zaps.push(by));
+    c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    engine.listener!.firstFrame();
+    send(stopped("s1", null, false));
+    send(command("s1", "next"));
+    expect(zaps).toEqual([]);
+  });
+
+  /**
+   * A player with the screen's channel step (CH+ and CH−, and the remote's
+   * next and previous), whose neighbour, the channel `by` from the one
+   * playing, is found only when `found()` is called.
+   */
+  function stepping() {
+    const pending: (() => void)[] = [];
+    let c: LiveController | null = null;
+    const step = (by: 1 | -1, remote: boolean) => {
+      const current = c!.stepStarts(remote);
+      const to = c!.state.value.channel.id + by;
+      pending.push(() => current() && c!.tune(channel(to)));
+    };
+    const w = setup(undefined, (by) => step(by, true));
+    c = w.c;
+    const found = () => pending.splice(0).forEach((f) => f());
+    return { ...w, step, found };
+  }
+
+  it("leaves a channel picked while the remote's step looked for its neighbour playing", async () => {
+    const { c, engine, asked, send, found } = stepping();
+    c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    engine.listener!.firstFrame();
+    send(command("s1", "next"));
+    // Picked from the channel list before the step's answer came.
+    c.tune(channel(7));
+    await vi.advanceTimersByTimeAsync(0);
+    found();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(watches(asked)).toEqual(["watch 1 tizen-tv", "watch 7 tizen-tv"]);
+    expect(c.state.value.channel.id).toBe(7);
+  });
+
+  it("watches nothing for a step whose neighbour came once the app was hidden, or the session stopped", async () => {
+    const hidden = stepping();
+    hidden.c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    hidden.engine.listener!.firstFrame();
+    hidden.send(command("s1", "next"));
+    hidden.c.suspend();
+    hidden.found();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(watches(hidden.asked)).toEqual(["watch 1 tizen-tv"]);
+
+    const stoppedHere = stepping();
+    stoppedHere.c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    stoppedHere.engine.listener!.firstFrame();
+    stoppedHere.send(command("s1", "next"));
+    stoppedHere.send(stopped("s1", null, false));
+    stoppedHere.found();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(watches(stoppedHere.asked)).toEqual(["watch 1 tizen-tv"]);
+    expect(stoppedHere.c.state.value.trouble?.kind).toBe("stopped");
+  });
+
+  it("still changes channel for CH+ on the TV pressed as the session stopped, and for a step once the app shows again", async () => {
+    const tv = stepping();
+    tv.c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    tv.engine.listener!.firstFrame();
+    tv.step(1, false);
+    tv.send(stopped("s1", null, false));
+    tv.found();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(watches(tv.asked)).toEqual(["watch 1 tizen-tv", "watch 2 tizen-tv"]);
+
+    const shown = stepping();
+    shown.c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    shown.engine.listener!.firstFrame();
+    shown.c.suspend();
+    shown.c.resume();
+    await vi.advanceTimersByTimeAsync(0);
+    shown.engine.listener!.firstFrame();
+    shown.send(command("s2", "next"));
+    shown.found();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(watches(shown.asked)).toEqual(["watch 1 tizen-tv", "watch 1 tizen-tv", "watch 2 tizen-tv"]);
   });
 });

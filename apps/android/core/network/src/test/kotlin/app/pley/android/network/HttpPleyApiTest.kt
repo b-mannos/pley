@@ -2,6 +2,7 @@ package app.pley.android.network
 
 import app.pley.android.model.AddSubtitle
 import app.pley.android.model.Approval
+import app.pley.android.model.CastRequest
 import app.pley.android.model.ConversionState
 import app.pley.android.model.Decline
 import app.pley.android.model.DiscoverList
@@ -17,11 +18,15 @@ import app.pley.android.model.SubtitleResult
 import app.pley.android.model.EntryIds
 import app.pley.android.model.ImageKind
 import app.pley.android.model.ItemIds
+import app.pley.android.model.DynamicRangeFilter
 import app.pley.android.model.LibraryIds
 import app.pley.android.model.LibrarySort
 import app.pley.android.model.LiveCategory
+import app.pley.android.model.ResolutionFilter
 import app.pley.android.model.NewPlaylist
 import app.pley.android.model.PlaybackRequest
+import app.pley.android.model.PlayerCommandRequest
+import app.pley.android.model.Control
 import app.pley.android.model.PlaylistPatch
 import app.pley.android.model.PleyJson
 import app.pley.android.model.ProgressReport
@@ -109,6 +114,9 @@ class HttpPleyApiTest {
             Golden("health", json("server/health.json"), "GET /api/health") { health() },
             Golden("server", json("server/info.json"), "GET /api/server") { server() },
             Golden("me", json("me/app_token.json"), "GET /api/auth/me") { me() },
+            Golden("setLanguage", json("me/app_token.json"), "PUT /api/me/language", body = """{"language":"fr"}""") { setLanguage("fr") },
+            // The server's: left out, which the server reads as null.
+            Golden("setLanguage (the server's)", json("me/app_token.json"), "PUT /api/me/language", body = "{}") { setLanguage(null) },
             Golden("libraries", json("libraries/list.json"), "GET /api/libraries") { libraries() },
             Golden("library", json("libraries/library.json"), "GET /api/libraries/2") { library(2) },
             Golden(
@@ -127,6 +135,13 @@ class HttpPleyApiTest {
                 "GET /api/libraries/1/items?sort=added&order=desc&watched=false&genre=Science%20Fiction&year=2016&offset=200&limit=1000",
             ) {
                 libraryItems(1, LibrarySort.Added, SortOrder.Descending, watched = false, genre = "Science Fiction", year = 2016, offset = 200, limit = 1000)
+            },
+            Golden(
+                "libraryItems (resolution and dynamic range)",
+                json("libraries/items.json"),
+                "GET /api/libraries/1/items?sort=bitrate&resolution=4k&dynamic_range=dolby_vision&offset=0",
+            ) {
+                libraryItems(1, LibrarySort.Bitrate, resolution = ResolutionFilter.Uhd, dynamicRange = DynamicRangeFilter.DolbyVision)
             },
             Golden("libraryFilters", json("libraries/filters.json"), "GET /api/libraries/1/filters") { libraryFilters(1) },
             Golden("libraryHubs", json("libraries/hubs.json"), "GET /api/libraries/1/hubs") { libraryHubs(1) },
@@ -149,7 +164,7 @@ class HttpPleyApiTest {
             ) { history(offset = 50, limit = 200, itemId = 201, libraryId = 2, since = 1761000000) },
             Golden("homeHubs", json("hubs/home.json"), "GET /api/hubs/home") { homeHubs() },
             Golden("watchlist", json("watchlist/list.json"), "GET /api/watchlist") { watchlist() },
-            Golden("search", json("search/results.json"), "GET /api/search?q=blade%20runner%20%26%202049&limit=60") {
+            Golden("search", json("search/results.json"), "GET /api/search?q=blade%20runner%20%26%202049&limit=200") {
                 search("blade runner & 2049")
             },
             Golden(
@@ -165,6 +180,39 @@ class HttpPleyApiTest {
                 body = PleyJson.encodeToString(PlaybackRequest.serializer(), playback.copy(keepPrevious = true)),
             ) { startPlayback(playback.copy(keepPrevious = true)) },
             Golden("playbackStatus", json("playback/status_transcode.json"), "GET /api/playback/6f1c2a9e") { playbackStatus("6f1c2a9e") },
+            Golden("playingSessions", json("sessions/list.json"), "GET /api/sessions") { playingSessions() },
+            Golden(
+                "sendCommand",
+                MockPley.noContent(),
+                "POST /api/sessions/6f1c2a9e/command",
+                body = """{"command":"seek","position_ms":600000}""",
+            ) { sendCommand("6f1c2a9e", request("sessions/command_request.json")) },
+            Golden(
+                "sendCommand (no value)",
+                MockPley.noContent(),
+                "POST /api/sessions/6f1c2a9e/command",
+                body = """{"command":"pause"}""",
+            ) { sendCommand("6f1c2a9e", PlayerCommandRequest(Control.Pause)) },
+            Golden("stopSession", MockPley.noContent(), "DELETE /api/sessions/6f1c2a9e") { stopSession("6f1c2a9e") },
+            Golden("remoteDevices", json("remote/devices.json"), "GET /api/remote/devices?household=1") { remoteDevices() },
+            Golden(
+                "cast",
+                MockPley.noContent(),
+                "POST /api/remote/devices/android-den/cast",
+                body = """{"item_id":204,"start_ms":600000}""",
+            ) { cast("android-den", CastRequest(itemId = 204, startMs = 600_000)) },
+            Golden(
+                "cast (a playlist, shuffled)",
+                MockPley.noContent(),
+                "POST /api/remote/devices/android-den/cast",
+                body = """{"playlist_id":9,"shuffle":true}""",
+            ) { cast("android-den", CastRequest(playlistId = 9, shuffle = true)) },
+            Golden(
+                "sendCommand (a track)",
+                MockPley.noContent(),
+                "POST /api/sessions/6f1c2a9e/command",
+                body = """{"command":"subtitles","stream_index":-1}""",
+            ) { sendCommand("6f1c2a9e", PlayerCommandRequest(Control.Subtitles, streamIndex = -1)) },
             Golden("stopPlayback", MockPley.noContent(), "DELETE /api/playback/6f1c2a9e") { stopPlayback("6f1c2a9e") },
             Golden("playbackNetwork", jsonAnswer(NETWORK), "GET /api/playback/network?client_id=android-1") { playbackNetwork("android-1") },
             Golden(
@@ -416,6 +464,7 @@ class HttpPleyApiTest {
             "playback/progress_request.json" to ProgressReport.serializer(),
             "playback/streams_request.json" to StreamChoice.serializer(),
             "playback/rating_request.json" to RatingRequest.serializer(),
+            "sessions/command_request.json" to PlayerCommandRequest.serializer(),
             "playlists/add_items_request.json" to ItemIds.serializer(),
             "playlists/order_request.json" to EntryIds.serializer(),
         )) {

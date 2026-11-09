@@ -9,6 +9,7 @@ import app.pley.android.model.DiscoverPage
 import app.pley.android.model.DiscoverTitle
 import app.pley.android.model.ItemRequest
 import app.pley.android.model.MediaRequest
+import app.pley.android.model.RequestStatus
 import app.pley.android.model.TitleKind
 import app.pley.android.model.TitleStatus
 import app.pley.android.screens.PleyKey
@@ -132,10 +133,12 @@ fun RequestChange.touches(title: DiscoverTitle): Boolean =
 /**
  * How titles already shown change with [change] (requests_changed): their
  * badges follow its request, read once (GET /api/requests/{id}). One this
- * account can no longer read says nothing of its title: the title's page
- * is read instead, for its status (the request let go of, should that
- * fail too). `null` when none of [shown] is touched, many changed at once
- * (rows are never read again for that), or the request couldn't be read.
+ * account can no longer read says nothing of its title, nor does a show's
+ * request wholly ready (the show may still lack seasons nobody asked for):
+ * the title's page is read instead, for its status (the request let go of,
+ * or followed, should that fail too). `null` when none of [shown] is
+ * touched, many changed at once (rows are never read again for that), or the
+ * request couldn't be read.
  */
 suspend fun RequestsRepository.patchFor(change: RequestChange, shown: Sequence<DiscoverTitle>): ((DiscoverTitle) -> DiscoverTitle)? {
     val id = change.requestId ?: return null
@@ -148,7 +151,8 @@ suspend fun RequestsRepository.patchFor(change: RequestChange, shown: Sequence<D
     } catch (_: Exception) {
         return null
     }
-    if (request != null) return { title -> if (change.touches(title)) patched(title, request) else title }
+    val readyShow = request != null && request.kind == TitleKind.Show && request.status == RequestStatus.Available
+    if (request != null && !readyShow) return { title -> if (change.touches(title)) patched(title, request) else title }
     val pages = touched.associateWith { (kind, tmdbId) ->
         try {
             readTitle(kind, tmdbId)
@@ -163,7 +167,7 @@ suspend fun RequestsRepository.patchFor(change: RequestChange, shown: Sequence<D
         when {
             !change.touches(title) -> title
             page != null -> title.copy(status = page.status, itemId = page.itemId, requestId = page.requestId)
-            else -> patched(title, null)
+            else -> patched(title, request)
         }
     }
 }
@@ -204,8 +208,19 @@ data class Pages(
     val totalPages: Int = 1,
     val loading: Boolean = false,
     val problem: RequestProblem? = null,
+    /**
+     * The last pages read on their own brought fewer titles than wanted,
+     * and more are read only when asked for (a TV grid's Show more): for
+     * an account with an age limit, page after page can come empty.
+     * It holds until a page is read ([with] starts afresh) or the reading is
+     * asked to go on (the view models' copy with it off).
+     */
+    val stopped: Boolean = false,
 ) {
     val more: Boolean get() = page < totalPages
+
+    /** Nothing more is read unless asked for: every page read, or the reading stopped short or failed. */
+    val settled: Boolean get() = !loading && (problem != null || (page > 0 && (!more || stopped)))
 
     /** [answer] added: the first page replaces what was there; later ones add what's new. */
     fun with(answer: DiscoverPage): Pages {
@@ -214,7 +229,7 @@ data class Pages(
     }
 
     /** Another page is wanted without scrolling: fewer than a [screenful], and more to read. */
-    fun short(screenful: Int): Boolean = more && !loading && problem == null && titles.size < screenful
+    fun short(screenful: Int): Boolean = more && !loading && problem == null && !stopped && titles.size < screenful
 
     fun map(transform: (DiscoverTitle) -> DiscoverTitle): Pages = copy(titles = titles.map(transform))
 }

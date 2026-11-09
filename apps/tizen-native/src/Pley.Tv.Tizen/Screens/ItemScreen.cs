@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Pley.Tv.Core;
 using Pley.Tv.Core.Api;
+using Pley.Tv.Core.Requests;
 using Pley.Tv.Core.Ui;
 using Pley.Tv.Tizen.Kit;
 using Tizen.NUI;
@@ -27,28 +28,42 @@ sealed class ItemScreen : ShellPage
     readonly Action<PageKey> go;
     readonly BackdropView backdrop;
     readonly View hero = new View();
-    readonly View heroText = new View();
+    readonly Redrawn heroText;
     readonly ButtonRow heroButtons = new ButtonRow();
     readonly View infoBlock = new View { Opacity = 0 };
     readonly View body = new View { WidthResizePolicy = ResizePolicyType.FillToParent, HeightResizePolicy = ResizePolicyType.FillToParent };
     readonly Timer episodeRest = new Timer((uint)KeyRepeatGate.RestMs);
+    /// <summary>
+    /// A page shown already is drawn again once what it says has settled: back from a film, four or
+    /// five answers came within 400 ms (its progress, its details, its seasons), each drawn whole,
+    /// 50 to 180 ms each, as the TV's player was let go.
+    /// </summary>
+    readonly Timer redraw = new Timer(RedrawMs);
+    const uint RedrawMs = 60;
+    ItemPage? waiting;
     readonly List<IDisposable> watches = new List<IDisposable>();
     readonly Dictionary<FocusItem, HeroButtonKind> buttonKinds = new Dictionary<FocusItem, HeroButtonKind>();
     RowColumnView? column;
     SeasonsView? seasons;
     ItemPage? shown;
+    /// <summary>What requests say of a movie or show: its request's stage, and Request more seasons.</summary>
+    readonly ItemRequestModel? requests;
+    FocusItem? moreSeasons;
     string shownSections = "";
     EpisodeLine? focusedEpisode;
     EpisodeLine? restedEpisode;
     bool inSections;
     bool summaryCut;
     Animation? reveal;
+    Animation? reading;
     string shownKind = "";
 
     /// <param name="layers">The app's sheets, for the side panels and dialogs.</param>
     /// <param name="go">Opens another page: an item, a person, a collection.</param>
-    public ItemScreen(TvShell shell, Shell layers, ItemModel model, Images images, KeyRepeatGate gate, Action<PageKey> go) : base(shell, new PageKey.Item(model.ItemId), "item")
+    public ItemScreen(TvShell shell, Shell layers, ItemModel model, Images images, KeyRepeatGate gate, Action<PageKey> go, ItemRequestModel? requests = null)
+        : base(shell, new PageKey.Item(model.ItemId), "item")
     {
+        this.requests = requests;
         this.layers = layers;
         this.model = model;
         this.images = images;
@@ -59,13 +74,19 @@ sealed class ItemScreen : ShellPage
         View.Add(backdrop);
         View.Add(new ScrimView(ScrimView.Item));
         hero.Position = new Position(Ui.Dp(PleyTv.Gutter), Ui.Dp(HeroTop));
-        hero.Add(heroText);
+        heroText = new Redrawn(hero);
         hero.Add(heroButtons);
         View.Add(hero);
         View.Add(body);
         View.Add(infoBlock);
         Group.ChildFocused += i => SetInSections(Group.Children[i] != heroButtons.Group);
         heroButtons.Group.Exit = d => d == Direction.Left && Scrolling.Left(gate, Shell.FocusRail);
+        redraw.Tick += (s, e) =>
+        {
+            if (waiting is { } page && model.State.Value is ItemState.Ready) Draw(page);
+            waiting = null;
+            return false;
+        };
         episodeRest.Tick += (s, e) =>
         {
             restedEpisode = focusedEpisode;
@@ -77,7 +98,17 @@ sealed class ItemScreen : ShellPage
         model.PlayRequested += OnPlay;
         model.OpenRequested += go;
         watches.Add(model.State.Watch(Show));
+        if (requests != null) watches.Add(requests.State.Watch(_ =>
+        {
+            if (shown == null) return;
+            ShowHero(shown, false);
+            // The hero grew or shrank by the request's line: the rows under it follow.
+            column?.MoveTop(RowsTop());
+        }));
     }
+
+    /// <summary>Where the rows start while the page is at its top: under the hero's buttons, in dp.</summary>
+    float RowsTop() => HeroTop + heroButtons.PositionY / Ui.Scale + PleyTv.ButtonHeight + 8 + PleyTv.RowGap;
 
     public override void Gone()
     {
@@ -86,7 +117,10 @@ sealed class ItemScreen : ShellPage
         model.PlayRequested -= OnPlay;
         model.OpenRequested -= go;
         episodeRest.Stop();
+        redraw.Stop();
+        heroText.Stop();
         model.Dispose();
+        requests?.Dispose();
     }
 
     public override void Enter()
@@ -103,11 +137,17 @@ sealed class ItemScreen : ShellPage
         switch (state)
         {
             case ItemState.Ready ready:
-                if (shownKind != "ready") Clear();
-                shownKind = "ready";
-                var drawn = Profile.Start();
-                ShowPage(ready.Page);
-                Profile.Took("item page drawn", drawn);
+                if (shownKind != "ready")
+                {
+                    Clear();
+                    shownKind = "ready";
+                    redraw.Stop();
+                    waiting = null;
+                    Draw(ready.Page);
+                    return;
+                }
+                if (waiting == null) redraw.Start();
+                waiting = ready.Page;
                 return;
             case ItemState.Loading:
                 if (shownKind == "loading") return;
@@ -189,6 +229,13 @@ sealed class ItemScreen : ShellPage
         Tree.Enter(row.Group);
     }
 
+    void Draw(ItemPage page)
+    {
+        var drawn = Profile.Start();
+        ShowPage(page);
+        Profile.Took("item page drawn", drawn);
+    }
+
     void ShowPage(ItemPage page)
     {
         var first = shown == null;
@@ -197,6 +244,8 @@ sealed class ItemScreen : ShellPage
         backdrop.Show(HomeRules.Backdrop(page.Item, page.Origin));
         ShowHero(page, first);
         ShowSections(page, first);
+        // Drawn: what requests say of it may be asked now.
+        requests?.Shown(page.Item.Kind);
         if (inSections) ShowInfoBlock();
     }
 
@@ -207,30 +256,42 @@ sealed class ItemScreen : ShellPage
     /// </summary>
     void ShowHero(ItemPage page, bool first)
     {
-        foreach (var child in heroText.Children.ToList())
-        {
-            heroText.Remove(child);
-            child.Dispose();
-        }
+        // Drawn over the one before, which goes once this is drawn: emptied first, the hero blinked.
+        var block = heroText.Next();
         float y = 0;
         var title = Text.Label(ItemText.HeroTitle(page), PleyType.HeroTitle, PleyColors.Fg, maxLines: 2, width: TextColumn);
         title.VerticalAlignment = VerticalAlignment.Bottom;
         title.SizeHeight = Ui.Dp(TitleBox);
-        heroText.Add(title);
+        block.Add(title);
         y += TitleBox;
         void Line(TextLabel label, float gap, float height)
         {
             y += gap;
             label.PositionY = Ui.Dp(y);
-            heroText.Add(label);
+            block.Add(label);
             y += height;
         }
         if (ItemText.ContextLine(page) is { } context) Line(Text.Label(context, PleyType.Title, PleyColors.Fg, width: TextColumn), 8, PleyType.Title.Line);
         y += 12;
         var meta = MetaLine.Of(page.Meta);
         meta.PositionY = Ui.Dp(y);
-        heroText.Add(meta);
+        block.Add(meta);
         y += 18;
+        // Its request's stage under the facts: the small pill, and a download's 120 dp bar beside it.
+        if (requests?.State.Value is { Request: { } asked } request)
+        {
+            y += 10;
+            var pill = RequestKit.StagePill(RequestRules.Pill(asked, request.Manage), small: true);
+            pill.PositionY = Ui.Dp(y);
+            block.Add(pill);
+            if (asked.Download is { } download)
+            {
+                var bar = RequestKit.DownloadBar(RequestRules.DownloadProgress(asked) ?? 0f, download.State, 120);
+                bar.Position = new Position(pill.SizeWidth + Ui.Dp(12), Ui.Dp(y + 9));
+                block.Add(bar);
+            }
+            y += 22;
+        }
         if (ItemText.TimeLeft(page) is { } left) Line(Text.Label(left, PleyType.Caption, PleyColors.Fg, width: TextColumn), 8, PleyType.Caption.Line);
         var genres = ItemText.GenresLine(page);
         if (genres.Length > 0) Line(Text.Label(genres, PleyType.Caption, PleyColors.Muted, width: TextColumn), 6, PleyType.Caption.Line);
@@ -265,9 +326,18 @@ sealed class ItemScreen : ShellPage
         return string.Join("<color value='#8B95A5'> · </color>", parts);
     }
 
+    /// <summary>The buttons drawn.</summary>
+    IReadOnlyList<HeroButton>? buttonsShown;
+
     void ShowButtons(ItemPage page, bool first)
     {
+        // The same buttons stay: made again, their labels blinked as the page came back from a film.
+        var buttons = ItemText.Buttons(page);
+        if (!first && buttonsShown != null && buttons.SequenceEqual(buttonsShown)) return;
+        buttonsShown = buttons;
         HeroButtonKind? focusedKind = Tree.Current != null && buttonKinds.TryGetValue(Tree.Current, out var k) ? k : null;
+        var wasMore = moreSeasons != null && Tree.Current == moreSeasons;
+        moreSeasons = null;
         buttonKinds.Clear();
         // Let go only once focus is on their replacements: the one with focus hears it leave.
         var old = heroButtons.Children.ToList();
@@ -276,14 +346,19 @@ sealed class ItemScreen : ShellPage
         float x = 0;
         FocusItem? start = null;
         FocusItem? again = null;
-        foreach (var b in ItemText.Buttons(page))
+        foreach (var b in buttons)
         {
             View view;
             FocusItem item;
             if (b.Kind == HeroButtonKind.Primary)
             {
                 var pill = new ButtonView(b.Label, ButtonKind.Pill, () => Press(b.Kind), iconName: b.Icon) { Enabled = b.Enabled };
-                pill.Item.LongSelected = () => Panel(ItemText.ActionsPanel(page.Item), page.Item);
+                // The page as it is then: the buttons outlive the page they were made for.
+                pill.Item.LongSelected = () =>
+                {
+                    var now = shown ?? page;
+                    Panel(ItemText.ActionsPanel(now.Item), now.Item);
+                };
                 pill.Item.Menu = pill.Item.LongSelected;
                 view = pill;
                 item = pill.Item;
@@ -302,6 +377,17 @@ sealed class ItemScreen : ShellPage
             x += view.SizeWidth / Ui.Scale + PleyTv.ButtonGap;
             if (b.Kind == ItemText.FirstFocus(page)) start = item;
             if (b.Kind == focusedKind) again = item;
+            // After Play, a show with seasons to ask for: its Discover page, Which seasons? open.
+            if (b.Kind == HeroButtonKind.Primary && requests?.State.Value is { More: true } request)
+            {
+                var more = new ButtonView(RequestText.MoreSeasons, ButtonKind.Pill, () => go(request.Picker), iconName: "plus");
+                more.PositionX = Ui.Dp(x);
+                heroButtons.Add(more);
+                heroButtons.Group.Add(more.Item);
+                x += more.WidthDp + PleyTv.ButtonGap;
+                if (wasMore) again = more.Item;
+                moreSeasons = more.Item;
+            }
         }
         heroButtons.SizeWidth = Ui.Dp(x);
         if (first)
@@ -311,8 +397,8 @@ sealed class ItemScreen : ShellPage
             if (start != null) heroButtons.Group.RememberChild(heroButtons.Group.Children.ToList().IndexOf(start));
         }
         if (again != null) Tree.Focus(again);
-        // The focused button went (Trailer, From start): focus to where the page starts.
-        else if ((first || focusedKind != null) && start != null) Tree.Focus(start);
+        // The focused button went (Trailer, From start, Request more seasons once asked): focus to where the page starts.
+        else if ((first || focusedKind != null || wasMore) && start != null) Tree.Focus(start);
         foreach (var child in old) child.Dispose();
     }
 
@@ -426,8 +512,7 @@ sealed class ItemScreen : ShellPage
             Group.Remove(old.Group);
             old.Unparent();
         }
-        var top = HeroTop + heroButtons.PositionY / Ui.Scale + PleyTv.ButtonHeight + 8 + PleyTv.RowGap;
-        column = new RowColumnView(gate, top: top, firstAtTop: false);
+        column = new RowColumnView(gate, top: RowsTop(), firstAtTop: false);
         seasons = null;
         if (page.Seasons is { } s)
         {
@@ -460,7 +545,13 @@ sealed class ItemScreen : ShellPage
         if (ItemText.HasDetails(page))
         {
             var details = new ItemDetailsView(page, model.ChooseVersion);
-            details.Group.Exit = d => d == Direction.Left ? Scrolling.Left(gate, Shell.FocusRail) : d is Direction.Right or Direction.Down;
+            details.Group.Exit = d =>
+            {
+                if (d == Direction.Up) details.Rest();
+                return d == Direction.Left ? Scrolling.Left(gate, Shell.FocusRail) : d is Direction.Right or Direction.Down;
+            };
+            // Reading on through the details, the info block steps aside: the text has the screen.
+            details.Reading += on => Fade(infoBlock, on ? 0f : 1f);
             column.Add(details, details.Group);
         }
         body.Add(column);
@@ -510,6 +601,15 @@ sealed class ItemScreen : ShellPage
         {
             episodeRest.Start();
         }
+    }
+
+    /// <summary>The info block steps aside while reading on through the details, and back after.</summary>
+    void Fade(View view, float to)
+    {
+        reading?.Stop();
+        reading = new Animation(PleyMotion.RevealMs) { DefaultAlphaFunction = new AlphaFunction(AlphaFunction.BuiltinFunctions.EaseOut) };
+        reading.AnimateTo(view, "Opacity", to);
+        reading.Play();
     }
 
     void SetInSections(bool on)

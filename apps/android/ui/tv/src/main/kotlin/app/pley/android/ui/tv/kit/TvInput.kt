@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -68,6 +69,7 @@ fun TvTextField(
     onAction: () -> Unit = {},
     focusModifier: Modifier = Modifier,
     typeNow: Boolean = false,
+    inputTransformation: InputTransformation? = null,
 ) {
     var editing by remember { mutableStateOf(typeNow) }
     val outer = remember { MutableInteractionSource() }
@@ -84,6 +86,7 @@ fun TvTextField(
     }
 
     BackHandler(enabled = editing) { stop() }
+    OverlayShowing(editing)
     val view = LocalView.current
     LaunchedEffect(editing) {
         if (editing) {
@@ -128,28 +131,31 @@ fun TvTextField(
         if (state.text.isEmpty()) {
             BasicText(placeholder, style = PleyType.Tv.Body.copy(color = PleyColors.Muted), maxLines = 1)
         }
-        BasicTextField(
-            state = state,
-            modifier = Modifier
-                .fillMaxWidth()
-                .focusRequester(field)
-                .focusProperties { canFocus = editing }
-                .onFocusChanged {
-                    // Not when it is first laid out, unfocused: typeNow is about to focus it.
-                    val lost = innerFocused && !it.isFocused
-                    innerFocused = it.isFocused
-                    // The keyboard closed (Back, or its own close key): back to the field.
-                    if (lost && editing) editing = false
+        KeyboardBridge(state, onPrevious = { stop() }) {
+            BasicTextField(
+                state = state,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(field)
+                    .focusProperties { canFocus = editing }
+                    .onFocusChanged {
+                        // Not when it is first laid out, unfocused: typeNow is about to focus it.
+                        val lost = innerFocused && !it.isFocused
+                        innerFocused = it.isFocused
+                        // The keyboard closed (Back, or its own close key): back to the field.
+                        if (lost && editing) editing = false
+                    },
+                textStyle = PleyType.Tv.Body.copy(color = PleyColors.Fg),
+                cursorBrush = SolidColor(PleyColors.AccentBright),
+                inputTransformation = inputTransformation,
+                lineLimits = TextFieldLineLimits.SingleLine,
+                keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = imeAction),
+                onKeyboardAction = {
+                    onAction()
+                    stop()
                 },
-            textStyle = PleyType.Tv.Body.copy(color = PleyColors.Fg),
-            cursorBrush = SolidColor(PleyColors.AccentBright),
-            lineLimits = TextFieldLineLimits.SingleLine,
-            keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = imeAction),
-            onKeyboardAction = {
-                onAction()
-                stop()
-            },
-        )
+            )
+        }
     }
 }
 

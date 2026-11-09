@@ -23,6 +23,13 @@ end sub
 sub test_player_progress_bodies()
     tkEqual(playerProgress(61500.7, 6960000, "playing", "s1"), { position_ms: 61500, state: "playing", duration_ms: 6960000, session_id: "s1" })
     tkEqual(playerProgress(-3, 0, "stopped", ""), { position_ms: 0, state: "stopped" })
+    ' A video's tracks, for the user's remotes; one not known left out.
+    tkEqual(playerProgress(1000, 6960000, "paused", "s1", { audio: 2, subtitle: -1 }), { position_ms: 1000, state: "paused", duration_ms: 6960000, session_id: "s1", audio_index: 2, subtitle_index: -1 })
+    tkEqual(playerProgress(1000, 0, "playing", "s1", { audio: -1, subtitle: 3 }), { position_ms: 1000, state: "playing", session_id: "s1", audio_index: -1, subtitle_index: 3 }, "a file without audio")
+    tkEqual(playerProgress(1000, 0, "playing", "s1", { audio: 1, subtitle: -2 }), { position_ms: 1000, state: "playing", session_id: "s1", audio_index: 1 }, "subtitles not known")
+    ' And the Quality menu's pick.
+    tkEqual(playerProgress(1000, 0, "playing", "s1", { audio: 1, subtitle: -1, quality: "8m" }), { position_ms: 1000, state: "playing", session_id: "s1", audio_index: 1, subtitle_index: -1, quality: "8m" })
+    tkEqual(playerProgress(1000, 0, "playing", "s1", { audio: 1, subtitle: -1, quality: "" }), { position_ms: 1000, state: "playing", session_id: "s1", audio_index: 1, subtitle_index: -1 }, "not known")
 end sub
 
 sub test_player_tells_media_errors_from_stream_errors()
@@ -48,19 +55,23 @@ sub test_player_asks_for_picture_subtitles_to_be_drawn()
             { index: 0, kind: "video", codec: "h264" },
             { index: 3, kind: "subtitle", codec: "subrip", text_based: true },
             { index: 4, kind: "subtitle", codec: "hdmv_pgs_subtitle", text_based: false },
-            { index: 5, kind: "subtitle", codec: "dvd_subtitle" }
+            { index: 5, kind: "subtitle", codec: "dvd_subtitle" },
+            { index: 6, kind: "subtitle", codec: "dvd_subtitle", text_based: false }
         ]
     }
-    tkEqual(playerBurnIndex(file), 4)
+    tkEqual(playerBurnIndex(file, []), 4, "PGS the app doesn't draw")
+    tkEqual(playerBurnIndex(file, picCodecs()), -1, "PGS the app draws itself")
+    file.selected_subtitle = 6
+    tkEqual(playerBurnIndex(file, picCodecs()), 6, "VobSub, which the app doesn't draw")
     file.selected_subtitle = 3
-    tkEqual(playerBurnIndex(file), -1, "text: the Video node shows it")
+    tkEqual(playerBurnIndex(file, []), -1, "text: the Video node shows it")
     file.selected_subtitle = 5
-    tkEqual(playerBurnIndex(file), -1, "not said to be a picture")
+    tkEqual(playerBurnIndex(file, []), -1, "not said to be a picture")
     file.selected_subtitle = invalid
-    tkEqual(playerBurnIndex(file), -1, "none picked")
+    tkEqual(playerBurnIndex(file, []), -1, "none picked")
     file.selected_subtitle = 9
-    tkEqual(playerBurnIndex(file), -1, "no such stream")
-    tkEqual(playerBurnIndex(invalid), -1)
+    tkEqual(playerBurnIndex(file, []), -1, "no such stream")
+    tkEqual(playerBurnIndex(invalid, []), -1)
 end sub
 
 sub test_player_reads_the_sessions_status()
@@ -77,6 +88,10 @@ sub test_player_says_who_stopped_the_stream()
     tkEqual(playerStoppedMessage({ message: "Disk full" }), "Playback was stopped by the server's administrator." + Chr(10) + "Disk full")
     tkEqual(playerStoppedMessage("<html>"), "Playback was stopped by the server's administrator.")
     tkEqual(playerStoppedMessage({ session_id: "s1", message: invalid, by_admin: false }), "Playback was stopped from another device.", "the event stream says who")
+    i18nUse("fr")
+    tkEqual(playerStoppedMessage({ message: "Disk full" }), "La lecture a été arrêtée par l’administrateur du serveur." + Chr(10) + "Disk full", "the server's words as it wrote them")
+    i18nUse("es")
+    tkEqual(playerStoppedMessage({ by_admin: false }), "La reproducción se detuvo desde otro dispositivo.")
 end sub
 
 sub test_player_up_next_at_the_credits()
@@ -132,6 +147,10 @@ sub test_player_shows_a_skip_button_until_a_second_before_the_end()
     tkEqual(playerActiveMarker(markers, 1250000).key, "credits:1200000")
     tkEqual(playerSkipLabel(markers[0]), "Skip intro")
     tkEqual(playerSkipLabel(markers[1]), "Skip credits")
+    i18nUse("fr")
+    tkEqual(playerSkipLabel(markers[1]), "Passer le générique")
+    i18nUse("es")
+    tkEqual(playerSkipLabel(markers[0]), "Saltar intro")
 end sub
 
 sub test_player_leaves_an_episodes_credits_to_up_next()
@@ -163,4 +182,43 @@ sub test_player_starts_where_the_title_was_left()
     tkEqual(playerStartOf(600000, 6000000), 600000)
     tkEqual(playerStartOf(5900000, 6000000), 0, "near the end: from the start")
     tkEqual(playerStartOf(0, 6000000), 0)
+end sub
+
+sub test_player_reconnects_while_the_server_keeps_the_session()
+    tkEqual(playerReconnectMs(), 90000)
+    tkTrue(playerReconnectEveryMs() < playerReconnectMs(), "several tries before giving up")
+end sub
+
+sub test_player_offers_try_again_where_it_may_help()
+    tkTrue(playerMayTryAgain(503), "the transcoder busy or away")
+    tkTrue(playerMayTryAgain(500))
+    tkTrue(playerMayTryAgain(409))
+    tkFalse(playerMayTryAgain(404), "no such title")
+    tkFalse(playerMayTryAgain(403), "no access")
+    tkFalse(playerMayTryAgain(401))
+    tkFalse(playerMayTryAgain(400))
+    tkFalse(playerMayTryAgain(410))
+end sub
+
+sub test_player_tells_media_that_ends_short_from_the_end()
+    ' Resumed at 40:00 of a 45:00 episode whose file holds 41:00.
+    tkTrue(playerEndedShort(2401000, 2400000, 2700000), "a few moments after the start, long before the end")
+    tkFalse(playerEndedShort(2699000, 2400000, 2700000), "at the end")
+    tkFalse(playerEndedShort(2650000, 2640000, 2700000), "within a minute of the end")
+    tkFalse(playerEndedShort(2410000, 2400000, 2700000), "played on 10 s first")
+    tkFalse(playerEndedShort(1000, 0, 0), "no duration known")
+end sub
+
+sub test_player_notices_a_seek()
+    tkFalse(playerSought(60000, 61000, 1000), "played on")
+    tkFalse(playerSought(60000, 60200, 1000), "a slow second")
+    tkTrue(playerSought(60000, 120000, 1000), "forward")
+    tkTrue(playerSought(60000, 30000, 1000), "back")
+end sub
+
+sub test_player_banner_names_the_show_over_the_episode()
+    tkEqual(playerBanner({ kind: "episode", title: "Pilot", grandparent_title: "The Office", parent_index: 1, index: 2 }), { title: "The Office", line: "S1 E2 · Pilot" })
+    tkEqual(playerBanner({ kind: "episode", title: "Pilot", parent_index: 1, index: 2 }), { title: "Pilot", line: "" })
+    tkEqual(playerBanner({ kind: "movie", title: "Dune" }), { title: "Dune", line: "" })
+    tkEqual(playerBanner(invalid), { title: "", line: "" })
 end sub

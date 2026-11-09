@@ -14,7 +14,10 @@ use std::time::Duration;
 use axum::http::{Method, StatusCode, header};
 use serde_json::json;
 
-use common::{ANDROID_APP, DESKTOP_APP, HOST, ISSUER, KODI_APP, ROKU_APP, Reply, TestApp};
+use common::{
+    ANDROID_APP, DESKTOP_APP, HOMEASSISTANT_APP, HOST, IOS_APP, ISSUER, KODI_APP, MACOS_APP, ROKU_APP, Reply, TVOS_APP,
+    TestApp, WEBOS_APP,
+};
 use pley::oauth::fetch::Source;
 
 const DEVICE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
@@ -210,6 +213,143 @@ async fn a_tv_signs_in_with_a_code_shown_on_screen() {
 }
 
 #[tokio::test]
+async fn a_tv_tells_its_server_from_another_device_at_its_address() {
+    use base64::Engine;
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let (device_code, user_code) = tv(&app).await;
+    allow(&app, &admin, &user_code).await;
+    let tokens = poll(&app, &device_code, &[]).await;
+    let (access, refresh_token) = pair(&tokens);
+
+    // The tokens come with the server's id and a key of this sign-in's own.
+    let server = app.call(Method::GET, "/api/server", None, None, &[]).await;
+    let id = server.body["id"].as_str().unwrap().to_owned();
+    assert_eq!(id.len(), 40, "discovery's id: {id}");
+    assert_eq!(tokens.body["server_id"], json!(id));
+    let proof_id = tokens.body["proof_id"].as_str().unwrap().to_owned();
+    let key = tokens.body["proof_key"].as_str().unwrap().to_owned();
+    assert!(server.body.get("proof").is_none(), "no proof without a challenge");
+
+    // Asked with a challenge at its home address, the server proves it
+    // holds that key, for that address.
+    let challenge = "AAECAwQFBgcICQoLDA0ODw";
+    let ask = format!("/api/server?challenge={challenge}&proof_id={proof_id}");
+    let home = [("host", "192.168.1.20:7539")];
+    let asked = app.get_from("192.168.1.30:50000", &ask, &home).await;
+    assert_eq!(asked.status, StatusCode::OK, "{}", asked.text());
+    assert_eq!(asked.headers[header::CACHE_CONTROL], "no-store");
+    let key_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(&key).unwrap();
+    let at_home = pley::identity::proof(&key_bytes, &id, "http://192.168.1.20:7539", challenge);
+    assert_eq!(asked.body["proof"], json!(at_home));
+    assert_eq!(asked.body["address"], json!("http://192.168.1.20:7539"), "what the proof covers");
+    // A page in a sandboxed frame (Origin: null) in a browser at home gets
+    // no proof, however it writes the challenge's name, nor does a
+    // website's page; LG's TV app (null, and webOS in its User-Agent) and
+    // the apps that send file:// or app:// get one they can read.
+    let from = |uri: String, origin: &'static str, agent: &'static str| {
+        let app = &app;
+        async move {
+            app.get_from(
+                "192.168.1.30:50000",
+                &uri,
+                &[("host", "192.168.1.20:7539"), ("origin", origin), ("user-agent", agent)],
+            )
+            .await
+        }
+    };
+    let safari = "Mozilla/5.0 (Macintosh) Safari/605.1.15";
+    let spelled = format!("/api/server?%63hallenge={challenge}&proof_id={proof_id}");
+    for (uri, origin) in [(&ask, "null"), (&spelled, "null"), (&ask, "https://example.com")] {
+        let page = from(uri.clone(), origin, safari).await;
+        assert_eq!(page.status, StatusCode::FORBIDDEN, "{uri} from {origin}: {}", page.text());
+        assert!(page.body.get("proof").is_none());
+    }
+    for (origin, agent) in [
+        ("null", "Mozilla/5.0 (Web0S; Linux/SmartTV) Chrome/87"),
+        ("file://", "Mozilla/5.0 (SMART-TV; Linux; Tizen 9.0)"),
+    ] {
+        let tv = from(ask.clone(), origin, agent).await;
+        assert_eq!(tv.body["proof"], json!(at_home), "{origin}");
+        assert!(tv.headers.get(header::ACCESS_CONTROL_ALLOW_ORIGIN).is_some(), "{origin}");
+    }
+    let other =
+        app.get_from("192.168.1.30:50000", "/api/server", &[("host", "192.168.1.20:7539"), ("origin", "null")]).await;
+    assert!(
+        other.headers.get(header::ACCESS_CONTROL_ALLOW_ORIGIN).is_some(),
+        "the server's name, without a proof, as before"
+    );
+    // Through the HTTPS proxy, for the public address: not a proof for the
+    // home one, which an app at that address refuses.
+    let proxy = [("host", "pley.example.com"), ("x-forwarded-proto", "https"), ("x-forwarded-for", "203.0.113.9")];
+    let public = app.get_from("127.0.0.1:50000", &ask, &proxy).await;
+    assert_eq!(public.status, StatusCode::OK, "{}", public.text());
+    assert_eq!(
+        public.body["proof"],
+        json!(pley::identity::proof(&key_bytes, &id, "https://pley.example.com", challenge))
+    );
+    assert_ne!(public.body["proof"], json!(at_home));
+    // A plain-http address asked from the internet (a device elsewhere
+    // passing the challenge on, saying it is the home address): no proof.
+    // Nor an https one said by a client on the internet rather than a proxy
+    // at home: it could name an address the server no longer has.
+    for (peer, extra) in [
+        ("203.0.113.9:50000", vec![("host", "192.168.1.20:7539")]),
+        ("127.0.0.1:50000", vec![("host", "192.168.1.20:7539"), ("x-forwarded-for", "203.0.113.9")]),
+        ("203.0.113.9:50000", vec![("host", "old.example.com"), ("x-forwarded-proto", "https")]),
+    ] {
+        let relayed = app.get_from(peer, &ask, &extra).await;
+        assert_eq!(relayed.status, StatusCode::FORBIDDEN, "{peer} {extra:?}: {}", relayed.text());
+        assert!(relayed.body.get("proof").is_none());
+    }
+    // Nor from an internet provider's shared address naming a home client
+    // as a proxy would; a computer on Tailscale reaches it from its own.
+    let shared = "100.72.3.4";
+    let relayed = app
+        .get_from(&format!("{shared}:50000"), &ask, &[("host", "192.168.1.20:7539"), ("x-forwarded-for", "127.0.0.1")])
+        .await;
+    let tailscale = pley::identity::at_home(shared.parse().unwrap());
+    assert_eq!(relayed.status == StatusCode::OK, tailscale, "{}", relayed.text());
+    for wrong in [
+        format!("/api/server?challenge={challenge}"),
+        format!("/api/server?proof_id={proof_id}"),
+        format!("/api/server?challenge=short&proof_id={proof_id}"),
+        format!("/api/server?challenge={challenge}&proof_id=nope"),
+    ] {
+        assert_eq!(app.get_from("192.168.1.30:50000", &wrong, &home).await.status, StatusCode::BAD_REQUEST, "{wrong}");
+    }
+
+    // A refresh keeps the key; another sign-in has its own.
+    let refreshed = refresh(&app, &refresh_token).await;
+    assert_eq!((&refreshed.body["proof_id"], &refreshed.body["proof_key"]), (&json!(proof_id), &json!(key)));
+    let (device_code, user_code) = tv(&app).await;
+    allow(&app, &admin, &user_code).await;
+    let other = poll(&app, &device_code, &[]).await;
+    assert_ne!(other.body["proof_key"], json!(key));
+
+    // Pley's own sign-in (the desktop app's window) asks for a key of its
+    // own; apps have theirs.
+    let session = app.get("/api/server/proof-key", &admin).await;
+    assert_eq!(session.status, StatusCode::OK, "{}", session.text());
+    assert_eq!(session.headers[header::CACHE_CONTROL], "no-store");
+    assert_eq!(session.body["server_id"], json!(id));
+    let session_id = session.body["proof_id"].as_str().unwrap();
+    assert!(session_id.starts_with('s'), "{session_id}");
+    let session_key =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(session.body["proof_key"].as_str().unwrap()).unwrap();
+    let asked = app
+        .get_from("192.168.1.30:50000", &format!("/api/server?challenge={challenge}&proof_id={session_id}"), &home)
+        .await;
+    assert_eq!(
+        asked.body["proof"],
+        json!(pley::identity::proof(&session_key, &id, "http://192.168.1.20:7539", challenge))
+    );
+    assert_ne!(app.get("/api/server/proof-key", &access).await.status, StatusCode::OK, "not for apps");
+    let anyone = app.call(Method::GET, "/api/server/proof-key", None, None, &[]).await;
+    assert_eq!(anyone.status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn a_disabled_account_gets_no_tokens_for_its_tv() {
     let app = TestApp::new().await;
     let admin = app.setup_admin().await;
@@ -331,9 +471,18 @@ async fn only_pleys_own_apps_sign_in_with_a_code() {
     let page = app.browser_call(Method::POST, "/api/oauth/requests", &admin, Some(json!({"query": query})), &[]).await;
     assert_eq!(page.status, StatusCode::OK, "{}", page.text());
     assert_eq!(app.state.oauth.documents.fetched(), 1);
-    // Desktops have browsers: pley's desktop app signs in on pley's page.
-    let desktop = ask(&app, DESKTOP_APP, None, &[]).await;
-    assert_eq!(oauth_error(&desktop), (StatusCode::BAD_REQUEST, "unauthorized_client"));
+    // Desktops have browsers: pley's desktop app and the Apple app on a Mac
+    // sign in on pley's page.
+    for client_id in [DESKTOP_APP, MACOS_APP] {
+        let desktop = ask(&app, client_id, None, &[]).await;
+        assert_eq!(oauth_error(&desktop), (StatusCode::BAD_REQUEST, "unauthorized_client"), "{client_id}");
+    }
+    // An iPad on a stand or a shared iPhone may show a code instead.
+    let ipad = ask(&app, IOS_APP, Some("library play"), &[]).await;
+    assert_eq!(ipad.status, StatusCode::OK, "{}", ipad.text());
+    let shown = verify(&app, &admin, ipad.body["user_code"].as_str().unwrap()).await;
+    assert_eq!(shown.body["client"]["name"], "Pley for iPhone and iPad", "{}", shown.text());
+    assert_eq!(shown.body["client"]["first_party"], true);
 
     // Scopes by the consent page's rules: library when none is asked for,
     // nothing pley doesn't offer, nothing beyond the app's description.
@@ -728,12 +877,21 @@ async fn device_grants_act_like_other_app_grants() {
 }
 
 #[tokio::test]
-async fn kodi_and_roku_sign_in_only_with_a_code() {
+async fn kodi_roku_lg_apple_tv_and_home_assistant_sign_in_only_with_a_code() {
     let app = TestApp::new().await;
     let admin = app.setup_admin().await;
     for (client_id, name, agent, platform) in [
         (KODI_APP, "Pley for Kodi", "pleyKodi/0.1.0 (Kodi 21.2; Windows)", "Kodi 21.2; Windows"),
         (ROKU_APP, "Pley for Roku", "pleyRoku/0.1.0 (Roku OS 14.5; Roku Ultra)", "Roku OS 14.5; Roku Ultra"),
+        (WEBOS_APP, "Pley for LG TV", "pleyLG/0.1.0 (webOS 23; OLED65C3PUA)", "webOS 23; OLED65C3PUA"),
+        (
+            HOMEASSISTANT_APP,
+            "Pley for Home Assistant",
+            "pleyHomeAssistant/0.1.0 (Home Assistant 2026.11.0)",
+            "Home Assistant 2026.11.0",
+        ),
+        // An agent pley doesn't know is named as the sign-ins list names it.
+        (TVOS_APP, "Pley for Apple TV", "pley-tv/1.0", "pley-tv/1.0"),
     ] {
         let asked = form(&[("client_id", client_id), ("scope", "library play")]);
         let started =
@@ -769,16 +927,23 @@ async fn kodi_and_roku_sign_in_only_with_a_code() {
 
         // They have no browser: pley's sign-in page has no return address for
         // them, so no code is ever sent anywhere.
-        let query = form(&[
-            ("response_type", "code"),
-            ("client_id", client_id),
-            ("redirect_uri", "app.pley.kodi:/oauth/callback"),
-            ("code_challenge", "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"),
-            ("code_challenge_method", "S256"),
-        ]);
-        let page =
-            app.browser_call(Method::POST, "/api/oauth/requests", &admin, Some(json!({"query": query})), &[]).await;
-        assert_eq!(page.status, StatusCode::BAD_REQUEST, "{}", page.text());
+        for redirect_uri in ["app.pley.kodi:/oauth/callback", "app.pley.apple:/oauth/callback"] {
+            let query = form(&[
+                ("response_type", "code"),
+                ("client_id", client_id),
+                ("redirect_uri", redirect_uri),
+                ("code_challenge", "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"),
+                ("code_challenge_method", "S256"),
+            ]);
+            let page =
+                app.browser_call(Method::POST, "/api/oauth/requests", &admin, Some(json!({"query": query})), &[]).await;
+            assert_eq!(page.status, StatusCode::BAD_REQUEST, "{redirect_uri}: {}", page.text());
+        }
+    }
+    // Home Assistant may ask for no more than its description allows.
+    for scope in ["profiles", "library playlists", "requests"] {
+        let refused = ask(&app, HOMEASSISTANT_APP, Some(scope), &[]).await;
+        assert_eq!(oauth_error(&refused), (StatusCode::BAD_REQUEST, "invalid_scope"), "{scope}");
     }
 }
 

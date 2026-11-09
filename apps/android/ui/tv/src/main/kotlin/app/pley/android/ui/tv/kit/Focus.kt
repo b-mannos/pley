@@ -11,10 +11,12 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusEventModifierNode
+import androidx.compose.ui.focus.FocusProperties
+import androidx.compose.ui.focus.FocusPropertiesModifierNode
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.FocusRequesterModifierNode
 import androidx.compose.ui.focus.FocusState
-import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.invalidateFocusProperties
 import androidx.compose.ui.focus.requestFocus
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.node.CompositionLocalConsumerModifierNode
@@ -50,26 +52,134 @@ val LocalTvRailFocus = staticCompositionLocalOf<TvRailFocus?> { null }
  * ([rail], [LocalTvRailFocus]'s), never to whatever is geometrically
  * nearest, such as another row's tile scrolled under the rail. Leaving it
  * to the right is refused when [stopRight], so Right stops at a row's end
- * (D-pad rule 3).
+ * (D-pad rule 3). A held Left stops at the start instead (rule 5): only a
+ * press of its own opens the rail, so scrolling back along a row never
+ * opens it by itself.
  *
  * Put it before the group's focusRestorer: the restorer's own exit (saving
  * the focused child) still runs first.
  */
 fun Modifier.railOnLeftStopOnRight(rail: TvRailFocus?, stopRight: Boolean = true): Modifier =
-    focusProperties {
-        val inner = onExit
-        onExit = {
+    this then RailOnLeftElement(rail, stopRight)
+
+private data class RailOnLeftElement(val rail: TvRailFocus?, val stopRight: Boolean) : ModifierNodeElement<RailOnLeftNode>() {
+    override fun create() = RailOnLeftNode(rail, stopRight)
+
+    override fun update(node: RailOnLeftNode) {
+        node.rail = rail
+        node.stopRight = stopRight
+        // The shell's rail comes and goes as it shows: focus asks the node again.
+        node.invalidateFocusProperties()
+    }
+
+    override fun InspectorInfo.inspectableProperties() {
+        name = "railOnLeftStopOnRight"
+        properties["stopRight"] = stopRight
+    }
+}
+
+private class RailOnLeftNode(var rail: TvRailFocus?, var stopRight: Boolean) :
+    Modifier.Node(),
+    FocusPropertiesModifierNode,
+    CompositionLocalConsumerModifierNode {
+    override fun applyFocusProperties(focusProperties: FocusProperties) {
+        val gate = currentValueOf(LocalKeyRepeatGate)
+        val rail = rail
+        val stopRight = stopRight
+        val inner = focusProperties.onExit
+        focusProperties.onExit = {
             inner()
             when (requestedFocusDirection) {
-                FocusDirection.Left -> if (rail != null) {
-                    cancelFocusChange()
-                    rail.focusCurrent()
+                FocusDirection.Left -> when {
+                    gate.holding -> cancelFocusChange()
+                    rail != null -> {
+                        cancelFocusChange()
+                        rail.focusCurrent()
+                    }
                 }
                 FocusDirection.Right -> if (stopRight) cancelFocusChange()
                 else -> Unit
             }
         }
     }
+}
+
+/**
+ * D-pad rule 5 at a list's ends: while a key is held, focus leaving this
+ * list [toward] one of these directions is refused, so a held key stops
+ * on the list's first or last element rather than run on into what comes
+ * next (the chips or tabs above a grid, the row under a page's last). A
+ * press of its own still goes there, as on a TV's home screen. A row keeps
+ * its own ends ([railOnLeftStopOnRight]).
+ *
+ * The list is a focus group (a lazy list or grid is one): put this before
+ * it, and before its focusRestorer or a focusProperties that sets onExit.
+ * The group's properties are set from the modifier nearest it outward, and
+ * those set onExit in place of what was set before them, where this one
+ * runs the exit set before it first (the restorer's, saving the focused
+ * child): after them, it would have no effect.
+ */
+fun Modifier.heldKeyStaysIn(toward: Set<FocusDirection>): Modifier = this then HeldKeyElement(toward, enter = false)
+
+/** The ends of a list that [heldKeyStaysIn] keeps a held key in. */
+object HeldEnds {
+    /** A column's top and bottom. */
+    val UpDown = setOf(FocusDirection.Up, FocusDirection.Down)
+
+    /** A row's start and end. */
+    val LeftRight = setOf(FocusDirection.Left, FocusDirection.Right)
+
+    /** A grid's every side. */
+    val All = UpDown + LeftRight
+}
+
+/**
+ * The other side of [heldKeyStaysIn], for what shares a list with the
+ * rows next to it (a page's hero, the first item of its column of rows):
+ * a held key's moves don't come into it, a press of its own does. Put it
+ * before the focus group it keeps, and before its focusRestorer, as
+ * [heldKeyStaysIn].
+ */
+fun Modifier.heldKeyStaysOut(): Modifier = this then HeldKeyElement(emptySet(), enter = true)
+
+private data class HeldKeyElement(val toward: Set<FocusDirection>, val enter: Boolean) : ModifierNodeElement<HeldKeyNode>() {
+    override fun create() = HeldKeyNode(toward, enter)
+
+    override fun update(node: HeldKeyNode) {
+        node.toward = toward
+        node.enter = enter
+        node.invalidateFocusProperties()
+    }
+
+    override fun InspectorInfo.inspectableProperties() {
+        name = if (enter) "heldKeyStaysOut" else "heldKeyStaysIn"
+        properties["toward"] = toward
+    }
+}
+
+private class HeldKeyNode(var toward: Set<FocusDirection>, var enter: Boolean) :
+    Modifier.Node(),
+    FocusPropertiesModifierNode,
+    CompositionLocalConsumerModifierNode {
+    override fun applyFocusProperties(focusProperties: FocusProperties) {
+        val gate = currentValueOf(LocalKeyRepeatGate)
+        if (enter) {
+            val inner = focusProperties.onEnter
+            focusProperties.onEnter = {
+                // Enter is focus asked for (coming back to a page), not a move. Refused, the group's own
+                // entry (a focusRestorer's choice of child) doesn't run.
+                if (gate.holding && requestedFocusDirection != FocusDirection.Enter) cancelFocusChange() else inner()
+            }
+        } else {
+            val toward = toward
+            val inner = focusProperties.onExit
+            focusProperties.onExit = {
+                inner()
+                if (gate.holding && requestedFocusDirection in toward) cancelFocusChange()
+            }
+        }
+    }
+}
 
 /**
  * Where focus was on a page, kept with the page's saved state, so coming
@@ -222,11 +332,13 @@ fun Modifier.tvSafeArea(): Modifier = padding(horizontal = TvSafeArea.Horizontal
  * the rows in view, so a requester on a row below them (the current
  * language far down a list of them, the 12th subtitle track) isn't
  * attached yet, and asking it alone leaves focus behind the panel.
- * Whether focus got there.
+ * It gives up once [wanted] says no (the panel closed while it waited),
+ * so focus isn't moved into a panel going away. Whether focus got there.
  */
-suspend fun LazyListState.focusRow(requester: FocusRequester): Boolean {
+suspend fun LazyListState.focusRow(requester: FocusRequester, wanted: () -> Boolean = { true }): Boolean {
     repeat(FOCUS_ROW_TRIES) {
         withFrameNanos { }
+        if (!wanted()) return false
         if (runCatching { requester.requestFocus() }.getOrDefault(false)) return true
         val info = layoutInfo
         val last = info.visibleItemsInfo.lastOrNull()?.index

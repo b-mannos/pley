@@ -3,6 +3,7 @@ package app.pley.android.player.session
 import app.pley.android.caps.CapsDecision
 import app.pley.android.caps.CapsSnapshot
 import app.pley.android.caps.PlaybackCapsPolicy
+import app.pley.android.model.Control
 import app.pley.android.model.DynamicRange
 import app.pley.android.model.ItemDetail
 import app.pley.android.model.MediaFile
@@ -11,6 +12,7 @@ import app.pley.android.model.PlaybackInfo
 import app.pley.android.model.PlaybackMethod
 import app.pley.android.model.PlaybackMode
 import app.pley.android.model.PlaybackRequest
+import app.pley.android.model.PlayingSession
 import app.pley.android.model.StreamKind
 import app.pley.android.model.caps.ClientCaps
 import app.pley.android.player.PlayRequest
@@ -134,11 +136,12 @@ object PlaybackPlan {
     private fun isCommentary(stream: MediaStream): Boolean = stream.title?.contains("commentary", ignoreCase = true) == true
 
     /**
-     * The subtitles to start with: as asked, else the profile's choice (the
-     * server applies its defaults to `selected_subtitle`); `null` is off,
-     * whatever the file flags as default.
+     * The subtitles to start with: as asked (`-1`: none, as a remote's cast
+     * asks), else the profile's choice (the server applies its defaults to
+     * `selected_subtitle`); `null` is off, whatever the file flags as default.
      */
     fun initialSubtitle(file: MediaFile?, requested: Long?): MediaStream? {
+        if (requested == PlayingSession.SUBTITLES_OFF.toLong()) return null
         val subs = subtitleStreams(file)
         return requested?.let { r -> subs.firstOrNull { it.index.toLong() == r } }
             ?: subs.firstOrNull { it.index == file?.selectedSubtitle }
@@ -157,6 +160,13 @@ object PlaybackPlan {
 
     /** Where the server's .mks of picture subtitles [index] of [fileId] is. */
     fun pictureSubtitlesPath(fileId: Long, index: Int): String = "/api/files/$fileId/subtitles/$index.mks"
+
+    /**
+     * [url] asked for from where the player is ([atMs] of the file, the
+     * start too): a track the server hasn't copied out of its file yet comes
+     * from there first.
+     */
+    fun pictureUrlAt(url: String, atMs: Long): String = "$url${if ('?' in url) '&' else '?'}at=${atMs.coerceAtLeast(0)}"
 
     /** Whether this device decodes [stream]'s audio or sends it as it is to the receiver. */
     fun audioPlaysHere(stream: MediaStream?, caps: CapsSnapshot?): Boolean {
@@ -208,9 +218,17 @@ object PlaybackPlan {
      * The body of POST /api/playback for [choices]. Automatic audio names no
      * track, even for a stream: the server picks it. [keepPrevious] when it
      * is made ready while the session before plays on: the server leaves
-     * that one to the player to end.
+     * that one to the player to end. [controls]: what the player obeys
+     * from the remote.
      */
-    fun request(itemId: Long, choices: Choices, clientId: String, caps: CapsSnapshot?, keepPrevious: Boolean = false): PlaybackRequest {
+    fun request(
+        itemId: Long,
+        choices: Choices,
+        clientId: String,
+        caps: CapsSnapshot?,
+        keepPrevious: Boolean = false,
+        controls: List<Control>? = null,
+    ): PlaybackRequest {
         val audioHere = audioPlaysHere(choices.audio, caps)
         // Named when the server must convert it, or when it isn't the one the
         // details give (without a track named, the server plays that one or
@@ -228,6 +246,7 @@ object PlaybackPlan {
             clientId = clientId,
             keepPrevious = true.takeIf { keepPrevious },
             caps = caps?.report ?: ClientCaps(),
+            controls = controls,
         )
     }
 

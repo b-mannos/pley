@@ -237,6 +237,10 @@ MASKS = {
 # library's row can end with "See all" in: the others' layouts go without.
 COUNTED = ("poster", "grid", "square")
 SEE_ALL = ("poster", "square")
+# The library grid's posters, which carry quality badges when its sort or
+# filters make them say something (window.Library.badged).
+BADGED = ("grid",)
+ON_ART = "CC0B0D10"  # bg at 80 %, under words on a picture
 
 ZOOM_TILE = "effect=zoom start=100 end=108 time=150 tween=cubic easing=out center=auto"
 ZOOM_PILL = "effect=zoom start=100 end=105 time=150 tween=cubic easing=out center=auto"
@@ -350,6 +354,32 @@ def pill(id_, icon: str | None, text="", navigation=None) -> ET.Element:
     )
 
 
+def quality_badges(h: int) -> list:
+    """A poster's quality badges at the art's foot, from the left: "4K"
+    (ListItem.Property(resolution)), then its dynamic range's
+    (ListItem.Property(range)), after "4K" or in its place. A list's items
+    can't size a pill to its word, so each word has a pill of its own."""
+    top = h - L.BADGE_INSET - L.BADGE_HEIGHT
+    resolution = "ListItem.Property(resolution)"
+
+    def pill(left, key, shown):
+        word, width = L.BADGES[key]
+        return [
+            image(left, top, width, L.BADGE_HEIGHT, "round4.png", color=ON_ART, border=6, visible=shown),
+            label(left, top, width, L.BADGE_HEIGHT, L.FONT_BADGE, L.FG, word, align="center", visible=shown),
+        ]
+
+    out = pill(L.BADGE_INSET, "4k", "String.IsEqual(%s,4k)" % resolution)
+    after = L.BADGE_INSET + L.BADGES["4k"][1] + L.BADGE_GAP
+    for key in L.BADGES:
+        if key == "4k":
+            continue
+        shown = "String.IsEqual(ListItem.Property(range),%s)" % key
+        out += pill(L.BADGE_INSET, key, shown + " + String.IsEmpty(%s)" % resolution)
+        out += pill(after, key, shown + " + !String.IsEmpty(%s)" % resolution)
+    return out
+
+
 def tile_parts(shape: L.Shape, list_id: int, focused: bool) -> list:
     """What a tile draws (ArtworkTile): its placeholder and title, its art,
     progress, watched tick or unwatched count, and the caption under it.
@@ -397,6 +427,8 @@ def tile_parts(shape: L.Shape, list_id: int, focused: bool) -> list:
                 image(w - 12 - width, 12, width, 36, "round4.png", color=L.ACCENT, border=6, visible=shown),
                 label(w - 12 - width, 12, width, 36, L.FONT_BADGE, L.ON_ACCENT, "$INFO[ListItem.Property(count)]", align="center", visible=shown),
             ]
+    if shape.name in BADGED:
+        well += quality_badges(h)
     if shape.name in SEE_ALL:
         # "See all", the last tile of a library's rows.
         see_all = "!" + plain
@@ -520,16 +552,16 @@ def rail() -> list:
     """The rail (TvRail): collapsed, icons with the current page's marked;
     with focus, open over the page with each entry's name."""
     entries = [
-        (L.RAIL_SEARCH, "search", "icon-search.png", "$ADDON[plugin.video.pley 30003]"),
-        (L.RAIL_HOME, "home", "icon-house.png", "$ADDON[plugin.video.pley 30100]"),
-        (L.RAIL_LIVE, "live", "icon-tv-minimal.png", "$ADDON[plugin.video.pley 30247]"),
+        (L.RAIL_SEARCH, "search", "icon-search.png", L.word(30003)),
+        (L.RAIL_HOME, "home", "icon-house.png", L.word(30100)),
+        (L.RAIL_LIVE, "live", "icon-tv-minimal.png", L.word(30247)),
     ]
     entries += [(e, "lib%d" % i, "icon-folder.png", "") for i, e in enumerate(L.RAIL_LIBRARIES)]
     entries += [
-        (L.RAIL_ALL_LIBRARIES, "libraries", "icon-layers.png", "$ADDON[plugin.video.pley 30207]"),
-        (L.RAIL_PLAYLISTS, "playlists", "icon-list-music.png", "$ADDON[plugin.video.pley 30004]"),
-        (L.RAIL_COLLECTIONS, "collections", "icon-layers.png", "$ADDON[plugin.video.pley 30005]"),
-        (L.RAIL_SETTINGS, "settings", "icon-settings.png", "$ADDON[plugin.video.pley 30027]"),
+        (L.RAIL_ALL_LIBRARIES, "libraries", "icon-layers.png", L.word(30207)),
+        (L.RAIL_PLAYLISTS, "playlists", "icon-list-music.png", L.word(30004)),
+        (L.RAIL_COLLECTIONS, "collections", "icon-layers.png", L.word(30005)),
+        (L.RAIL_SETTINGS, "settings", "icon-settings.png", L.word(30027)),
     ]
     order = [L.RAIL_AVATAR] + [e for e, _, _, _ in entries]
     opened = "ControlGroup(%d).HasFocus" % L.RAIL
@@ -567,6 +599,10 @@ def rail() -> list:
             ],
         )
     )
+    # Each entry's group is a pill tall; the window places them (setup_rail),
+    # and the icon and name stay in its middle when it makes pills shorter.
+    row = L.RAIL_ROW
+    middle = (row - 40) // 2
     y = L.RAIL_TOP
     for entry, key, icon, text in entries:
         if entry == L.RAIL_SETTINGS:
@@ -579,19 +615,19 @@ def rail() -> list:
             group(
                 L.rail_group(entry),
                 0,
-                y - 50,
+                y - row // 2,
                 544,
-                100,
+                row,
                 [
-                    image(8, 0, 528, 100, "round12.png", id_=L.rail_pill(entry), color=L.SURFACE3, border=14, visible=opened + " + " + current + " + !" + focused),
-                    image(16, 30, 8, 40, "round4.png", color=L.ACCENT, border=4, visible="!" + opened + " + " + current),
-                    button(entry, 8, 0, 528, 100, "round12.png", None, animations=[anim("Focus", ZOOM_PILL)], navigation=links(entry)),
-                    image(48, 30, 40, 40, icon, id_=rest_icon, color=L.MUTED, visible="!%s + !%s" % (focused, current)),
-                    image(48, 30, 40, 40, icon, id_=current_icon, color=L.FG, visible="!%s + %s" % (focused, current)),
-                    image(48, 30, 40, 40, icon, id_=focus_icon, color=L.ON_ACCENT, visible=focused),
-                    label(113, 0, 400, 100, L.FONT_BODY_LARGE, L.MUTED, text, id_=rest_label, visible="%s + !%s + !%s" % (opened, focused, current), animations=fades(150)),
-                    label(113, 0, 400, 100, L.FONT_BODY_LARGE, L.FG, text, id_=current_label, visible="%s + !%s + %s" % (opened, focused, current), animations=fades(150)),
-                    label(113, 0, 400, 100, L.FONT_BODY_LARGE, L.ON_ACCENT, text, id_=focus_label, visible=focused),
+                    image(8, 0, 528, row, "round12.png", id_=L.rail_pill(entry), color=L.SURFACE3, border=14, visible=opened + " + " + current + " + !" + focused),
+                    image(16, middle, 8, 40, "round4.png", color=L.ACCENT, border=4, visible="!" + opened + " + " + current),
+                    button(entry, 8, 0, 528, row, "round12.png", None, animations=[anim("Focus", ZOOM_PILL)], navigation=links(entry)),
+                    image(48, middle, 40, 40, icon, id_=rest_icon, color=L.MUTED, visible="!%s + !%s" % (focused, current)),
+                    image(48, middle, 40, 40, icon, id_=current_icon, color=L.FG, visible="!%s + %s" % (focused, current)),
+                    image(48, middle, 40, 40, icon, id_=focus_icon, color=L.ON_ACCENT, visible=focused),
+                    label(113, 0, 400, row, L.FONT_BODY_LARGE, L.MUTED, text, id_=rest_label, visible="%s + !%s + !%s" % (opened, focused, current), animations=fades(150)),
+                    label(113, 0, 400, row, L.FONT_BODY_LARGE, L.FG, text, id_=current_label, visible="%s + !%s + %s" % (opened, focused, current), animations=fades(150)),
+                    label(113, 0, 400, row, L.FONT_BODY_LARGE, L.ON_ACCENT, text, id_=focus_label, visible=focused),
                 ],
             )
         )
@@ -611,10 +647,10 @@ def home() -> ET.Element:
         L.BUTTON + L.BUTTON_LABEL_ROOM,
         [
             pill(L.HOME_PLAY, "play"),
-            round_button(L.HOME_FROM_START, "rotate-ccw", "$ADDON[plugin.video.pley 30101]"),
-            round_button(L.HOME_INFO, "info", "$ADDON[plugin.video.pley 30102]"),
-            round_button(L.HOME_WATCHED, "circle-check", "$ADDON[plugin.video.pley 30019]"),
-            round_button(L.HOME_UNWATCHED, "circle-check", "$ADDON[plugin.video.pley 30020]"),
+            round_button(L.HOME_FROM_START, "rotate-ccw", L.word(30101)),
+            round_button(L.HOME_INFO, "info", L.word(30102)),
+            round_button(L.HOME_WATCHED, "circle-check", L.word(30019)),
+            round_button(L.HOME_UNWATCHED, "circle-check", L.word(30020)),
         ],
         gap=L.BUTTON_GAP,
         navigation=nav(ondown=to_rows, onleft=str(L.RAIL)),
@@ -668,15 +704,15 @@ def item() -> ET.Element:
         L.BUTTON + L.BUTTON_LABEL_ROOM,
         [
             pill(L.ITEM_PLAY, "play"),
-            round_button(L.ITEM_SHUFFLE, "shuffle", "$ADDON[plugin.video.pley 30214]"),
-            round_button(L.ITEM_FROM_START, "rotate-ccw", "$ADDON[plugin.video.pley 30101]"),
-            round_button(L.ITEM_WATCHED, "circle-check", "$ADDON[plugin.video.pley 30019]"),
-            round_button(L.ITEM_UNWATCHED, "eye-off", "$ADDON[plugin.video.pley 30020]"),
-            round_button(L.ITEM_ADD_TO_LIST, "bookmark-plus", "$ADDON[plugin.video.pley 30021]"),
-            round_button(L.ITEM_IN_LIST, "bookmark-check", "$ADDON[plugin.video.pley 30103]"),
-            round_button(L.ITEM_TRAILER, "film", "$ADDON[plugin.video.pley 30104]"),
-            round_button(L.ITEM_ADD_TO_PLAYLIST, "list-plus", "$ADDON[plugin.video.pley 30180]"),
-            round_button(L.ITEM_MORE, "ellipsis", "$ADDON[plugin.video.pley 30105]"),
+            round_button(L.ITEM_SHUFFLE, "shuffle", L.word(30214)),
+            round_button(L.ITEM_FROM_START, "rotate-ccw", L.word(30101)),
+            round_button(L.ITEM_WATCHED, "circle-check", L.word(30019)),
+            round_button(L.ITEM_UNWATCHED, "eye-off", L.word(30020)),
+            round_button(L.ITEM_ADD_TO_LIST, "bookmark-plus", L.word(30021)),
+            round_button(L.ITEM_IN_LIST, "bookmark-check", L.word(30103)),
+            round_button(L.ITEM_TRAILER, "film", L.word(30104)),
+            round_button(L.ITEM_ADD_TO_PLAYLIST, "list-plus", L.word(30180)),
+            round_button(L.ITEM_MORE, "ellipsis", L.word(30105)),
         ],
         gap=L.BUTTON_GAP,
         navigation=nav(ondown=str(L.ITEM_SEASONS), onleft=str(L.RAIL)),
@@ -765,7 +801,7 @@ def library() -> ET.Element:
                     80,
                     "round12.png",
                     "round12.png" if chosen else None,
-                    "$ADDON[plugin.video.pley %d]" % text,
+                    L.word(text),
                     font=L.FONT_BODY_LARGE,
                     color=L.FG if chosen else L.MUTED,
                     offset=32,
@@ -791,11 +827,12 @@ def library() -> ET.Element:
             chip(L.LIBRARY_SORT, "arrow-up-narrow-wide", ""),
             chip(L.LIBRARY_SORT_DOWN, "arrow-down-wide-narrow", ""),
             chip(L.LIBRARY_FILTER, "sliders-horizontal", ""),
-            chip(L.LIBRARY_UNWATCHED, None, "$ADDON[plugin.video.pley 30109]"),
+            chip(L.LIBRARY_FILTER_ON, "check", ""),
+            chip(L.LIBRARY_UNWATCHED, None, L.word(30109)),
             chip(L.LIBRARY_UNWATCHED_ON, "check", ""),
-            chip(L.LIBRARY_GENRE, None, "$ADDON[plugin.video.pley 30110]"),
+            chip(L.LIBRARY_GENRE, None, L.word(30110)),
             chip(L.LIBRARY_GENRE_ON, "check", ""),
-            chip(L.LIBRARY_YEAR, None, "$ADDON[plugin.video.pley 30111]"),
+            chip(L.LIBRARY_YEAR, None, L.word(30111)),
             chip(L.LIBRARY_YEAR_ON, "check", ""),
             control("label", L.LIBRARY_COUNT, width="auto", height=80, font=L.FONT_LABEL, textcolor=L.MUTED, aligny="center", label=""),
         ],
@@ -1044,7 +1081,7 @@ def live_page() -> ET.Element:
                 autoscroll="false",
                 label="$INFO[%s.Property(description)]" % item,
             ),
-            label(x, y + ph + 414, pw, 34, L.FONT_CAPTION, L.SUBTLE, "$ADDON[plugin.video.pley 30257]", visible="!String.IsEmpty(%s.Property(next))" % item),
+            label(x, y + ph + 414, pw, 34, L.FONT_CAPTION, L.SUBTLE, L.word(30257), visible="!String.IsEmpty(%s.Property(next))" % item),
             label(x, y + ph + 450, pw, 40, L.FONT_LABEL, L.FG, "$INFO[%s.Property(next)]" % item),
         ],
         visible="Integer.IsGreater(Container(%d).NumItems,0)" % L.LIVE_LIST,
@@ -1056,7 +1093,7 @@ def live_page() -> ET.Element:
         L.WIDTH,
         L.HEIGHT,
         [
-            label(L.GUTTER, 64, L.LIVE_LIST_X - L.GUTTER, 68, L.FONT_PAGE, L.FG, "$ADDON[plugin.video.pley 30247]", id_=L.LIVE_TITLE),
+            label(L.GUTTER, 64, L.LIVE_LIST_X - L.GUTTER, 68, L.FONT_PAGE, L.FG, L.word(30247), id_=L.LIVE_TITLE),
             label(L.LIVE_LIST_X + 16, 72, width - 16, 56, L.FONT_SECTION, L.FG, id_=L.LIVE_HEADING),
             label(L.LIVE_LIST_X + 16, 124, width - 16, 36, L.FONT_CAPTION, L.MUTED, id_=L.LIVE_COUNT),
             categories,
@@ -1118,7 +1155,7 @@ def libraries_page() -> ET.Element:
         L.WIDTH,
         L.HEIGHT,
         [
-            label(L.GUTTER, 64, 1000, 68, L.FONT_PAGE, L.FG, "$ADDON[plugin.video.pley 30207]", id_=L.LIBRARIES_TITLE),
+            label(L.GUTTER, 64, 1000, 68, L.FONT_PAGE, L.FG, L.word(30207), id_=L.LIBRARIES_TITLE),
             grouplist(
                 L.LIBRARIES_BUTTONS,
                 1000,
@@ -1186,7 +1223,7 @@ def profiles_page() -> ET.Element:
         L.HEIGHT,
         [
             image(0, 0, L.WIDTH, L.HEIGHT, "glow.png"),
-            label(0, 220, L.WIDTH, 80, L.FONT_PAGE, L.FG, "$ADDON[plugin.video.pley 30219]", id_=L.PROFILES_TITLE, align="center"),
+            label(0, 220, L.WIDTH, 80, L.FONT_PAGE, L.FG, L.word(30219), id_=L.PROFILES_TITLE, align="center"),
             faces,
             label(400, 800, L.WIDTH - 800, 100, L.FONT_BODY, L.DANGER_TEXT, id_=L.PROFILES_NOTE, align="center", wrap=True, aligny="top"),
         ],
@@ -1297,15 +1334,15 @@ def signin() -> ET.Element:
         image(0, 0, L.WIDTH, L.HEIGHT, "glow.png"),
         image(L.GUTTER, 112, 80, 80, "logo.png"),
         label(L.GUTTER + 112, 112, 400, 80, L.FONT_HERO, L.FG, "Pley"),
-        label(L.GUTTER, 248, 1000, 72, L.FONT_PAGE, L.FG, "$ADDON[plugin.video.pley 30171]"),
-        step(L.SIGNIN_STEP_SCAN, None, 1, 352, "$ADDON[plugin.video.pley 30172]"),
+        label(L.GUTTER, 248, 1000, 72, L.FONT_PAGE, L.FG, L.word(30171)),
+        step(L.SIGNIN_STEP_SCAN, None, 1, 352, L.word(30172)),
         step(L.SIGNIN_STEP_GO, L.SIGNIN_NUMBER_GO, 2, 432, "", text_id=L.SIGNIN_ADDRESS),
-        step(L.SIGNIN_STEP_ENTER, L.SIGNIN_NUMBER_ENTER, 3, 512, "$ADDON[plugin.video.pley 30174]"),
+        step(L.SIGNIN_STEP_ENTER, L.SIGNIN_NUMBER_ENTER, 3, 512, L.word(30174)),
     ] + code_box(L.GUTTER, L.SIGNIN_CODE_A) + [
         image(L.GUTTER + 328, 664, 40, 8, "round4.png", color=L.SUBTLE, border=4),
     ] + code_box(L.GUTTER + 396, L.SIGNIN_CODE_B) + [
-        label(L.GUTTER, 776, 1100, 40, L.FONT_BODY, L.MUTED, "$ADDON[plugin.video.pley 30175]"),
-        label(L.GUTTER, 828, 1100, 40, L.FONT_BODY, L.MUTED, "$ADDON[plugin.video.pley 30176]"),
+        label(L.GUTTER, 776, 1100, 40, L.FONT_BODY, L.MUTED, L.word(30175)),
+        label(L.GUTTER, 828, 1100, 40, L.FONT_BODY, L.MUTED, L.word(30176)),
         # Empty until the server says it requires two-step sign-in, which
         # it answers after the screen shows.
         label(L.GUTTER, 880, 1100, 40, L.FONT_BODY, L.MUTED, id_=L.SIGNIN_TWO_STEP),
@@ -1320,10 +1357,10 @@ def signin() -> ET.Element:
             [
                 image(0, 0, 536, 536, "round12.png", color="FFFFFFFF", border=14),
                 image(32, 32, 472, 472, "", id_=L.SIGNIN_QR, aspect="keep"),
-                label(0, 560, 536, 40, L.FONT_BODY, L.MUTED, "$ADDON[plugin.video.pley 30177]", id_=L.SIGNIN_SCAN, align="center"),
+                label(0, 560, 536, 40, L.FONT_BODY, L.MUTED, L.word(30177), id_=L.SIGNIN_SCAN, align="center"),
             ],
         ),
-        grouplist(None, 1200, 868, 536, L.BUTTON, [pill(L.SIGNIN_CHANGE, None, "$ADDON[plugin.video.pley 30178]")], align="center"),
+        grouplist(None, 1200, 868, 536, L.BUTTON, [pill(L.SIGNIN_CHANGE, None, L.word(30178))], align="center"),
     ]:
         controls.append(c)
     w.append(controls)

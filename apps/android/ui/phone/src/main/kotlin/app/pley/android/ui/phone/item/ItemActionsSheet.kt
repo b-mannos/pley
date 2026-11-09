@@ -19,10 +19,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import app.pley.android.common.sentenceOf
+import app.pley.android.common.errorSentence
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.icon.PleyIcon
 import app.pley.android.designsystem.icon.PleyIcons
+import app.pley.android.designsystem.text.asString
 import app.pley.android.screens.item.ItemAction
 import app.pley.android.screens.item.ItemActionsUiState
 import app.pley.android.screens.item.ItemActionsViewModel
@@ -31,15 +32,18 @@ import app.pley.android.screens.item.destination
 import app.pley.android.ui.phone.R
 import app.pley.android.ui.phone.kit.DelayedSpinner
 import app.pley.android.ui.phone.kit.SheetAction
+import app.pley.android.ui.phone.remote.CastTarget
+import app.pley.android.ui.phone.remote.LocalPlayOn
+import app.pley.android.ui.phone.remote.canPlayOn
 import app.pley.android.ui.phone.shell.LocalPhoneNavigator
 import app.pley.android.ui.phone.shell.LocalPhoneShell
 
 /**
  * An item's action sheet (PleyKey.ItemActions; design spec §3.4): its
- * name, then Play or Resume, From start, the watched mark, Remove from
- * Continue Watching (from that row), My List, Add to playlist, and Go to
- * show or season. Choosing one closes the sheet; the
- * action carries on after it.
+ * name, then Play or Resume, From start, Play on… (while another device
+ * takes titles), the watched mark, Remove from Continue Watching (from
+ * that row), My List, Add to playlist, and Go to show or season. Choosing
+ * one closes the sheet; the action carries on after it.
  */
 @Composable
 internal fun ItemActionsSheet(itemId: Long, continueWatching: Boolean = false) {
@@ -62,7 +66,7 @@ internal fun ItemActionsSheet(itemId: Long, continueWatching: Boolean = false) {
                 DelayedSpinner(stringResource(R.string.item_loading))
             }
             is ItemActionsUiState.Failed -> Text(
-                sentenceOf(s.error),
+                errorSentence(s.error).asString(),
                 style = MaterialTheme.typography.bodyMedium,
                 color = PleyColors.DangerText,
                 modifier = Modifier.padding(24.dp),
@@ -87,7 +91,7 @@ internal fun ItemActionsSheet(itemId: Long, continueWatching: Boolean = false) {
                     )
                 }
                 Box(Modifier.height(8.dp))
-                s.actions.forEach { action ->
+                val row: @Composable (ItemAction) -> Unit = { action ->
                     val (label, icon) = actionLook(action)
                     SheetAction(
                         label = label,
@@ -100,6 +104,22 @@ internal fun ItemActionsSheet(itemId: Long, continueWatching: Boolean = false) {
                         },
                     )
                 }
+                // Play on… after the ways to play it here (a track's, an album's: opening its page).
+                val playOn = LocalPlayOn.current
+                val playing = s.actions.takeWhile { it in PLAY_ACTIONS }
+                playing.forEach { row(it) }
+                CastTarget.of(s.item)?.takeIf { canPlayOn(it.kind) }?.let { cast ->
+                    SheetAction(
+                        label = stringResource(R.string.play_on),
+                        icon = PleyIcons.Cast,
+                        onClick = {
+                            navigator.back()
+                            playOn?.playOn(cast)
+                        },
+                        modifier = Modifier.testTag(ITEM_ACTIONS_PLAY_ON),
+                    )
+                }
+                s.actions.drop(playing.size).forEach { row(it) }
             }
         }
     }
@@ -122,4 +142,8 @@ private fun actionLook(action: ItemAction): Pair<String, PleyIcon> = when (actio
     ItemAction.Open -> stringResource(R.string.item_action_open) to PleyIcons.ArrowRight
 }
 
+/** What plays the item here, which Play on… follows. */
+private val PLAY_ACTIONS = setOf(ItemAction.Play, ItemAction.Resume, ItemAction.FromStart, ItemAction.Open)
+
 internal const val ITEM_ACTIONS = "pley.item.actions"
+internal const val ITEM_ACTIONS_PLAY_ON = "pley.item.actions.play_on"

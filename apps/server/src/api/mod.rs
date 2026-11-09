@@ -3,18 +3,20 @@
 mod accounts;
 mod activity;
 mod admin;
-mod auth;
+pub(crate) mod auth;
 mod browse;
 pub(crate) mod collections;
+mod compatibility_tokens;
 pub(crate) mod editing;
 mod history;
 pub(crate) mod items;
 mod libraries;
 mod livetv;
 mod oauth;
-mod people;
+pub(crate) mod people;
 pub(crate) mod playback;
 mod playlists;
+pub(crate) mod remote;
 mod requests;
 mod subtitles;
 mod two_step;
@@ -39,6 +41,7 @@ pub fn router(state: AppState) -> Router {
     let api = Router::new()
         .route("/health", get(|| async { axum::Json(serde_json::json!({ "status": "ok" })) }))
         .route("/server", get(auth::server_status))
+        .route("/server/proof-key", get(auth::server_proof_key))
         .route("/setup", post(auth::setup))
         .route("/auth/login", post(auth::login))
         .route("/auth/logout", post(auth::logout))
@@ -52,6 +55,7 @@ pub fn router(state: AppState) -> Router {
         .route("/me", patch(accounts::update_me))
         .route("/me/pin", put(accounts::set_my_pin))
         .route("/me/track-defaults", put(accounts::set_track_defaults))
+        .route("/me/language", put(accounts::set_language))
         .route("/me/libraries/order", put(libraries::set_my_order).delete(libraries::forget_my_order))
         .route(
             "/me/avatar",
@@ -61,6 +65,8 @@ pub fn router(state: AppState) -> Router {
         .route("/me/devices/{id}", delete(accounts::sign_out_device))
         .route("/me/apps", get(oauth::my_apps))
         .route("/me/apps/{id}", delete(oauth::sign_out_my_app))
+        .route("/me/compatibility-tokens", get(compatibility_tokens::list).post(compatibility_tokens::create))
+        .route("/me/compatibility-tokens/{id}", delete(compatibility_tokens::revoke))
         .route("/oauth/requests", post(oauth::create_request).layer(DefaultBodyLimit::max(FORM_MAX)))
         .route("/oauth/requests/{id}", post(oauth::decide))
         .route("/oauth/requests/{id}/continue", get(oauth::continue_to_app))
@@ -184,7 +190,11 @@ pub fn router(state: AppState) -> Router {
         .route("/files/{id}/trickplay", get(playback::trickplay))
         .route("/files/{id}/trickplay/{sheet}", get(playback::trickplay_sheet))
         .route("/files/{id}/chapters/{image}", get(playback::chapter_image))
+        .route("/sessions", get(remote::list))
         .route("/sessions/{id}", delete(playback::stop_session))
+        .route("/sessions/{id}/command", post(remote::command))
+        .route("/remote/devices", get(remote::devices))
+        .route("/remote/devices/{id}/cast", post(remote::cast))
         .route("/activity", get(activity::activity))
         .route("/events", get(activity::events))
         .route("/users", get(accounts::list_users).post(accounts::create_user))
@@ -197,6 +207,8 @@ pub fn router(state: AppState) -> Router {
         .route("/invites", get(accounts::list_invites).post(accounts::create_invite))
         .route("/invites/{code}", get(accounts::check_invite).delete(accounts::delete_invite))
         .route("/invites/{code}/accept", post(accounts::accept_invite))
+        .route("/ratings/systems", get(accounts::rating_systems))
+        .route("/labels", get(editing::labels))
         .route("/system", get(admin::system))
         .route("/system/resources", get(admin::resources))
         .route("/system/library-work", get(admin::library_work))
@@ -209,7 +221,7 @@ pub fn router(state: AppState) -> Router {
         .route("/settings/test", post(admin::test_service))
         .route("/settings/arr", post(admin::arr_options))
         .route("/network", get(admin::get_network).put(admin::put_network))
-        .route("/fs", get(admin::browse_fs))
+        .route("/fs", post(admin::browse_fs))
         .fallback(|| async { AppError::not_found("no such endpoint") })
         .layer(SetResponseHeaderLayer::if_not_present(header::CACHE_CONTROL, HeaderValue::from_static("no-store")));
 
@@ -248,8 +260,14 @@ pub fn router(state: AppState) -> Router {
             axum::http::StatusCode::REQUEST_TIMEOUT,
             Duration::from_secs(60 * 30),
         ))
-        // The Plex-compatible API's clients, before anything of pley's.
+        // The compatibility APIs' clients, before anything of pley's: the
+        // Jellyfin-compatible API's first, which leaves the requests that
+        // name themselves the Plex-compatible API's to it.
         .layer(axum::middleware::from_fn_with_state(crate::plex::OnWebPort::new(&state), crate::plex::on_web_port))
+        .layer(axum::middleware::from_fn_with_state(
+            crate::jellyfin::OnWebPort::new(&state),
+            crate::jellyfin::on_web_port,
+        ))
         .with_state(state)
 }
 
@@ -303,8 +321,9 @@ fn with_proxy_port(headers: &axum::http::HeaderMap, addresses: &[String]) -> Opt
 /// A website's page in a sandboxed frame sends `null` too: what it gets is
 /// only what a token it holds opens (no cookie is let through, see
 /// [`tv_app_cors`]), and starting a TV sign-in still takes someone signed
-/// in to type its code and allow it.
-fn tv_app_origin(origin: &[u8]) -> bool {
+/// in to type its code and allow it. Nor does it get a server's proof
+/// (`auth::server_status`).
+pub(crate) fn tv_app_origin(origin: &[u8]) -> bool {
     matches!(origin, b"null" | b"file://") || origin.starts_with(b"app://")
 }
 
@@ -393,7 +412,16 @@ pub(crate) fn loggable_uri(uri: &axum::http::Uri) -> String {
         .find_map(|prefix| uri.path().strip_prefix(prefix).map(|rest| (prefix, rest)));
     let path = match keyed {
         Some((prefix, rest)) => format!("{prefix}…{}", rest.find('/').map_or("", |at| &rest[at..])),
-        None => uri.path().to_owned(),
+        // A Jellyfin media source's id stands for its token.
+        None => {
+            uri.path()
+                .split('/')
+                .map(|segment| {
+                    if segment.len() == 64 && segment.bytes().all(|b| b.is_ascii_hexdigit()) { "…" } else { segment }
+                })
+                .collect::<Vec<_>>()
+                .join("/")
+        }
     };
     let Some(query) = uri.query() else { return path };
     let query: Vec<String> = query
@@ -405,6 +433,8 @@ pub(crate) fn loggable_uri(uri: &axum::http::Uri) -> String {
                     "token"
                         | "x-plex-token"
                         | "api_key"
+                        | "apikey"
+                        | "mediasourceid"
                         | "code"
                         | "state"
                         | "code_verifier"
@@ -456,8 +486,9 @@ mod tests {
 
     #[test]
     fn logs_leave_codes_and_tokens_out() {
-        let uri: axum::http::Uri = "/api/files/3/stream?token=secret&t=10&X-Plex-Token=abc&api_key=k".parse().unwrap();
-        assert_eq!(loggable_uri(&uri), "/api/files/3/stream?token=…&t=10&X-Plex-Token=…&api_key=…");
+        let uri: axum::http::Uri =
+            "/api/files/3/stream?token=secret&t=10&ApiKey=abc&api_key=k&X-Plex-Token=p".parse().unwrap();
+        assert_eq!(loggable_uri(&uri), "/api/files/3/stream?token=…&t=10&ApiKey=…&api_key=…&X-Plex-Token=…");
         let uri: axum::http::Uri = "/api/x?code=c0de&state=st4te".parse().unwrap();
         assert_eq!(loggable_uri(&uri), "/api/x?code=…&state=…");
         let uri =

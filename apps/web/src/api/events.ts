@@ -24,6 +24,21 @@ export function onServerEvent(listener: Listener): () => void {
   };
 }
 
+/** The stream's query while this app takes casts (`receiver=…&casts=…`), else null. */
+let receiverQuery: string | null = null;
+const receiverChanged = new Set<() => void>();
+
+/**
+ * Opens the event stream as a receiver of casts with `query` (docs/API.md,
+ * "Casting"), or as a plain stream with `null`: a stream already open opens
+ * again with it, for the user's remotes to list this device, or no longer.
+ */
+export function setReceiver(query: string | null) {
+  if (query === receiverQuery) return;
+  receiverQuery = query;
+  for (const changed of receiverChanged) changed();
+}
+
 /** `user_state_changed` events heard and not acted on yet. */
 interface WatchStateChange {
   ids: Set<Id>;
@@ -161,6 +176,8 @@ export function useServerEvents(userId: Id | null) {
     const resync = () => {
       void qc.invalidateQueries({ queryKey: keys.libraries });
       void qc.invalidateQueries({ queryKey: keys.activity });
+      void qc.invalidateQueries({ queryKey: keys.sessions });
+      void qc.invalidateQueries({ queryKey: keys.remoteDevices });
       void qc.invalidateQueries({ queryKey: ["hubs"] });
       void qc.invalidateQueries({ queryKey: ["library"] });
       void qc.invalidateQueries({ queryKey: ["item"] });
@@ -320,8 +337,14 @@ export function useServerEvents(userId: Id | null) {
           void qc.invalidateQueries({ queryKey: keys.libraries });
           void qc.invalidateQueries({ queryKey: ["hubs"] });
           break;
+        // A device that takes casts coming or going says so too.
         case "sessions_changed":
           void qc.invalidateQueries({ queryKey: keys.activity });
+          void qc.invalidateQueries({ queryKey: keys.sessions });
+          void qc.invalidateQueries({ queryKey: keys.remoteDevices });
+          break;
+        case "session_stopped":
+          void qc.invalidateQueries({ queryKey: keys.sessions });
           break;
         case "watchlist_changed":
           void qc.invalidateQueries({ queryKey: keys.watchlist });
@@ -369,7 +392,7 @@ export function useServerEvents(userId: Id | null) {
 
     const connect = () => {
       if (closed) return;
-      es = new EventSource("/api/events");
+      es = new EventSource(receiverQuery ? `/api/events?${receiverQuery}` : "/api/events");
       es.onopen = () => {
         failures = 0;
         back();
@@ -401,8 +424,19 @@ export function useServerEvents(userId: Id | null) {
     };
 
     connect();
+    // Taking casts or no longer: the stream opens again saying so. Events
+    // missed between the two are caught up as after any reconnect.
+    const reopen = () => {
+      if (closed || !es) return;
+      es.close();
+      es = null;
+      window.clearTimeout(retryTimer);
+      connect();
+    };
+    receiverChanged.add(reopen);
     return () => {
       closed = true;
+      receiverChanged.delete(reopen);
       es?.close();
       window.clearTimeout(retryTimer);
       window.clearTimeout(flushTimer);

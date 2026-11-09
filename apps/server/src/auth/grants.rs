@@ -480,6 +480,7 @@ pub async fn holder(db: &Db, token: &str, client_id: &str, two_step_required: bo
             scopes,
             approved_by,
         })),
+        compatibility: None,
     };
     Ok(Holder { grant_id, client_id: owner, scopes, approved_by, user })
 }
@@ -775,7 +776,7 @@ mod tests {
             client_name: Some("pley".into()),
             scopes: Scopes::parse(scopes).unwrap(),
             refresh: true,
-            first_party: client_id == ANDROID,
+            first_party: crate::oauth::clients::builtin(client_id).is_some(),
             session_hash: None,
             user_agent: Some("okhttp".into()),
             ip: Some("10.0.0.2".into()),
@@ -805,7 +806,7 @@ mod tests {
 
     #[tokio::test]
     async fn requiring_two_step_sign_in_leaves_apps_of_accounts_without_it_nothing() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let db = database(dir.path()).await;
         let (issued, _) = issue(&db, grant(ANDROID, "library profiles")).await.unwrap();
         let token = issued.refresh_token.unwrap();
@@ -832,7 +833,7 @@ mod tests {
 
     #[tokio::test]
     async fn app_tokens_are_prefixed_and_stored_hashed() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let db = database(dir.path()).await;
         let (issued, dropped) = issue(&db, grant(ANDROID, "library play")).await.unwrap();
         assert!(dropped.is_empty());
@@ -866,7 +867,7 @@ mod tests {
 
     #[tokio::test]
     async fn refresh_tokens_rotate_and_a_reused_one_ends_the_grant() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let db = database(dir.path()).await;
         let (first, _) = issue(&db, grant(ANDROID, "library")).await.unwrap();
         let old = first.refresh_token.clone().unwrap();
@@ -889,7 +890,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_refresh_token_used_after_two_rotations_still_ends_the_grant() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let db = database(dir.path()).await;
         let (first, _) = issue(&db, grant(ANDROID, "library")).await.unwrap();
         let stolen = first.refresh_token.unwrap();
@@ -903,7 +904,7 @@ mod tests {
 
     #[tokio::test]
     async fn two_refreshes_with_one_token_end_the_grant() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let db = database(dir.path()).await;
         let (first, _) = issue(&db, grant(ANDROID, "library")).await.unwrap();
         let token = first.refresh_token.unwrap();
@@ -918,7 +919,7 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_refresh_tokens_change_nothing() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let db = database(dir.path()).await;
         let (first, _) = issue(&db, grant(ANDROID, "library")).await.unwrap();
         let before = tokens(&db).await;
@@ -932,7 +933,7 @@ mod tests {
 
     #[tokio::test]
     async fn another_clients_refresh_token_changes_nothing() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let db = database(dir.path()).await;
         let (first, _) = issue(&db, grant(ANDROID, "library")).await.unwrap();
         let token = first.refresh_token.unwrap();
@@ -945,7 +946,7 @@ mod tests {
 
     #[tokio::test]
     async fn refresh_never_widens_scope() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let db = database(dir.path()).await;
         let (first, _) = issue(&db, grant(ANDROID, "library play")).await.unwrap();
         let token = first.refresh_token.unwrap();
@@ -963,7 +964,7 @@ mod tests {
 
     #[tokio::test]
     async fn clients_without_refresh_tokens_get_none() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let db = database(dir.path()).await;
         let mut new = grant(OTHER, "library");
         new.refresh = false;
@@ -975,7 +976,7 @@ mod tests {
 
     #[tokio::test]
     async fn grants_expire_after_90_days_unused_and_other_publishers_after_a_year() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let db = database(dir.path()).await;
         let (own, _) = issue(&db, grant(ANDROID, "library")).await.unwrap();
         let (other, _) = issue(&db, grant(OTHER, "library")).await.unwrap();
@@ -1041,8 +1042,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_grant_refreshed_too_often_ends() {
+    async fn every_one_of_pleys_own_apps_has_no_yearly_end() {
         let dir = tempfile::tempdir().unwrap();
+        let db = database(dir.path()).await;
+        for id in crate::oauth::clients::BUILTIN_IDS {
+            let (issued, _) = issue(&db, grant(id, "library")).await.unwrap();
+            let ends: Option<i64> = sqlx::query_scalar("SELECT ends_at FROM app_grants WHERE id = ?")
+                .bind(issued.grant_id)
+                .fetch_one(&db.read)
+                .await
+                .unwrap();
+            assert_eq!(ends, None, "{id}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_grant_refreshed_too_often_ends() {
+        let dir = crate::testing::tempdir();
         let db = database(dir.path()).await;
         let (first, _) = issue(&db, grant(ANDROID, "library")).await.unwrap();
         sqlx::query(
@@ -1064,7 +1080,7 @@ mod tests {
 
     #[tokio::test]
     async fn access_tokens_per_grant_are_capped() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let db = database(dir.path()).await;
         let (mut issued, _) = issue(&db, grant(ANDROID, "library")).await.unwrap();
         for _ in 0..15 {
@@ -1080,7 +1096,7 @@ mod tests {
 
     #[tokio::test]
     async fn grants_per_user_are_capped() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let db = database(dir.path()).await;
         let (oldest, _) = issue(&db, grant(ANDROID, "library")).await.unwrap();
         let (used, _) = issue(&db, grant(ANDROID, "library")).await.unwrap();
@@ -1119,7 +1135,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_profile_switch_reads_without_spending_and_moves_only_the_profile() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let db = database(dir.path()).await;
         sqlx::query("UPDATE users SET is_admin = 1, max_age = 12 WHERE id = 1").execute(&db.write).await.unwrap();
         let (first, _) = issue(&db, grant(ANDROID, "library profiles")).await.unwrap();
@@ -1158,7 +1174,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_refresh_token_spent_while_switching_ends_the_grant() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let db = database(dir.path()).await;
         let (first, _) = issue(&db, grant(ANDROID, "library profiles")).await.unwrap();
         let token = first.refresh_token.unwrap();
@@ -1172,7 +1188,7 @@ mod tests {
 
     #[tokio::test]
     async fn grants_are_listed_and_ended() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let db = database(dir.path()).await;
         sqlx::query("UPDATE users SET display_name = 'Ann B' WHERE id = 1").execute(&db.write).await.unwrap();
         let (own, _) = issue(&db, grant(ANDROID, "library")).await.unwrap();

@@ -8,8 +8,8 @@
 //   bun scripts/version.mjs check [unit...]   fails when a unit's manifests disagree
 //
 // A unit is what has its own version: server (with its transcoder and the
-// web app it embeds), desktop, android, samsung, lg, kodi and roku. A release
-// takes the units whose versions went up, under one tag.
+// web app it embeds), desktop, android, samsung, samsung-native, lg, kodi and
+// roku. A release takes the units whose versions went up, under one tag.
 // `bun scripts/release.mjs` bumps a unit and moves its CHANGELOG's Unreleased
 // section under the new version.
 // Builds add the commit they were made from (scripts/commit.mjs), which every
@@ -42,6 +42,8 @@ const cargoLock = (path, name) =>
 const bunLock = (workspace) =>
   pattern("bun.lock", new RegExp(`("${workspace}": \\{\\s*"name": "[^"]+",\\s*"version": ")([^"]*)(")`), `bun.lock (${workspace})`);
 const xmlAttribute = (path, element) => pattern(path, new RegExp(`(<${element} [^>]*?\\bversion=")([^"]*)(")`));
+/** MSBuild's <Version>, which a .NET project's assemblies carry. */
+const msbuildVersion = (path) => pattern(path, /(<Version>)([^<]*)(<\/Version>)/);
 
 /** Roku's manifest: major_version, minor_version and build_version. */
 const rokuManifest = {
@@ -74,13 +76,16 @@ export function androidVersionCode(version, build = 0) {
   return ANDROID_CODE_OFFSET + major * 1_000_000 + minor * 10_000 + patch * 100 + build;
 }
 
+/** Tizen: x.y.z, x and y at most 255, z at most 65535. */
+const tizen = ([major, minor, patch]) =>
+  major > 255 || minor > 255 || patch > 65535 ? "Tizen takes major and minor up to 255 and patch up to 65535" : null;
+
 /** What each platform takes, beyond major.minor.patch. */
 const LIMITS = {
   // Version codes stay in order only while minor and patch fit their digits.
   android: ([, minor, patch]) => (minor > 99 || patch > 99 ? "Android's version code needs minor and patch below 100" : null),
-  // Tizen: x.y.z, x and y at most 255, z at most 65535.
-  samsung: ([major, minor, patch]) =>
-    major > 255 || minor > 255 || patch > 65535 ? "Tizen takes major and minor up to 255 and patch up to 65535" : null,
+  samsung: tizen,
+  "samsung-native": tizen,
 };
 
 export const UNITS = {
@@ -129,12 +134,28 @@ export const UNITS = {
     paths: ["apps/tizen", "packages/tv", "packages/picture-subtitles"],
     manifests: [json("apps/tizen/package.json"), bunLock("apps/tizen"), xmlAttribute("apps/tizen/config.xml", "widget")],
   },
+  "samsung-native": {
+    title: "Pley for Samsung TV (native)",
+    about: "the native Samsung TV app (Tizen .NET), beside the web one",
+    changelog: "apps/tizen-native/CHANGELOG.md",
+    paths: ["apps/tizen-native"],
+    // The build's version, then the one the TV reads; the manifest's api-version is Tizen's, not the app's.
+    manifests: [
+      msbuildVersion("apps/tizen-native/Directory.Build.props"),
+      pattern("apps/tizen-native/src/Pley.Tv.Tizen/tizen-manifest.xml", /(<manifest [^>]*?\sversion=")([^"]*)(")/),
+    ],
+  },
   lg: {
     title: "Pley for LG TV",
-    about: "the LG TV app (webOS), built with packages/tv",
+    about: "the LG TV app (webOS), a native app in Rust",
     changelog: "apps/webos/CHANGELOG.md",
-    paths: ["apps/webos", "packages/tv", "packages/picture-subtitles"],
-    manifests: [json("apps/webos/package.json"), bunLock("apps/webos"), json("apps/webos/appinfo.json")],
+    paths: ["apps/webos"],
+    // appinfo.json is what the TV reads; pley-lg is the crate of the app's binary.
+    manifests: [
+      json("apps/webos/appinfo.json"),
+      cargoPackage("apps/webos/crates/app/Cargo.toml"),
+      cargoLock("apps/webos/Cargo.lock", "pley-lg"),
+    ],
   },
   kodi: {
     title: "Pley for Kodi",

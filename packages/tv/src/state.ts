@@ -1,11 +1,14 @@
-import { signal } from "@preact/signals";
+import { computed, signal } from "@preact/signals";
 import { Api, ApiError, isApiError, unreachable } from "./api/client";
 import { EventStream } from "./api/events";
 import type { Hub, HouseholdProfile, ItemDetail, Library, LiveChannel, LiveSummary, MediaRequest, RequestSummary, ServerEvent, TitleKind, TitleStatus, User } from "./api/types";
 import { origin } from "./auth/addresses";
+import { probe } from "./auth/servers";
 import { SignedOutError, Tokens, type KeyValue } from "./auth/tokens";
+import { deviceLanguage, language, navigatorLanguages, pickLanguage, setDeviceLanguages, setLanguage, supportedLanguage, type Language } from "./i18n";
 import { xhrTransport, type Transport } from "./net/transport";
 import type { Platform, Probe } from "./platform";
+import { CAST_SWITCH_WAIT_MS, receiverQuery } from "./player/cast";
 import { Reporter } from "./player/reporter";
 import { isSummary, newsKeys, newsText, readyNews, readyText, statusFromRequest, titleKey } from "./requests";
 import type { SubtitleFont, SubtitlePosition } from "./subs/style";
@@ -62,7 +65,7 @@ const PROFILES_KEY = "pley.householdProfiles";
 const ITEM_TTL_MS = 5 * 60_000;
 /** Watch state changes come in bursts (an episode, its season and show; a play reaching 90 %): gathered this long. */
 const STATE_GATHER_MS = 300;
-/** How long "Showing what pley had saved. Reconnecting…" shows: as long as an error's toast. */
+/** How long "Pley is offline" shows: as long as an error's toast. */
 const OFFLINE_NOTICE_MS = 6_000;
 /** While the server is out of reach it is asked this often (and given as long to answer). */
 const OFFLINE_ASK_MS = 5_000;
@@ -78,6 +81,10 @@ const REQUEST_GATHER_MS = 300;
 export const SUMMARY_POLL_MS = 60_000;
 /** Ready-to-watch notices kept while they can't show (a video plays): the last three. */
 const NOTICES_KEPT = 3;
+/** The language shown last: the next start shows it before the server answers. */
+const LANGUAGE_KEY = "pley.language";
+/** The language picked on this TV with the globe, as the web app keeps its own. */
+const DEVICE_LANGUAGE_KEY = "pley.deviceLanguage";
 
 /** News of requests popped up over the pages: on TVs, only what is ready to watch. */
 export interface RequestNotice {
@@ -139,17 +146,18 @@ export interface StartFacts {
 
 /**
  * The first screen (the Android app's startKey): no server, Servers; no
- * sign-in, Link; a household of several profiles, "Who's watching?".
- * "Always start as" skips that question and goes on as the profile the TV
- * was left on, but never past its PIN: its pad comes first when it has one,
- * and "Who's watching?" when the TV doesn't know whether it has one.
+ * sign-in, Link; otherwise Home as the profile the TV was left on, but never
+ * past its PIN. In a household of several profiles, one with a PIN asks
+ * first: "Who's watching?", or its pad with "Always start as"; and so does
+ * one the TV doesn't know has none.
  */
 export function startPage(f: StartFacts): Start["page"] {
   if (!f.server) return "servers";
   if (!f.signedIn) return "link";
   if (f.household <= 1) return "home";
+  if (f.me && !f.me.has_pin) return "home";
   if (f.alwaysStartAs === null || !f.me) return "profiles";
-  return f.me.has_pin ? "pin" : "home";
+  return "pin";
 }
 
 /**
@@ -195,7 +203,7 @@ export class AppState {
    * after a failure.
    */
   readonly offline = signal(false);
-  /** "Showing what pley had saved. Reconnecting…" shows, for 6 s from going offline; then the rail's avatar keeps a mark. */
+  /** "Pley is offline" shows, for 6 s from going offline; then the rail's avatar keeps a mark. */
   readonly offlineNotice = signal(false);
   /**
    * The requests summary (docs/API.md, "Requests"): whether Discover and
@@ -211,6 +219,26 @@ export class AppState {
   readonly notices = signal<RequestNotice[]>([]);
   /** The events aren't connected: pages that show requests ask on their own meanwhile. */
   readonly eventsDown = signal(false);
+  /**
+   * The server's language for accounts without their own (`GET /api/server`):
+   * `undefined` until it answers, `null` from a Pley from before languages,
+   * which names none.
+   */
+  readonly serverLanguage = signal<string | null | undefined>(undefined);
+  /**
+   * The language picked on this TV with the globe of the screens before
+   * signing in (`null`: Automatic, the TV's own): before the TV's, and what
+   * an account's Automatic is ({@link setDeviceLanguage}).
+   */
+  readonly deviceChoice = signal<Language | null>(null);
+  /**
+   * The server keeps no account's language: a Pley from before languages,
+   * whose `GET /api/server` names none (one that names any, even one this
+   * app doesn't have, keeps it), or one that answered a choice 404 or 405.
+   * Settings' Language row is then this TV's, as the globe picks it
+   * ({@link chooseLanguage}).
+   */
+  readonly languageOnDevice = computed(() => this.serverLanguage.value === null || this.languageMissing.value);
   /**
    * "Who's watching?" was answered in this launch (a profile picked, a PIN
    * checked, or a sign-in approved on a phone): the current profile's PIN
@@ -260,12 +288,22 @@ export class AppState {
   private markTimer: ReturnType<typeof setTimeout> | null = null;
   private noticeIds = 0;
   private noticeOnScreen: number | null = null;
+  /** Who is watching was heard from the server since the profile, sign-in or server last changed: its language counts. */
+  private accountHeard = false;
+  /** The server in use answered a choice of language 404 (or 405): it has no route for it. */
+  private readonly languageMissing = signal(false);
+  /** Choices made on Settings' Language row: a 404 for one before the last keeps the last ({@link chooseLanguage}). */
+  private languageChoices = 0;
 
   constructor(platform: Platform, http: Transport = xhrTransport) {
     this.platform = platform;
     this.http = http;
     this.store = platform.storage;
     this.offsets = new OffsetStore(platform.storage, () => this.me.value?.id ?? null);
+    setDeviceLanguages(() => this.deviceLanguages());
+    this.deviceChoice.value = supportedLanguage(this.store.get(DEVICE_LANGUAGE_KEY)) ?? null;
+    // The language shown last, until the server says; at the first start, the one picked here or the TV's.
+    setLanguage(supportedLanguage(this.store.get(LANGUAGE_KEY)) ?? this.deviceChoice.value ?? deviceLanguage(this.deviceLanguages()) ?? "en");
     const kept = readJson<Partial<Settings>>(this.store, SETTINGS_KEY) ?? {};
     // Original was the default before Automatic, and was saved along with any other setting: unless picked, it is Automatic now.
     if (kept.quality === "original" && this.store.get(QUALITY_PICKED_KEY) !== "1") delete kept.quality;
@@ -321,9 +359,13 @@ export class AppState {
     this.tokens = new Tokens(home, this.platform.clientId, this.store, this.http, () => {
       this.signedOut.value = true;
       this.events?.stop();
+      this.followLanguage();
     });
     this.api.value = new Api(home, this.tokens, this.http);
     this.signedOut.value = false;
+    this.serverLanguage.value = undefined;
+    this.languageMissing.value = false;
+    void this.loadServerLanguage();
   }
 
   get signedIn(): boolean {
@@ -357,7 +399,7 @@ export class AppState {
   }
 
   /**
-   * This TV's own id for its playbacks ("webos-1f3a…"), kept for good: the
+   * This TV's own id for its playbacks ("tizen-1f3a…"), kept for good: the
    * server ends a client's earlier sessions when it starts another, so two
    * TVs of a household must never share one.
    */
@@ -438,6 +480,28 @@ export class AppState {
     void this.loadHome();
   }
 
+  /**
+   * Moves the app to `profile` for a cast from that profile's remote, with
+   * its `ticket` (docs/API.md, "Casting"). What plays ends first, and its
+   * last reports go out with this profile's sign-in, for up to
+   * CAST_SWITCH_WAIT_MS: what hasn't gone by then is dropped, never sent as
+   * the new profile, whose watch history it isn't. Then the ticket is
+   * redeemed and the app acts as the new profile (`switched`). A refused
+   * ticket rejects, and the app stays as it is, what played ended.
+   */
+  async switchForCast(profile: number, ticket: string): Promise<void> {
+    const tokens = this.tokens;
+    if (!tokens) throw new SignedOutError();
+    this.endPlayback();
+    // The player's last reports are made as its page goes, once drawn.
+    await new Promise((r) => setTimeout(r, 0));
+    await this.reporter.flush(CAST_SWITCH_WAIT_MS);
+    this.reporter.drop();
+    await tokens.switchProfile(profile, null, ticket);
+    // As a switch on "Who's watching?": who is watching failing to load is the pages' Retry's.
+    await this.switched().catch(() => undefined);
+  }
+
   /** Forgets a server of the list: its sign-in ends, and what was saved from it goes. */
   async forget(url: string): Promise<void> {
     const home = origin(url);
@@ -461,6 +525,8 @@ export class AppState {
     this.server.value = null;
     this.api.value = null;
     this.tokens = null;
+    this.serverLanguage.value = undefined;
+    this.languageMissing.value = false;
   }
 
   /** What was shown from the server in use goes: another one comes, or none. */
@@ -490,6 +556,7 @@ export class AppState {
     this.forgetAccount();
     this.home.value = null;
     this.signedOut.value = true;
+    this.followLanguage();
   }
 
   updateSettings(patch: Partial<Settings>): void {
@@ -497,6 +564,111 @@ export class AppState {
     this.settings.value = { ...this.settings.value, ...patch };
     this.store.set(SETTINGS_KEY, JSON.stringify(this.settings.value));
     if ("quality" in patch) this.store.set(QUALITY_PICKED_KEY, "1");
+  }
+
+  // ---- the language
+
+  /** The TV's languages, its own first. */
+  deviceLanguages(): readonly string[] {
+    return this.platform.languages?.() ?? navigatorLanguages();
+  }
+
+  /** The server's language, from `GET /api/server`; asked again when its events reconnect if it didn't answer. */
+  private async loadServerLanguage(): Promise<void> {
+    const server = this.server.value;
+    if (!server) return;
+    let info;
+    try {
+      info = await probe(this.http, server);
+    } catch {
+      return;
+    }
+    if (!info || this.server.value !== server) return;
+    this.serverLanguage.value = info.language;
+    this.followLanguage();
+  }
+
+  /**
+   * The language the app is in (packages/tv/test/fixtures/language.json):
+   * the account's as soon as it is heard; else, once who is watching was
+   * heard (signed in), the one picked on this TV, else the TV's, or for a
+   * TV in a language Pley doesn't have, the server language once the server
+   * has said it. Until then the last one shown stays, as going by another
+   * meanwhile would flash it.
+   */
+  private followLanguage(): void {
+    const account = this.signedIn && this.accountHeard ? this.me.value?.language : null;
+    const choice = this.deviceChoice.value;
+    if (!supportedLanguage(account)) {
+      if (this.signedIn && !this.accountHeard) return;
+      if (this.serverLanguage.value === undefined && !choice && !deviceLanguage(this.deviceLanguages())) return;
+    }
+    this.showLanguage(pickLanguage(account, this.serverLanguage.value, this.deviceLanguages(), choice));
+  }
+
+  /**
+   * Picks this TV's language (`null`: Automatic, the TV's own again), kept
+   * on the TV. Signed out (the globe of the screens before signing in), or
+   * on a server that keeps no account's language, it shows at once,
+   * Automatic as what it says it is; signed in, unless the account has its
+   * own.
+   */
+  setDeviceLanguage(next: Language | null): void {
+    this.deviceChoice.value = next;
+    if (next) this.store.set(DEVICE_LANGUAGE_KEY, next);
+    else this.store.remove(DEVICE_LANGUAGE_KEY);
+    if (this.signedIn && !this.languageOnDevice.peek()) this.followLanguage();
+    else this.showLanguage(pickLanguage(null, this.serverLanguage.value, this.deviceLanguages(), next));
+  }
+
+  /**
+   * A choice on Settings' Language row (`null`: Automatic): the profile's
+   * language on all its devices ({@link setAccountLanguage}), or where the
+   * server keeps none ({@link languageOnDevice}) this TV's, as the globe
+   * picks it ({@link setDeviceLanguage}). A server that answers it 404 (or
+   * 405) has no route for it: the choice is this TV's, and so are the next.
+   * One made since the choice went (on this TV, once the server turned out
+   * to name no language) stays.
+   */
+  async chooseLanguage(next: Language | null): Promise<void> {
+    const choice = ++this.languageChoices;
+    if (this.languageOnDevice.peek()) {
+      this.setDeviceLanguage(next);
+      return;
+    }
+    const api = this.api.value;
+    try {
+      await this.setAccountLanguage(next);
+    } catch (e) {
+      if (!isApiError(e, 404) && !isApiError(e, 405)) throw e;
+      // Another server since: the answer was the one before's.
+      if (this.api.value !== api) return;
+      this.languageMissing.value = true;
+      if (choice === this.languageChoices) this.setDeviceLanguage(next);
+    }
+  }
+
+  /** The app in `next` from now on, and at the next start. */
+  private showLanguage(next: Language): void {
+    this.store.set(LANGUAGE_KEY, next);
+    if (next === language.peek()) return;
+    setLanguage(next);
+    // The server writes Home's and the libraries' row titles: asked again in the new language.
+    if (this.signedIn) this.refresh();
+  }
+
+  /** The profile's own language on all its devices (`null`: the server's), shown once the server has it (`PUT /api/me/language`). */
+  async setAccountLanguage(next: Language | null): Promise<void> {
+    const api = this.api.value;
+    if (!api) throw new SignedOutError();
+    const who = this.me.value?.id;
+    const me = await api.setLanguage(next);
+    // Another profile, sign-in or server since: the answer was the one before's.
+    if (this.api.value !== api || this.me.value?.id !== who) return;
+    this.me.value = me;
+    this.store.set(ME_KEY, JSON.stringify(me));
+    this.accountHeard = true;
+    this.followLanguage();
   }
 
   // ---- what the server has
@@ -512,6 +684,7 @@ export class AppState {
     this.store.remove(LIVE_KEY);
     this.store.remove(REQUESTS_KEY);
     this.generation++;
+    this.accountHeard = false;
     this.requests.value = null;
     this.marks.value = {};
     this.markNamed.clear();
@@ -551,6 +724,8 @@ export class AppState {
     this.me.value = me;
     this.store.set(ME_KEY, JSON.stringify(me));
     this.keepLibraries(libraries);
+    this.accountHeard = true;
+    this.followLanguage();
     api.profiles().then(
       (profiles) => this.keepHousehold(profiles),
       () => undefined,
@@ -582,6 +757,8 @@ export class AppState {
     this.live.value = summary;
     if (summary) this.store.set(LIVE_KEY, JSON.stringify(summary));
     else this.store.remove(LIVE_KEY);
+    // The remotes are told this TV takes channels now, or no longer does.
+    if (!!summary?.available !== this.receivesLive) this.events?.restart();
   }
 
   /** Live channels a page showed: the player starts with one of them at once. The 500 seen last are kept. */
@@ -809,10 +986,17 @@ export class AppState {
         (e) => this.handleEvent(e),
         () => this.reconnected(),
         () => this.eventsLost(),
+        () => {
+          this.receivesLive = !!this.live.value?.available;
+          return receiverQuery(this.installId(), this.receivesLive);
+        },
       );
     }
     this.events.start();
   }
+
+  /** Whether the stream last opened took Live TV's channels from remotes: it opens again when that changes. */
+  private receivesLive = false;
 
   private lastSync = 0;
 
@@ -827,6 +1011,7 @@ export class AppState {
     // The server may have restarted, newer: one without requests is asked again.
     this.requestsMissing = false;
     void this.loadRequests();
+    if (this.serverLanguage.value === undefined) void this.loadServerLanguage();
     if (down) this.requestsChanged(null);
     if (away || Date.now() - this.lastSync > 30_000) {
       this.lastSync = Date.now();

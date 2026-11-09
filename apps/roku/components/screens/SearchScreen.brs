@@ -3,12 +3,13 @@
 ' were opened, kept on the Roku for each server and profile; OK searches
 ' one again (and moves it to the top), Clear forgets them.
 ' What the libraries have (GET /api/search) comes in rows by kind, as on
-' the other apps (lib/Search.brs): People, Live TV (cards; OK watches the
-' channel), Movies, Shows, Seasons, Episodes, Artists, Albums, Tracks.
+' the other apps (lib/Search.brs): Movies, Shows, Seasons, Episodes,
+' Artists, Albums, Tracks, Live TV (cards; OK watches the channel), People.
 ' Where the person may ask for titles (the scene's summary), Discover (GET
 ' /api/discover/search?missing=1), asked at the same time and never waited
-' for, comes after them, ending with See all: all of TMDB's results for
-' the words, with their badges (DiscoverListScreen).
+' for, comes after them: up to 20 titles, from 3 of TMDB's pages at most,
+' ending with See all: all of TMDB's results for the words, with their
+' badges (DiscoverListScreen).
 
 sub init()
     m.keyboard = m.top.findNode("keyboard")
@@ -16,9 +17,12 @@ sub init()
     ' The Live TV channels found, for the player.
     m.channels = []
     m.message = m.top.findNode("message")
+    m.message.text = placeholder()
     m.debounce = m.top.findNode("debounce")
     m.recentTitle = m.top.findNode("recentTitle")
+    m.recentTitle.text = t("browse.search.recent")
     m.recentList = m.top.findNode("recent")
+    m.top.findNode("title").text = t("browse.menu.search")
     ' The recent searches, newest first, and where they are kept.
     m.recent = []
     m.recentKey = ""
@@ -34,6 +38,14 @@ sub init()
     m.libraryRows = invalid
     m.tmdbTiles = invalid
     m.libraryMessage = ""
+    ' TMDB's search as its pages come: which one (answers to another are
+    ' left out), the titles found and shown ({ "movie:603": true }), the
+    ' last page and how many were read.
+    m.tmdbAsked = 0
+    m.tmdbFound = []
+    m.tmdbSeen = {}
+    m.tmdbPage = 0
+    m.tmdbRead = 0
     m.rowKeys = []
     m.lastFocus = m.keyboard
     m.keyboard.observeField("text", "onText")
@@ -71,7 +83,7 @@ end sub
 
 ' What the screen says before anything is typed.
 function placeholder() as string
-    return "Type to search your libraries."
+    return t("browse.search.placeholder")
 end function
 
 ' --- Recent searches ---
@@ -91,7 +103,7 @@ sub showIdle()
     for each query in m.recent
         items.Push({ title: query })
     end for
-    items.Push({ title: "Clear" })
+    items.Push({ title: t("browse.search.clear") })
     m.recentList.content = nodesContent(items)
     m.message.visible = false
     m.recentTitle.visible = true
@@ -176,7 +188,7 @@ sub search()
         return
     end if
     hideRecent()
-    m.path = urlWithQuery("/api/search", { q: query, limit: 40 })
+    m.path = searchPath(query)
     uiRequest({ method: "GET", path: m.path, build: "searchRows" }, "onResults")
     if m.mayAsk then askTmdb()
 end sub
@@ -218,33 +230,73 @@ end sub
 sub watch(channelId as dynamic)
     remember()
     for each channel in m.channels
-        if channel.id = channelId then uiNavigate({ to: "livePlayer", params: { channel: channel, category: "search:" + m.query, categoryName: "Results for “" + m.query + "”" } })
+        if channel.id = channelId then uiNavigate({ to: "livePlayer", params: { channel: channel, category: "search:" + m.query, categoryName: t("browse.search.resultsFor", { query: m.query }) } })
     end for
 end sub
 
 ' --- Discover, with the libraries' titles ---
 
 ' TMDB's first titles the libraries lack, for the words searched (as many
-' as TMDB's search takes).
+' as TMDB's search takes). A page can come short, even empty, its titles
+' in a library: the next is read until there are enough to show.
 sub askTmdb()
     m.tmdbPath = urlWithQuery("/api/discover/search", { q: reqSearchWords(m.query), missing: 1 })
-    uiRequest({ method: "GET", path: m.tmdbPath, build: "discoverTiles", known: {} }, "onTmdb")
+    m.tmdbAsked = m.tmdbAsked + 1
+    m.tmdbFound = []
+    m.tmdbSeen = {}
+    m.tmdbPage = 0
+    m.tmdbRead = 0
+    askTmdbPage()
 end sub
 
-' TMDB's titles and See all. What stops TMDB's search
-' (TMDB not answering, its key refused, no access) is a tile that says
-' so, asking again where that may help; the server not answering is the
-' libraries' search's to say.
+sub askTmdbPage()
+    uiRequest({ method: "GET", path: m.tmdbPath, query: { page: m.tmdbPage + 1 }, build: "discoverTiles", known: m.tmdbSeen, asked: m.tmdbAsked }, "onTmdb")
+end sub
+
+' A page of TMDB's titles: the next is asked for while too few came
+' (reqSearchWantsPage), then they show.
 sub onTmdb(event as object)
     request = event.getRoSGNode()
-    if request.spec.path <> m.tmdbPath then return
+    if request.spec.path <> m.tmdbPath or request.spec.asked <> m.tmdbAsked then return
     answer = event.getData()
+    if not answer.ok
+        showTmdb(answer)
+        return
+    end if
+    page = answer.data
+    ' A server that answers the same page again has no more.
+    fresh = page.page > m.tmdbPage
+    m.tmdbPage = page.page
+    m.tmdbRead = m.tmdbRead + 1
+    if request.content <> invalid
+        for each node in request.content.getChildren(-1, 0)
+            if not m.tmdbSeen.DoesExist(node.key)
+                m.tmdbSeen[node.key] = true
+                m.tmdbFound.Push(node)
+            end if
+        end for
+    end if
+    if fresh and reqSearchWantsPage(m.tmdbFound.Count(), m.tmdbPage, page.totalPages, m.tmdbRead)
+        askTmdbPage()
+        return
+    end if
+    showTmdb(invalid)
+end sub
+
+' TMDB's titles, 20 at most, and See all. A page that failed (failed, its
+' answer) leaves what came before; with none, what stops TMDB's search
+' (TMDB not answering, its key refused, no access) is a tile that says
+' so, asking again where that may help. The server not answering is the
+' libraries' search's to say.
+sub showTmdb(failed as dynamic)
     tiles = []
-    if answer.ok
-        if request.content <> invalid then tiles = request.content.getChildren(-1, 0)
-        if tiles.Count() > 0 then tiles.Push(nodesContent([reqMoreTile("See all", "", m.query)]).getChild(0))
-    else if answer.error <> "network" and answer.error <> "signed_out"
-        tiles.Push(nodesContent([reqSearchProblemTile(answer, reqSummaryOf(m.top.requestSummary).manage)]).getChild(0))
+    for each node in m.tmdbFound
+        if tiles.Count() < reqSearchShown() then tiles.Push(node)
+    end for
+    if tiles.Count() > 0
+        tiles.Push(nodesContent([reqMoreTile(t("common.actions.seeAll"), "", m.query)]).getChild(0))
+    else if failed <> invalid and failed.error <> "network" and failed.error <> "signed_out"
+        tiles.Push(nodesContent([reqSearchProblemTile(failed, reqSummaryOf(m.top.requestSummary).manage)]).getChild(0))
     end if
     m.tmdbTiles = tiles
     showRows()
@@ -259,17 +311,17 @@ sub showRows()
     if m.libraryRows <> invalid then shown.Append(m.libraryRows)
     if m.mayAsk and m.tmdbTiles <> invalid and m.tmdbTiles.Count() > 0
         row = CreateObject("roSGNode", "ContentNode")
-        row.title = "Discover"
+        row.title = t("browse.menu.discover")
         row.appendChildren(m.tmdbTiles)
         shown.Push({ key: "tmdb", node: row })
     end if
-    line = "Nothing in your libraries matches."
+    line = t("browse.search.noneInLibraries")
     if m.libraryMessage <> "" then line = m.libraryMessage
     if shown.Count() = 0
         ' TMDB's answer alone, empty: the libraries' is waited for.
         if not noneHere then return
         hideResults()
-        if m.libraryMessage = "" and (not m.mayAsk or m.tmdbTiles <> invalid) then line = "Nothing found for “" + m.query + "”."
+        if m.libraryMessage = "" and (not m.mayAsk or m.tmdbTiles <> invalid) then line = t("browse.search.noResults", { query: m.query })
         showMessage(line)
         return
     end if

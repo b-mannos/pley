@@ -12,6 +12,8 @@ namespace Pley.Tv.Tizen.Screens;
 /// The TV's way in (design spec §2.8; the Android app's TvLinkScreen): the steps and the code on
 /// the left from x = 96, the QR code and "Change server" on the right from x = 600. "Change server"
 /// has focus, except after a decline or once the code expired, when "Get a new code" has it.
+/// Signing in, a server that requires two-step sign-in is said so under the title, once it answers,
+/// and the globe at the top right, on the logo's line, picks the TV's language (Up reaches it).
 /// </summary>
 sealed class LinkScreen : Sheet
 {
@@ -19,6 +21,12 @@ sealed class LinkScreen : Sheet
 
     readonly LinkModel model;
     readonly View column;
+    /// <summary>The steps, the code and what's under it: they move down when an intro comes under the title.</summary>
+    readonly View steps;
+    /// <summary>Where the intro goes, under the title.</summary>
+    readonly float introTop;
+    /// <summary>The screen's own intro (approving a profile): the server's two-step sign-in isn't said over it.</summary>
+    readonly bool ownIntro;
     readonly View codeFields;
     readonly TextLabel address;
     readonly TextLabel addressLead;
@@ -27,64 +35,71 @@ sealed class LinkScreen : Sheet
     readonly View qrBox;
     readonly View qrSide;
     readonly ButtonView back;
+    readonly ButtonView? globeButton;
+    /// <summary>Get a new code and the way back, side by side under the globe.</summary>
+    readonly FocusGroup actions = new FocusGroup(Axis.Row, "link-actions");
+    readonly LanguageGlobe? globe;
     readonly StatusLine status;
     readonly Timer countdown = new Timer(1000);
     readonly IDisposable watch;
     View? signedIn;
     LinkCode? shownCode;
     bool? neededNewCode;
+    TextLabel? introLabel;
+    bool twoStepShown;
 
-    /// <param name="intro">Under the title: why a code (approving a profile on a phone); null when signing in.</param>
-    public LinkScreen(LinkModel model, Action onBack, string title = "Sign in to Pley", string? intro = null, string backLabel = "Change server") : base("link", Axis.Row)
+    /// <param name="intro">
+    /// Under the title: why a code (approving a profile on a phone); null when signing in, where it
+    /// says when the server requires two-step sign-in.
+    /// </param>
+    /// <param name="title">The heading; "Sign in to Pley" without.</param>
+    /// <param name="backLabel">The way back; "Change server" without.</param>
+    /// <param name="globe">The globe, signing in; none approving a profile, where a household is signed in.</param>
+    public LinkScreen(LinkModel model, Action onBack, string? title = null, string? intro = null, string? backLabel = null, Shell? shell = null, LanguageGlobe? globe = null)
+        : base("link")
     {
         this.model = model;
+        this.globe = globe;
         View.BackgroundColor = PleyColors.Bg;
         View.Add(Onboarding.BrandGlow());
 
         column = new View { Position = new Position(Ui.Dp(Left), Ui.Dp(56)), Size = new Size(Ui.Dp(ColumnWidth), Ui.Dp(400)) };
         View.Add(column);
         column.Add(Onboarding.Logo(40));
-        var heading = Text.Label(title, PleyType.PageTitle, PleyColors.Fg, width: ColumnWidth);
+        var heading = Text.Label(title ?? Strings.T("signin.link.title"), PleyType.PageTitle, PleyColors.Fg, width: ColumnWidth);
         heading.PositionY = Ui.Dp(40 + 28);
         column.Add(heading);
-        float y = 40 + 28 + PleyType.PageTitle.Line;
-        if (intro != null)
-        {
-            var introLabel = Text.Label(intro, PleyType.Body, PleyColors.Muted, maxLines: 2, width: ColumnWidth);
-            introLabel.VerticalAlignment = VerticalAlignment.Top;
-            introLabel.PositionY = Ui.Dp(y + 6);
-            column.Add(introLabel);
-            y += 6 + PleyType.Body.Line * 2 + 10;
-        }
-        else
-        {
-            y += 18;
-        }
-        column.Add(Step(1, y, out _, "Scan the code with your phone"));
+        introTop = 40 + 28 + PleyType.PageTitle.Line + 6;
+        steps = new View { Size = new Size(Ui.Dp(ColumnWidth), Ui.Dp(400)) };
+        column.Add(steps);
+        ownIntro = intro != null;
+        Intro(intro);
+        float y = 0;
+        steps.Add(Step(1, y, out _, Strings.T("signin.link.scan")));
         y += 28 + 12;
-        var step2 = Step(2, y, out var stepText, "or go to");
+        var step2 = Step(2, y, out var stepText, Strings.T("signin.link.goTo"));
         addressLead = stepText;
         address = Text.Label("…", PleyType.Section, PleyColors.Fg);
         address.SizeHeight = Ui.Dp(28);
         step2.Add(address);
-        column.Add(step2);
+        steps.Add(step2);
         y += 28 + 12;
-        column.Add(Step(3, y, out _, "and enter this code"));
+        steps.Add(Step(3, y, out _, Strings.T("signin.link.enterCode")));
         y += 28 + 12;
         codeFields = new View { PositionY = Ui.Dp(y), Size = new Size(Ui.Dp(ColumnWidth), Ui.Dp(76)) };
-        column.Add(codeFields);
+        steps.Add(codeFields);
         y += 76 + 16;
         notes = new View { PositionY = Ui.Dp(y) };
-        var sameWifi = Text.Label("Your phone must be on the same Wi-Fi as this TV.", PleyType.Body, PleyColors.Muted, width: ColumnWidth);
-        var otherDevice = Text.Label("Or open Pley on a signed-in device → Link a TV", PleyType.Body, PleyColors.Muted, width: ColumnWidth);
+        var sameWifi = Text.Label(Strings.T("signin.link.sameWifi"), PleyType.Body, PleyColors.Muted, width: ColumnWidth);
+        var otherDevice = Text.Label(Strings.T("signin.link.otherDevice"), PleyType.Body, PleyColors.Muted, width: ColumnWidth);
         otherDevice.PositionY = Ui.Dp(PleyType.Body.Line + 6);
         notes.Add(sameWifi);
         notes.Add(otherDevice);
-        column.Add(notes);
-        newCode = new ButtonView("Get a new code", ButtonKind.Pill, model.NewCode, iconName: "refresh-cw") { PositionY = Ui.Dp(y) };
+        steps.Add(notes);
+        newCode = new ButtonView(Strings.T("signin.link.newCode"), ButtonKind.Pill, model.NewCode, iconName: "refresh-cw") { PositionY = Ui.Dp(y) };
         newCode.Hide();
         newCode.Item.Shown = false;
-        column.Add(newCode);
+        steps.Add(newCode);
 
         status = new StatusLine(ColumnWidth) { Position = new Position(Ui.Dp(Left), Ui.Dp(StatusTop)) };
         View.Add(status);
@@ -93,17 +108,25 @@ sealed class LinkScreen : Sheet
         qrSide = new View { Position = new Position(Ui.Dp(QrLeft), Ui.Dp(QrTop)), Size = new Size(Ui.Dp(QrSize), Ui.Dp(QrSize + 12 + 17 + 18 + PleyTv.ButtonHeight)) };
         qrBox = new View { Size = new Size(Ui.Dp(QrSize), Ui.Dp(QrSize)), CornerRadius = Ui.Dp(PleyShape.DialogRadius), BackgroundColor = PleyColors.Surface2 };
         qrSide.Add(qrBox);
-        var scan = Text.Label("Scan with your phone camera", PleyType.Caption, PleyColors.Muted, width: QrSize);
+        var scan = Text.Label(Strings.T("signin.link.scanCamera"), PleyType.Caption, PleyColors.Muted, width: QrSize);
         scan.HorizontalAlignment = HorizontalAlignment.Center;
         scan.PositionY = Ui.Dp(QrSize + 12);
         qrSide.Add(scan);
-        back = new ButtonView(backLabel, ButtonKind.Text, onBack);
+        back = new ButtonView(backLabel ?? Strings.T("signin.link.changeServer"), ButtonKind.Text, onBack);
         back.Position = new Position(Ui.Dp((QrSize - back.WidthDp) / 2), Ui.Dp(QrSize + 12 + 17 + 18));
         qrSide.Add(back);
         View.Add(qrSide);
 
-        Root.Add(newCode.Item);
-        Root.Add(back.Item);
+        if (shell != null && globe != null)
+        {
+            // The logo is 40 dp tall from y = 56.
+            globeButton = GlobeButton.Of(shell, globe, centreY: 56 + 20);
+            View.Add(globeButton);
+            Root.Add(globeButton.Item);
+        }
+        actions.Add(newCode.Item);
+        actions.Add(back.Item);
+        Root.Add(actions);
 
         countdown.Tick += (s, e) =>
         {
@@ -120,15 +143,48 @@ sealed class LinkScreen : Sheet
         };
     }
 
-    /// <summary>On screen: the code is asked about.</summary>
+    /// <summary>On screen: the code is asked about. Drawn again after the globe changed the language, the globe has focus.</summary>
     public void Started()
     {
-        Tree.Focus(back.Item);
+        if (globeButton != null && globe!.TakeFocus()) Tree.Focus(globeButton.Item);
+        else Tree.Focus(back.Item);
         model.Started();
+    }
+
+    /// <summary>
+    /// Under the title: why a code (approving a profile on a phone), or that the server requires
+    /// two-step sign-in; the steps start under it, or 18 dp under the title without.
+    /// </summary>
+    void Intro(string? text)
+    {
+        if (text == null)
+        {
+            introLabel?.Hide();
+            steps.PositionY = Ui.Dp(introTop - 6 + 18);
+            return;
+        }
+        if (introLabel == null)
+        {
+            introLabel = Text.Label(text, PleyType.Body, PleyColors.Muted, maxLines: 2, width: ColumnWidth);
+            introLabel.VerticalAlignment = VerticalAlignment.Top;
+            introLabel.PositionY = Ui.Dp(introTop);
+            column.Add(introLabel);
+        }
+        else
+        {
+            introLabel.Text = text;
+            introLabel.Show();
+        }
+        steps.PositionY = Ui.Dp(introTop + PleyType.Body.Line * 2 + 10);
     }
 
     void Show(LinkState state)
     {
+        if (!ownIntro && state.TwoStepRequired != twoStepShown)
+        {
+            twoStepShown = state.TwoStepRequired;
+            Intro(twoStepShown ? LinkText.TwoStepRequired : null);
+        }
         var s = state.Shown;
         if (s is LinkStatus.SignedIn done)
         {
@@ -171,21 +227,21 @@ sealed class LinkScreen : Sheet
         switch (s)
         {
             case LinkStatus.Starting:
-                status.Set("Getting a code…", waiting: true, color: PleyColors.Muted);
+                status.Set(Strings.T("signin.link.gettingCode"), waiting: true, color: PleyColors.Muted);
                 break;
             case LinkStatus.Waiting:
-                status.Set("Waiting for approval…", waiting: true, color: PleyColors.Muted);
+                status.Set(Strings.T("signin.link.waiting"), waiting: true, color: PleyColors.Muted);
                 break;
             case LinkStatus.Unreachable u:
                 var seconds = Math.Max(0, (int)((u.RetryAt - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + 999) / 1000));
-                status.Set($"Can't reach the server. Trying again in {seconds} s", color: PleyColors.DangerText);
+                status.Set(Strings.T("signin.link.retrying", ("seconds", seconds)), color: PleyColors.DangerText);
                 countdown.Start();
                 break;
             case LinkStatus.Declined:
-                status.Set("Request declined", color: PleyColors.DangerText);
+                status.Set(Strings.T("signin.link.declined"), color: PleyColors.DangerText);
                 break;
             case LinkStatus.Expired:
-                status.Set("Code expired: press OK for a new one", color: PleyColors.Muted);
+                status.Set(Strings.T("signin.link.expired"), color: PleyColors.Muted);
                 break;
             case LinkStatus.Failed f:
                 status.Set(f.Message, color: PleyColors.DangerText);
@@ -254,6 +310,11 @@ sealed class LinkScreen : Sheet
         column.Hide();
         qrSide.Hide();
         status.Hide();
+        if (globeButton != null)
+        {
+            globeButton.Hide();
+            globeButton.Item.Shown = false;
+        }
         Tree.Blur();
         signedIn = new View { Position = new Position(Ui.Dp(Left), Ui.Dp(200)), Size = new Size(Ui.Dp(ColumnWidth), Ui.Dp(64 + 20 + PleyType.PageTitle.Line * 2)) };
         var tile = new View { Size = new Size(Ui.Dp(64), Ui.Dp(64)), CornerRadius = Ui.Dp(PleyShape.DialogRadius), BackgroundColor = PleyColors.Success };
@@ -261,7 +322,8 @@ sealed class LinkScreen : Sheet
         check.Position = new Position(Ui.Dp(16), Ui.Dp(16));
         tile.Add(check);
         signedIn.Add(tile);
-        var words = Text.Label(name != null ? $"Signed in as {name}" : "Signed in", PleyType.PageTitle, PleyColors.Fg, maxLines: 2, width: ColumnWidth);
+        var words = Text.Label(name != null ? Strings.T("signin.link.signedInAs", ("name", name)) : Strings.T("signin.link.signedIn"), PleyType.PageTitle, PleyColors.Fg, maxLines: 2,
+            width: ColumnWidth);
         words.VerticalAlignment = VerticalAlignment.Top;
         words.PositionY = Ui.Dp(64 + 20);
         signedIn.Add(words);

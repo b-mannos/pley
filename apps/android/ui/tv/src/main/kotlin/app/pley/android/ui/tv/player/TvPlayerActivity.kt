@@ -13,10 +13,12 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import app.pley.android.common.AppLanguage
 import app.pley.android.data.SubtitleBackground
 import app.pley.android.player.PlaybackController
 import app.pley.android.player.PlayerEngine
 import app.pley.android.player.PlayerPhase
+import app.pley.android.player.PlayerWindows
 import app.pley.android.player.engine.VideoMediaSession
 import app.pley.android.player.subtitles.CaptionLook
 import app.pley.android.player.session.SavedPlaybackState
@@ -65,8 +67,14 @@ class TvPlayerActivity : ComponentActivity() {
     /** Settings → Playback details: the readout shows over the video. */
     private var showDetails by mutableStateOf(false)
 
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(AppLanguage.wrap(newBase))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // One player at a time, as one thing plays at a time: one left under this one (Live TV's too) goes.
+        PlayerWindows.opened(this)
         key = savedInstanceState?.getString(STATE_KEY) ?: intent.getStringExtra(EXTRA_PLAYBACK)
         saved = SavedPlaybackState.fromBundle(savedInstanceState?.getBundle(STATE_SAVED))
         wasPlaying = savedInstanceState?.getBoolean(STATE_PLAYING, true) ?: true
@@ -126,6 +134,11 @@ class TvPlayerActivity : ComponentActivity() {
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
         super.onStop()
+    }
+
+    override fun onDestroy() {
+        PlayerWindows.closed(this)
+        super.onDestroy()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

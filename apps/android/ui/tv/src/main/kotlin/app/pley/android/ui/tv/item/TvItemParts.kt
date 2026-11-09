@@ -47,7 +47,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Surface
 import androidx.tv.material3.SurfaceDefaults
-import app.pley.android.common.sentenceOf
+import app.pley.android.common.UiText
+import app.pley.android.common.errorSentence
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyFocus
 import app.pley.android.designsystem.PleyMotion
@@ -59,10 +60,12 @@ import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcon
 import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.designsystem.reducedMotion
+import app.pley.android.designsystem.text.asString
 import app.pley.android.designsystem.tile.QualityBadge
 import app.pley.android.designsystem.tile.TileStyle
 import app.pley.android.screens.item.MetaPart
 import app.pley.android.ui.tv.R
+import app.pley.android.ui.tv.kit.OverlayShowing
 import app.pley.android.ui.tv.kit.TvTextButton
 import kotlinx.coroutines.delay
 
@@ -156,7 +159,7 @@ internal fun TvMetaLine(parts: List<MetaPart>, modifier: Modifier = Modifier) {
         parts.forEachIndexed { i, part ->
             if (i > 0) BasicText("·", style = PleyType.Tv.Label.copy(color = PleyColors.Subtle))
             when (part) {
-                is MetaPart.Text -> BasicText(part.text, style = PleyType.Tv.Label.copy(color = PleyColors.Muted), maxLines = 1)
+                is MetaPart.Text -> BasicText(part.text.asString(), style = PleyType.Tv.Label.copy(color = PleyColors.Muted), maxLines = 1)
                 is MetaPart.ContentRating -> QualityBadge(part.rating, TileStyle.Tv)
                 is MetaPart.Rating -> Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(PleyIcons.Star, contentDescription = null, size = 16.dp, tint = PleyColors.Accent)
@@ -171,26 +174,33 @@ internal fun TvMetaLine(parts: List<MetaPart>, modifier: Modifier = Modifier) {
     }
 }
 
-/** Toasts on TV (design spec §2.10): one pill at the top right, 3.5 s (errors 6 s, in dangerText). */
+/**
+ * Toasts on TV (design spec §2.10): one pill at the top right, 3.5 s
+ * (errors 6 s, in dangerText). A toast's words are put into the language
+ * shown as it shows.
+ */
 @Stable
 internal class TvToastState {
     var message by mutableStateOf<Toast?>(null)
         private set
 
-    fun show(text: String, error: Boolean = false) {
+    /** [text], already in words. */
+    fun show(text: String, error: Boolean = false) = show(UiText.raw(text), error)
+
+    fun show(text: UiText, error: Boolean = false) {
         message = Toast(text, error, System.nanoTime())
     }
 
+    /** Why [error] happened, as a sentence. */
     fun report(error: Throwable) {
-        val sentence = sentenceOf(error)
-        show(sentence, error = true)
+        show(errorSentence(error), error = true)
     }
 
     internal fun clear(toast: Toast) {
         if (message == toast) message = null
     }
 
-    data class Toast(val text: String, val error: Boolean, val at: Long)
+    data class Toast(val text: UiText, val error: Boolean, val at: Long)
 }
 
 @Composable
@@ -214,7 +224,7 @@ internal fun TvToastHost(state: TvToastState, modifier: Modifier = Modifier) {
                     .padding(horizontal = 20.dp, vertical = 12.dp)
                     .semantics { liveRegion = LiveRegionMode.Polite },
             ) {
-                BasicText(t.text, style = PleyType.Tv.Label.copy(color = if (t.error) PleyColors.DangerText else PleyColors.Fg))
+                BasicText(t.text.asString(), style = PleyType.Tv.Label.copy(color = if (t.error) PleyColors.DangerText else PleyColors.Fg))
             }
         }
     }
@@ -231,6 +241,7 @@ private const val ERROR_TOAST_MS = 6_000L
 @Composable
 internal fun TvTextDialog(title: String?, text: String, onDismiss: () -> Unit) {
     BackHandler(onBack = onDismiss)
+    OverlayShowing()
     val close = remember { FocusRequester() }
     val reduced = reducedMotion()
     LaunchedEffect(Unit) { runCatching { close.requestFocus() } }

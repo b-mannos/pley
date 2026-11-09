@@ -11,27 +11,29 @@ function libTabs(kind as string) as object
 end function
 
 function libTabLabel(which as string) as string
-    if which = "recommended" then return "Recommended"
-    if which = "collections" then return "Collections"
-    return "Library"
+    if which = "recommended" then return t("browse.library.tabs.recommended")
+    if which = "collections" then return t("browse.library.tabs.collections")
+    return t("browse.library.tabs.library")
 end function
 
 ' The sorts a library of kind offers, in order: [{ id, label }].
 function libSorts(kind as string) as object
-    all = [
-        { id: "title", label: "Title" }, { id: "year", label: "Year" }, { id: "added", label: "Date added" },
-        { id: "rating", label: "Rating" }, { id: "user_rating", label: "Your rating" }, { id: "release", label: "Release date" },
-        { id: "duration", label: "Duration" }, { id: "last_played", label: "Last played" }, { id: "bitrate", label: "Bitrate" }
-    ]
-    if kind = "music" then return [all[0], all[2], all[4], all[7]]
-    if kind = "shows"
-        out = []
-        for each sort in all
-            if sort.id <> "duration" then out.Push(sort)
-        end for
-        return out
-    end if
-    return all
+    ids = ["title", "year", "added", "rating", "user_rating", "release", "duration", "last_played", "bitrate"]
+    if kind = "music" then ids = ["title", "added", "user_rating", "last_played"]
+    sorts = []
+    for each id in ids
+        if kind <> "shows" or id <> "duration" then sorts.Push({ id: id, label: t("browse.library.sorts." + libSortKey(id)) })
+    end for
+    return sorts
+end function
+
+' A sort's key among the words ("user_rating" → "userRating"); a sort this
+' version doesn't know is Title's.
+function libSortKey(sort as string) as string
+    keys = { title: "title", year: "year", added: "added", rating: "rating", user_rating: "userRating", release: "release", duration: "duration", last_played: "lastPlayed", bitrate: "bitrate" }
+    key = keys[sort]
+    if key = invalid then return "title"
+    return key
 end function
 
 ' A sort's own order: A to Z for titles, newest or highest first for the rest.
@@ -43,32 +45,17 @@ end function
 ' How the Library tab is sorted, in words: "Title, A to Z", "Year, newest
 ' first".
 function libSortLabel(sort as string, order as string) as string
-    notes = {
-        title: ["A to Z", "Z to A"],
-        year: ["oldest first", "newest first"],
-        added: ["first added first", "recently added first"],
-        rating: ["lowest rated first", "best rated first"],
-        user_rating: ["lowest rated first", "best rated first"],
-        release: ["earliest first", "latest first"],
-        duration: ["shortest first", "longest first"],
-        last_played: ["least recent first", "most recent first"],
-        bitrate: ["lowest first", "highest first"]
-    }
-    label = "Title"
-    for each known in libSorts("movies")
-        if known.id = sort then label = known.label
-    end for
-    pair = notes[sort]
-    if pair = invalid then pair = notes.title
-    if order = "desc" then return label + ", " + pair[1]
-    return label + ", " + pair[0]
+    direction = "asc"
+    if order = "desc" then direction = "desc"
+    return t("browse.library.sortOrders." + libSortKey(sort) + "." + direction)
 end function
 
 ' The view of a library a fresh Roku opens on: the Library tab by title,
 ' nothing filtered. watched: "" for every title, "false" unwatched only,
-' "true" watched only; genre "" and year 0 for any.
+' "true" watched only; genre "" and year 0 for any; resolution and
+' dynamic_range a token of fmtResolutions and fmtDynamicRanges, "" for any.
 function libDefaultView() as object
-    return { tab: "library", sort: "title", order: "asc", watched: "", genre: "", year: 0 }
+    return { tab: "library", sort: "title", order: "asc", watched: "", genre: "", year: 0, resolution: "", dynamic_range: "" }
 end function
 
 ' The view a row's See all opens a library on: the Library tab in the
@@ -89,22 +76,145 @@ function libQuery(view as object, offset as integer, limit as integer) as object
     if view.watched <> "" then query.watched = view.watched
     if view.genre <> "" then query.genre = view.genre
     if view.year > 0 then query.year = view.year
+    if view.resolution <> "" then query.resolution = view.resolution
+    if view.dynamic_range <> "" then query.dynamic_range = view.dynamic_range
     return query
 end function
 
-' What the filters keep, in words: "All titles", "Unwatched, Comedy, 1999".
+' What the filters keep, in words: "All titles", "Unwatched, Comedy, 1999,
+' 4K, Dolby Vision".
 function libFilterLabel(view as object) as string
     parts = []
-    if view.watched = "false" then parts.Push("Unwatched")
-    if view.watched = "true" then parts.Push("Watched")
+    if view.watched = "false" or view.watched = "true" then parts.Push(libWatchedLabel(view.watched))
     if view.genre <> "" then parts.Push(view.genre)
     if view.year > 0 then parts.Push(urlValue(view.year))
-    if parts.Count() = 0 then return "All titles"
+    if view.resolution <> "" then parts.Push(fmtTokenLabel(fmtResolutions(), view.resolution))
+    if view.dynamic_range <> "" then parts.Push(fmtTokenLabel(fmtDynamicRanges(), view.dynamic_range))
+    if parts.Count() = 0 then return t("browse.library.allTitles")
     return parts.Join(", ")
 end function
 
 function libFiltered(view as object) as boolean
-    return view.watched <> "" or view.genre <> "" or view.year > 0
+    return view.watched <> "" or view.genre <> "" or view.year > 0 or view.resolution <> "" or view.dynamic_range <> ""
+end function
+
+' Whether the Library tab's posters carry their quality badges ("4K",
+' "DV"), as on the other apps: only sorted by bitrate or filtered by
+' resolution or dynamic range, where they say why a title is where it is.
+' Sorted by bitrate, its bitrate and size are under it too.
+function libShowsBadges(view as object) as boolean
+    return view.sort = "bitrate" or view.resolution <> "" or view.dynamic_range <> ""
+end function
+
+' Clear filters: every title again, in the same order.
+sub libClearFilters(view as object)
+    view.watched = ""
+    view.genre = ""
+    view.year = 0
+    view.resolution = ""
+    view.dynamic_range = ""
+end sub
+
+' --- The Filter panel ---
+
+' What GET /api/libraries/{id}/filters offers: { genres, years,
+' resolutions, dynamicRanges }. The resolutions and dynamic ranges are
+' tokens, in the server's order, and only those this version can name; an
+' older server sends neither.
+function libFilters(data as dynamic) as object
+    answer = httpObject(data)
+    if answer = invalid then answer = {}
+    filters = { genres: [], years: [], resolutions: libKnownTokens(answer.resolutions, fmtResolutions()), dynamicRanges: libKnownTokens(answer.dynamic_ranges, fmtDynamicRanges()) }
+    for each genre in httpArray(answer.genres)
+        name = httpSentence(genre)
+        if name <> "" then filters.genres.Push(name)
+    end for
+    for each year in httpArray(answer.years)
+        if httpNumber(year, 0) > 0 then filters.years.Push(Int(year))
+    end for
+    return filters
+end function
+
+function libKnownTokens(list as dynamic, table as object) as object
+    tokens = []
+    for each token in httpArray(list)
+        if fmtTokenLabel(table, token) <> "" then tokens.Push(token)
+    end for
+    return tokens
+end function
+
+' The Filter panel's rows, in order: [{ title, action }]. Show, Genre and
+' Year; Resolution and Dynamic range when the library's titles differ in
+' them (filters: libFilters, invalid until the server said) or one is
+' chosen, so it can be changed or cleared, never for music; then Clear
+' filters and Save as… once some are set. A row may say a filter isn't
+' set in fewer words than its list ("Résolution : Toutes", the list's
+' "Toutes les résolutions"): the row names the filter before them.
+function libFilterRows(view as object, kind as string, filters as dynamic) as object
+    rows = [{ title: t("browse.library.rows.show", { value: libWatchedLabel(view.watched) }), action: "watched" }]
+    genre = view.genre
+    if genre = "" then genre = t("browse.library.rows.anyGenre")
+    rows.Push({ title: t("browse.library.rows.genre", { value: genre }), action: "genre" })
+    year = t("browse.library.rows.anyYear")
+    if view.year > 0 then year = urlValue(view.year)
+    rows.Push({ title: t("browse.library.rows.year", { value: year }), action: "year" })
+    if kind <> "music"
+        resolutions = []
+        ranges = []
+        if filters <> invalid
+            resolutions = filters.resolutions
+            ranges = filters.dynamicRanges
+        end if
+        if resolutions.Count() > 0 or view.resolution <> ""
+            value = libQualityLabel(fmtResolutions(), view.resolution, t("browse.library.rows.anyResolution"))
+            rows.Push({ title: t("browse.library.rows.resolution", { value: value }), action: "resolution" })
+        end if
+        if ranges.Count() > 0 or view.dynamic_range <> ""
+            value = libQualityLabel(fmtDynamicRanges(), view.dynamic_range, t("browse.library.rows.anyDynamicRange"))
+            rows.Push({ title: t("browse.library.rows.dynamicRange", { value: value }), action: "dynamic_range" })
+        end if
+    end if
+    if libFiltered(view)
+        rows.Push({ title: t("browse.library.rows.clear"), action: "clear" })
+        rows.Push({ title: t("browse.library.rows.saveAs"), action: "save" })
+    end if
+    return rows
+end function
+
+function libWatchedLabel(watched as string) as string
+    if watched = "false" then return t("browse.library.unwatched")
+    if watched = "true" then return t("browse.library.watched")
+    return t("browse.library.allTitles")
+end function
+
+' A resolution's or a dynamic range's words; `none` when none is chosen
+' ("All resolutions", as the other apps say: "Any" would read beside "Any
+' HDR" as the same thing).
+function libQualityLabel(table as object, token as string, none as string) as string
+    if token = "" then return none
+    return fmtTokenLabel(table, token)
+end function
+
+' A resolution's or a dynamic range's choices: { labels, values, current }.
+' `none`, then the tokens the library offers in its order, and the one
+' chosen when it no longer offers it, so that it shows checked.
+function libQualityChoices(table as object, offered as object, chosen as string, none as string) as object
+    out = { labels: [none], values: [""], current: 0 }
+    tokens = []
+    tokens.Append(offered)
+    if chosen <> ""
+        known = false
+        for each token in tokens
+            if token = chosen then known = true
+        end for
+        if not known then tokens.Push(chosen)
+    end if
+    for each token in tokens
+        if token = chosen then out.current = out.values.Count()
+        out.labels.Push(fmtTokenLabel(table, token))
+        out.values.Push(token)
+    end for
+    return out
 end function
 
 ' --- Save as… ---
@@ -120,13 +230,15 @@ function libPlexSort(sort as string) as string
 end function
 
 ' The Library tab's filters and order as a smart filter, in Plex's syntax
-' (genre=Comedy&unwatched=1&sort=year:desc, docs/API.md's smart playlists):
-' what Save as… saves, written as the other apps write it (Android's
-' SmartFilter.of).
+' (genre=Comedy&unwatched=1&sort=year:desc, docs/API.md's smart playlists;
+' dynamicRange is Pley's own field): what Save as… saves, written as the
+' other apps write it (Android's SmartFilter.of).
 function libSmartFilter(view as object) as string
     parts = []
     if view.genre <> "" then parts.Push("genre=" + libFormValue(view.genre))
     if view.year > 0 then parts.Push("year=" + urlValue(view.year))
+    if view.resolution <> "" then parts.Push("resolution=" + libFormValue(view.resolution))
+    if view.dynamic_range <> "" then parts.Push("dynamicRange=" + libFormValue(view.dynamic_range))
     if view.watched = "true" then parts.Push("unwatched=0")
     if view.watched = "false" then parts.Push("unwatched=1")
     field = libPlexSort(view.sort)
@@ -141,30 +253,18 @@ function libFormValue(text as string) as string
 end function
 
 ' What libSmartFilter's filter finds, in words, as the other apps describe
-' a smart playlist: ["Genre: Comedy", "Unwatched", "Newest first"].
+' a smart playlist: ["Genre: Comedy", "4K", "Unwatched", "Newest first"].
 function libSmartFilterWords(view as object) as object
     words = []
-    if view.genre <> "" then words.Push("Genre: " + view.genre)
-    if view.year > 0 then words.Push("From " + urlValue(view.year))
-    if view.watched = "true" then words.Push("Watched")
-    if view.watched = "false" then words.Push("Unwatched")
-    notes = {
-        titleSort: ["By title", "By title, Z to A"],
-        year: ["Oldest first", "Newest first"],
-        originallyAvailableAt: ["Earliest release first", "Latest release first"],
-        addedAt: ["First added first", "Recently added first"],
-        rating: ["Lowest rated first", "Best rated first"],
-        userRating: ["Your lowest rated first", "Your best rated first"],
-        lastViewedAt: ["Least recently played first", "Recently played first"],
-        duration: ["Shortest first", "Longest first"],
-        mediaBitrate: ["Lowest bitrate first", "Highest bitrate first"]
-    }
-    pair = notes[libPlexSort(view.sort)]
-    if view.order = "desc"
-        words.Push(pair[1])
-    else
-        words.Push(pair[0])
-    end if
+    if view.genre <> "" then words.Push(t("browse.library.smartFilter.genre", { value: view.genre }))
+    if view.year > 0 then words.Push(t("browse.library.smartFilter.year", { value: urlValue(view.year) }))
+    if view.resolution <> "" then words.Push(fmtTokenLabel(fmtResolutions(), view.resolution))
+    if view.dynamic_range <> "" then words.Push(fmtTokenLabel(fmtDynamicRanges(), view.dynamic_range))
+    if view.watched = "true" then words.Push(t("browse.library.watched"))
+    if view.watched = "false" then words.Push(t("browse.library.unwatched"))
+    direction = "asc"
+    if view.order = "desc" then direction = "desc"
+    words.Push(t("browse.library.smartFilter.sort." + libPlexSort(view.sort) + "." + direction))
     return words
 end function
 
@@ -174,7 +274,8 @@ function libViewKey(server as string, profileId as dynamic, libraryId as dynamic
 end function
 
 ' The view kept for key, checked against what a library of kind offers;
-' the default for anything else.
+' the default for anything else. Music has no resolutions or dynamic
+' ranges to filter by.
 function libLoadView(section as object, key as string, kind as string) as object
     view = libDefaultView()
     kept = httpObject(httpJson(section.Read(key)))
@@ -195,6 +296,10 @@ function libLoadView(section as object, key as string, kind as string) as object
     view.genre = httpSentence(kept.genre)
     year = httpNumber(kept.year, 0)
     if year > 0 then view.year = Int(year)
+    if kind <> "music"
+        if fmtTokenLabel(fmtResolutions(), kept.resolution) <> "" then view.resolution = kept.resolution
+        if fmtTokenLabel(fmtDynamicRanges(), kept.dynamic_range) <> "" then view.dynamic_range = kept.dynamic_range
+    end if
     return view
 end function
 

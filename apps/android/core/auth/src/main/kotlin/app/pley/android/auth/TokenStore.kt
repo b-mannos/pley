@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import androidx.core.content.edit
+import app.pley.android.common.UiText
 import java.security.GeneralSecurityException
 import java.security.KeyStore
 import java.security.ProviderException
@@ -83,7 +84,7 @@ open class Vault(private val key: () -> SecretKey) {
 
     companion object {
         /** Why tokens couldn't be sealed: they aren't used, and the person signs in again. */
-        const val UNKEPT = "the sign-in couldn't be kept on this device: sign in again"
+        val UNKEPT: UiText = UiText.res(R.string.auth_not_kept)
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
         private const val IV_BYTES = 12
         private const val TAG_BITS = 128
@@ -119,6 +120,8 @@ data class StoredTokens(
     val refreshToken: String?,
     /** What the server allowed, as it wrote it ("library play …"). */
     val scope: String,
+    /** The server's id and this sign-in's proof key; absent from servers before them. */
+    val proof: ServerProof? = null,
 ) {
     /** The access token is used until a minute before it ends. */
     fun accessUsable(now: Long): Boolean = now < accessExpiresAt - REUSE_MARGIN_MS
@@ -133,6 +136,9 @@ data class StoredTokens(
         .put("access_expires_at", accessExpiresAt)
         .put("refresh_token", refreshToken ?: JSONObject.NULL)
         .put("scope", scope)
+        .apply {
+            if (proof != null) put("server_id", proof.serverId).put("proof_id", proof.proofId).put("proof_key", proof.proofKey)
+        }
 
     // Never print the tokens.
     override fun toString(): String = "StoredTokens(issuer=$issuer, scope=$scope)"
@@ -148,6 +154,7 @@ data class StoredTokens(
             accessExpiresAt = o.getLong("access_expires_at"),
             refreshToken = if (o.isNull("refresh_token")) null else o.getString("refresh_token"),
             scope = o.optString("scope"),
+            proof = ServerProof.of(o),
         )
     }
 }

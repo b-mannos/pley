@@ -557,9 +557,16 @@ fn aad(user_id: i64) -> [u8; 16] {
     aad
 }
 
+/// A key of its own for `purpose`, derived from the server's key in
+/// `secret.key`: [`crate::bandwidth`]'s and [`crate::identity`]'s.
+pub(crate) fn derived_key(secret: &[u8], purpose: &[u8]) -> hmac::Key {
+    let derived = hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, secret), purpose);
+    hmac::Key::new(hmac::HMAC_SHA256, derived.as_ref())
+}
+
 /// The key in `path`, made on first use. A file that isn't a key is left
 /// alone: replacing it would lose every secret sealed with it. Other keys
-/// the server holds are derived from it ([`crate::bandwidth`]'s).
+/// the server holds are derived from it ([`derived_key`]).
 pub(crate) fn load_key(path: &Path) -> Result<[u8; 32], String> {
     match std::fs::read_to_string(path) {
         Ok(text) => hex::decode(text.trim())
@@ -876,7 +883,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_secret_shown_signing_in_is_shown_again_to_its_id_until_it_is_used_or_dropped() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let two_step = with_bob(dir.path()).await;
         let first = two_step.pending_or_begin(7, None, "bob", "Den").unwrap();
         assert!(first.uri.contains("Pley:bob%40Den"), "{}", first.uri);
@@ -903,7 +910,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_right_code_takes_its_secret_once_and_wrong_ones_drop_it() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let two_step = with_bob(dir.path()).await;
         let shown = two_step.begin(7, "bob", "pley", false).unwrap();
         assert!(shown.uri.contains("Pley:bob?"), "no server name for a server called pley: {}", shown.uri);
@@ -933,7 +940,7 @@ mod tests {
 
     #[tokio::test]
     async fn moving_it_to_another_app_keeps_it_on_and_renews_the_recovery_codes() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let two_step = with_bob(dir.path()).await;
         let first = base32_decode(&two_step.begin(7, "bob", "pley", false).unwrap().secret).unwrap();
         let on = two_step.finish(7, &code_at(&first, now())).await.unwrap();
@@ -957,7 +964,7 @@ mod tests {
 
     #[tokio::test]
     async fn secrets_are_sealed_for_their_account_with_the_key_in_the_data_folder() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::testing::tempdir();
         let db = Db::open(&dir.path().join("pley.db")).await.unwrap();
         let two_step = TwoStep::new(db.clone(), dir.path());
         let key = std::fs::read_to_string(dir.path().join(KEY_FILE)).unwrap();

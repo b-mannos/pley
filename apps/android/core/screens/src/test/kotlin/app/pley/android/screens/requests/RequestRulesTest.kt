@@ -220,6 +220,16 @@ class RequestRulesTest {
     }
 
     @Test
+    fun aTitleTheLibraryHasWholeOpensThere() {
+        assertEquals(PleyKey.Item(101), opens(title(329865)))
+        // Partly there: its Discover page, where more seasons can be asked for.
+        assertEquals(PleyKey.DiscoverTitle(TitleKind.Show, 95396), opens(title(95396)))
+        assertEquals(PleyKey.DiscoverTitle(TitleKind.Movie, 1184918), opens(title(1184918)))
+        // In no library this account can open: nothing to open there.
+        assertEquals(PleyKey.DiscoverTitle(TitleKind.Movie, 329865), opens(title(329865).copy(itemId = null)))
+    }
+
+    @Test
     fun refusalsSayWhatTheyMean() {
         assertEquals(RequestProblem.Off, RequestProblem.of(ApiException(503, "unavailable", "off", details = ApiErrorBody("unavailable", "off", setup = false))))
         assertEquals(RequestProblem.TmdbKey, RequestProblem.of(ApiException(503, "tmdb_key", "refused")))
@@ -267,6 +277,19 @@ class RequestRulesTest {
         assertEquals(app.pley.android.model.Approval(qualityProfile = 6, seasons = listOf(1, 2)), dialog.approval(6, "/anime", setOf(2, 1)))
         assertFalse(ApproveDialog(arcane, null, loading = false).choices)
         assertTrue(dialog.choices)
+    }
+
+    @Test
+    fun aDeclineReasonIsCutToTheServersLimitWithoutSplittingAPair() {
+        assertEquals(3, declineReasonEnd("abc"))
+        assertEquals(DECLINE_REASON_MAX, declineReasonEnd("a".repeat(DECLINE_REASON_MAX)))
+        assertEquals(DECLINE_REASON_MAX, declineReasonEnd("a".repeat(DECLINE_REASON_MAX + 5)))
+        // An emoji (two UTF-16 units) across the limit goes whole rather than leaving its first half.
+        val across = "a".repeat(DECLINE_REASON_MAX - 1) + "😀" + "b"
+        assertEquals(DECLINE_REASON_MAX - 1, declineReasonEnd(across))
+        // One that ends at the limit stays.
+        val within = "a".repeat(DECLINE_REASON_MAX - 2) + "😀" + "b"
+        assertEquals(DECLINE_REASON_MAX, declineReasonEnd(within))
     }
 
     @Test

@@ -59,6 +59,9 @@ object SnapshotKeys {
 
     fun libraryHubs(libraryId: Long) = "libhubs:$libraryId"
 
+    /** Whether [key] holds words the server writes in the language asked for: the rows' titles of Home and of a library. */
+    fun isWorded(key: String): Boolean = key == HOME || key.startsWith("libhubs:")
+
     /** The first items of a library's listing, for the first frame. */
     fun libraryHead(libraryId: Long, query: LibraryQuery) = "library:$libraryId:${queryKey(query)}:head"
 
@@ -91,7 +94,7 @@ object SnapshotKeys {
         return key.substringAfter(':').substringBefore(':').toLongOrNull()
     }
 
-    /** [query] in a key: sort, order, watched, genre and year. */
+    /** [query] in a key: sort, order, watched, genre, year, resolution and dynamic range. */
     fun queryKey(query: LibraryQuery): String = buildString {
         append(query.sort.wire).append('.').append(query.order.wire)
         when (query.unwatched) {
@@ -101,6 +104,8 @@ object SnapshotKeys {
         }
         query.genre?.let { append(".g=").append(it) }
         query.year?.let { append(".y=").append(it) }
+        query.resolution?.let { append(".r=").append(it.wire) }
+        query.dynamicRange?.let { append(".d=").append(it.wire) }
     }
 
     private val LIBRARY_KEYS = setOf("libhubs", "library", "filters", "collections")

@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -22,7 +21,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -50,16 +48,18 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import app.pley.android.common.UiText
+import app.pley.android.common.resolve
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyMotion
 import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.PleyTv
 import app.pley.android.designsystem.PleyType
 import app.pley.android.designsystem.TvSafeArea
-import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.designsystem.image.ArtworkCandidates
 import app.pley.android.designsystem.image.ArtworkImage
 import app.pley.android.designsystem.reducedMotion
+import app.pley.android.designsystem.text.formatWords
 import app.pley.android.designsystem.tile.ArtworkTileModel
 import app.pley.android.designsystem.tile.TileKind
 import app.pley.android.model.Credit
@@ -77,12 +77,19 @@ import app.pley.android.screens.item.ItemViewModel
 import app.pley.android.screens.item.extraSubtitle
 import app.pley.android.ui.tv.R
 import app.pley.android.ui.tv.kit.BackdropScrim
+import app.pley.android.ui.tv.kit.HeldEnds
+import app.pley.android.ui.tv.kit.LocalTvRowColumn
 import app.pley.android.ui.tv.kit.TvBackdrop
 import app.pley.android.ui.tv.kit.TvRow
+import app.pley.android.ui.tv.kit.TvRowColumn
+import app.pley.android.ui.tv.kit.heldKeyStaysIn
 import app.pley.android.ui.tv.kit.railFade
 import app.pley.android.ui.tv.kit.readOn
 import app.pley.android.ui.tv.kit.rememberFocusMemory
 import app.pley.android.ui.tv.kit.rememberRested
+import app.pley.android.ui.tv.kit.rememberTvRowColumnFocus
+import app.pley.android.ui.tv.kit.rememberTvRowColumnState
+import app.pley.android.ui.tv.kit.tvRowColumnFocus
 import app.pley.android.ui.tv.shell.LocalTvNavigator
 import app.pley.android.ui.tv.shell.ReportOffline
 import app.pley.android.ui.tv.shell.TvNavigator
@@ -111,11 +118,10 @@ internal fun TvItemScreen(model: ItemViewModel) {
     val state by model.state.collectAsStateWithLifecycle()
     val navigator = LocalTvNavigator.current
     val toasts = remember { TvToastState() }
-    val resources = LocalResources.current
     LaunchedEffect(model) {
         model.events.collect { event ->
             when (event) {
-                ItemEvent.NothingToPlay -> toasts.show(resources.getString(R.string.tv_item_nothing_to_play))
+                ItemEvent.NothingToPlay -> toasts.show(UiText.res(R.string.tv_item_nothing_to_play))
                 is ItemEvent.Failed -> toasts.report(event.error)
             }
         }
@@ -182,7 +188,8 @@ internal sealed interface Panel {
 private fun TvItemPage(page: ItemPage, model: ItemViewModel, navigator: TvNavigator, toasts: TvToastState) {
     val focus = remember { ItemPageFocus() }
     val memory = rememberFocusMemory()
-    val list = rememberLazyListState()
+    // Composes the row below ahead, as Home does: Down onto Extras or Cast glides onto a row already made.
+    val list = rememberTvRowColumnState()
     val tier = LocalTvTier.current
     var panel by remember { mutableStateOf<Panel?>(null) }
     var summaryOpen by remember { mutableStateOf(false) }
@@ -193,6 +200,8 @@ private fun TvItemPage(page: ItemPage, model: ItemViewModel, navigator: TvNaviga
     val sections = remember { SectionFocus() }
     val backdrop = remember(page.item, page.origin, tier) { ArtworkCandidates.backdrop(page.item, page.origin, tier) }
     val actions = remember(model, navigator) { TvPageActions(model, navigator) }
+    // What requests say of a movie or show: asked once the page has drawn.
+    val request by model.request.collectAsStateWithLifecycle()
 
     Box(Modifier.fillMaxSize()) {
         TvBackdrop(backdrop, page.context?.showTitle ?: page.title, scrim = BackdropScrim.Item)
@@ -208,6 +217,7 @@ private fun TvItemPage(page: ItemPage, model: ItemViewModel, navigator: TvNaviga
                     onTracks = { panel = Panel.Tracks },
                     onMore = { panel = Panel.More },
                     onPrimaryActions = { panel = Panel.Actions(page.item, buttons.play) },
+                    request = request,
                 )
             }
             page.seasons?.let { seasons ->
@@ -307,8 +317,10 @@ private fun LazyListScope.rowsOf(
     val origin = page.origin
     if (page.extras.isNotEmpty()) {
         item(key = "extras", contentType = TileKind.Landscape) {
-            val tiles = remember(page.extras, origin) {
-                page.extras.map { ArtworkTileModel.of(it, TileKind.Landscape, origin).copy(subtitle = extraSubtitle(it)) }
+            val resources = LocalResources.current
+            val words = formatWords()
+            val tiles = remember(page.extras, origin, resources, words) {
+                page.extras.map { ArtworkTileModel.of(it, TileKind.Landscape, origin, words).copy(subtitle = extraSubtitle(it, words).resolve(resources)) }
             }
             val byId = remember(page.extras) { page.extras.associateBy { it.id } }
             val group = sections.of("extras")
@@ -353,7 +365,8 @@ private fun LazyListScope.rowsOf(
     }
     if (page.related.isNotEmpty()) {
         item(key = "related", contentType = TileKind.Poster) {
-            val tiles = remember(page.related, origin) { page.related.map { ArtworkTileModel.of(it, TileKind.Poster, origin) } }
+            val words = formatWords()
+            val tiles = remember(page.related, origin, words) { page.related.map { ArtworkTileModel.of(it, TileKind.Poster, origin, words) } }
             val byId = remember(page.related) { page.related.associateBy { it.id } }
             val group = sections.of("related")
             Box(Modifier.focusRequester(group).onFocusChanged { if (it.hasFocus) focus.area = Area.Rows }) {
@@ -377,7 +390,10 @@ private fun LazyListScope.rowsOf(
  * hero at the top; the season tabs at y = 218 and the episodes under them
  * at 272; other rows' tiles at 210, their header at 172; the details'
  * header there too — and, once focus has left the hero, draws nothing
- * above that line, so the rows pass under the info block. Tiles that
+ * above that line, so the rows pass under the info block. It moves itself
+ * to a row's tile, and back to the hero, as a page of rows does
+ * ([TvRowColumn]): over 150 ms, eased out, for a press, evenly under a
+ * held Up or Down; Compose scrolls to the tabs and the details. Tiles that
  * scroll left pass under the rail ([railFade]). Down past the last thing
  * that takes focus reads on through the details ([readOn]); the info block
  * steps aside then and the text has the screen down from the safe area.
@@ -385,14 +401,18 @@ private fun LazyListScope.rowsOf(
 @Composable
 private fun ItemColumn(state: LazyListState, focus: ItemPageFocus, content: LazyListScope.() -> Unit) {
     val density = LocalDensity.current
-    val spec = remember(density, state, focus) { ItemPageSpec(density, state, focus) }
-    CompositionLocalProvider(LocalBringIntoViewSpec provides spec) {
+    val column = rememberTvRowColumnFocus(state, with(density) { RowTilesTop.toPx() })
+    column.tileTops[EPISODE_ROW] = with(density) { EpisodeTilesTop.toPx() }
+    val spec = remember(density, state, focus, column) { column.spec(ItemPageSpec(density, state, focus)) }
+    CompositionLocalProvider(LocalBringIntoViewSpec provides spec, LocalTvRowColumn provides column) {
         LazyColumn(
             state = state,
             contentPadding = PaddingValues(bottom = BottomRoom),
             verticalArrangement = Arrangement.spacedBy(PleyTv.RowGap),
             modifier = Modifier
                 .fillMaxSize()
+                .tvRowColumnFocus(column)
+                .heldKeyStaysIn(HeldEnds.UpDown)
                 .readOn(state, line = PleyTv.FocusedRowHeaderY, onReading = { focus.reading = it })
                 .railFade()
                 .drawWithContent {

@@ -26,12 +26,14 @@ import threading
 import time
 from typing import List, Optional
 
-# The menu, in its order: (id, label, kbps, lines).
+# The menu, in its order: (id, label, kbps, lines). A bitrate's label is
+# the same in every language; Original's and Automatic's are the names of
+# the add-on's words for them (label()).
 ORIGINAL = "original"
 AUTO = "auto"
 MENU = [
-    (ORIGINAL, "Original", None, None),
-    (AUTO, "Automatic", None, None),
+    (ORIGINAL, "original", None, None),
+    (AUTO, "automatic", None, None),
     ("30m", "30 Mbps 4K", 30000, 2160),
     ("15m", "15 Mbps 4K", 15000, 2160),
     ("20m", "20 Mbps 1080p", 20000, 1080),
@@ -132,11 +134,17 @@ PROBE_SHARE = 0.7
 START_BUDGET = 3.5
 
 
-def label(quality_id: str) -> str:
-    for id_, text, _, _ in MENU:
+def label(quality_id: str, text) -> str:
+    """A quality as the menu names it; `text(name)` is the add-on's words."""
+    for id_, name, kbps, _ in MENU:
         if id_ == quality_id:
-            return text
-    return MENU[0][1]
+            return name if kbps else text(name)
+    return text(MENU[0][1])
+
+
+def decimal(value: float, digits: int) -> str:
+    """A number as English writes it, "4.5": bitrate_label's own."""
+    return "%.*f" % (digits, value)
 
 
 def limits(quality_id: str):
@@ -177,6 +185,40 @@ def offered(file_kbps: Optional[float], file_lines: Optional[int]) -> List[str]:
         elif (file_kbps is not None and kbps < file_kbps) or (file_lines is not None and lines < file_lines):
             found.append(id_)
     return sorted(found, key=lambda q: -kbps_of(q))
+
+
+def menu_for(width: Optional[int], height: Optional[int], bitrate: Optional[float]) -> List[str]:
+    """The ids of the Quality menu as every app offers it for a file of
+    `width` × `height` and `bitrate` (bits per second), docs/QUALITY.md, "The
+    menu", and as the server lists them to remotes: Original, Automatic,
+    then each quality with fewer lines than the file or at most 80 % of its
+    bitrate (every one when neither is known), tallest first as the file
+    names them, then by bitrate. The setting offers the whole menu, which
+    keeps the table's order."""
+    lines = named_lines(width, height)
+    kbps = bitrate / 1000.0 if bitrate and bitrate > 0 else None
+    height = height if height and height > 0 else None
+    copies = []
+    for id_, _, cap_kbps, cap_lines in MENU:
+        if cap_kbps is None:
+            continue
+        if kbps is not None or height is not None:
+            fewer = height is not None and cap_lines < height
+            lighter = kbps is not None and cap_kbps <= kbps * 0.8
+            if not fewer and not lighter:
+                continue
+        shown = min(cap_lines, lines) if lines else cap_lines
+        copies.append((id_, shown, cap_kbps))
+    copies.sort(key=lambda c: (-c[1], -c[2]))
+    return [ORIGINAL, AUTO] + [c[0] for c in copies]
+
+
+def picked(choice: str, offered_ids: List[str]) -> str:
+    """What the Quality menu has picked for a file that offers
+    `offered_ids` (menu_for), as progress reports and the user's remotes
+    say it: the setting's choice, else Original, which a file that doesn't
+    offer it plays."""
+    return choice if choice in offered_ids else ORIGINAL
 
 
 def under_cap(qualities: List[str], cap: Optional[str]) -> List[str]:
@@ -296,11 +338,12 @@ def floor_kbps(lines: Optional[int]) -> int:
     return LEAST_KBPS
 
 
-def bitrate_label(kbps: float, lines: Optional[int]) -> str:
+def bitrate_label(kbps: float, lines: Optional[int], number=decimal) -> str:
     """A bitrate stepped as it is sent, as the menu names qualities: "4.5
-    Mbps 1080p", "8 Mbps 4K"."""
+    Mbps 1080p", "8 Mbps 4K". `number(value, digits)` writes the number in
+    the language shown (kodi.decimal)."""
     mbps = int(kbps) // 100 / 10.0
-    words = ("%d" % mbps if mbps == int(mbps) else "%.1f" % mbps) + " Mbps"
+    words = number(mbps, 0 if mbps == int(mbps) else 1) + " Mbps"
     if not lines:
         return words
     return words + (" 4K" if lines >= 2160 else " %dp" % lines)
@@ -379,11 +422,11 @@ class Watch:
         """Below the original: a quality, or a bitrate stepped down."""
         return self.quality != ORIGINAL or bool(self.live and self.playing_kbps < self.own_kbps)
 
-    def label(self) -> str:
+    def label(self, text, number=decimal) -> str:
         """What plays, as the menu would say it after "Automatic · "."""
         if self.live and self.playing_kbps < self.own_kbps:
-            return bitrate_label(self.playing_kbps, self.lines)
-        return label(self.quality)
+            return bitrate_label(self.playing_kbps, self.lines, number)
+        return label(self.quality, text)
 
     def reset(self, now: float) -> None:
         self.last = None

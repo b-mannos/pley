@@ -396,9 +396,11 @@ impl ChannelRow {
         self.custom_number.clone().filter(|n| !n.is_empty()).or_else(|| self.number.clone())
     }
 
-    /// The guide's channel it takes its programmes from.
+    /// The guide's channel it takes its programmes from: the one set for it,
+    /// else the match found when the guide lacks the source's id, else the
+    /// source's id.
     fn guide_key(&self) -> Option<&str> {
-        [self.custom_guide_id.as_deref(), Some(self.guide_id.as_str()), self.matched_guide_id.as_deref()]
+        [self.custom_guide_id.as_deref(), self.matched_guide_id.as_deref(), Some(self.guide_id.as_str())]
             .into_iter()
             .flatten()
             .find(|id| !id.is_empty())
@@ -450,6 +452,21 @@ impl ProgramRow {
     }
 }
 
+/// Who asks for a source to be read, which says what happens while it is
+/// being read already.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Asker {
+    /// Reads that fall due: looked at again in a minute.
+    Schedule,
+    /// An administrator (a source added or changed, Refresh): read once more
+    /// after the read under way, channels and guide.
+    Admin,
+    /// Channels given a guide channel or a name: the guide read once more,
+    /// unless the read under way hadn't chosen its channels yet. Not counted
+    /// as a try, which would put off reads that fall due.
+    ChannelsSet,
+}
+
 pub struct LiveTv {
     db: Db,
     events: EventBus,
@@ -466,6 +483,10 @@ pub struct LiveTv {
     downloads: PathBuf,
     /// Sources being read now, and when each was last tried.
     refreshing: Mutex<HashSet<i64>>,
+    /// Sources read once more when their read ends, their channels too when
+    /// `true`: asked for meanwhile ([`Asker`]). Taken with `refreshing`
+    /// locked first.
+    again: Mutex<HashMap<i64, bool>>,
     tried: Mutex<HashMap<i64, Instant>>,
     refresh_lock: tokio::sync::Mutex<()>,
     /// Every channel, in order, read once and kept until something changes:
@@ -477,6 +498,26 @@ pub struct LiveTv {
     generation: AtomicU64,
     /// Logo addresses fetched ahead (or that failed): not asked for again.
     logos_ahead: Mutex<HashSet<String>>,
+    /// What's on, as search finds it, read again a minute later or after a
+    /// change (see [`LiveTv::airing_titled`]).
+    airing: Mutex<Option<Arc<Airing>>>,
+}
+
+/// The programmes on (and starting within the minute) when read, their
+/// titles folded for search.
+struct Airing {
+    read_at: i64,
+    generation: u64,
+    programs: Vec<AiringProgram>,
+}
+
+struct AiringProgram {
+    source_id: i64,
+    guide_id: String,
+    start: i64,
+    stop: i64,
+    /// The title folded (see [`crate::search::text::fold`]).
+    title: Box<str>,
 }
 
 /// The channels of the enabled sources as they are now, hidden ones too.
@@ -494,11 +535,19 @@ pub(crate) struct Lineup {
     guided: HashSet<(i64, String)>,
     /// Each source's short id, by source.
     source_uids: HashMap<i64, String>,
+    /// The names as search finds them, made when first searched.
+    search: std::sync::OnceLock<crate::search::Names>,
 }
 
 impl Lineup {
     fn has_guide(&self, c: &ChannelRow) -> bool {
         c.guide_key().is_some_and(|k| self.guided.contains(&(c.source_id, k.to_owned())))
+    }
+
+    /// The channels `search` finds by name (see [`crate::search::Names`]), by id.
+    fn find(&self, search: &str) -> HashMap<i64, crate::search::Found> {
+        let names = self.search.get_or_init(|| crate::search::Names::new(self.rows.iter().map(|c| c.display_name())));
+        names.find(search).into_iter().map(|(i, how)| (self.rows[i].id, how)).collect()
     }
 }
 
@@ -637,12 +686,14 @@ impl LiveTv {
             pictures_pruned: Mutex::default(),
             downloads,
             refreshing: Mutex::default(),
+            again: Mutex::default(),
             tried: Mutex::default(),
             refresh_lock: tokio::sync::Mutex::new(()),
             lineup: Mutex::default(),
             reading_lineup: tokio::sync::Mutex::new(()),
             generation: AtomicU64::new(0),
             logos_ahead: Mutex::default(),
+            airing: Mutex::default(),
         });
         // Whether channels played, as the tuners find out (until Live TV goes).
         let weak = Arc::downgrade(&live);
@@ -710,6 +761,32 @@ impl LiveTv {
 
     pub async fn check_access(&self, user: &AuthUser) -> Result<(), AppError> {
         if self.may_watch(user).await { Ok(()) } else { Err(AppError::forbidden("Live TV isn't open to this account")) }
+    }
+
+    /// The account's name (its display name, else its username) when it is
+    /// one of the household's (in Home).
+    pub async fn home_name(&self, user_id: i64) -> Option<String> {
+        sqlx::query_as::<_, (String, Option<String>)>("SELECT username, display_name FROM users WHERE id = ? AND home")
+            .bind(user_id)
+            .fetch_optional(&self.db.read)
+            .await
+            .ok()
+            .flatten()
+            .map(|(username, display)| display.filter(|d| !d.trim().is_empty()).unwrap_or(username))
+    }
+
+    /// The home as it is now, when the account is in it: its name, which
+    /// the viewers whose connection it takes over are told when they are in
+    /// the home too, and the accounts in it.
+    pub async fn home_now(&self, user_id: i64) -> Option<tuner::InHome> {
+        let name = self.home_name(user_id).await?;
+        let accounts = sqlx::query_scalar::<_, i64>("SELECT id FROM users WHERE home")
+            .fetch_all(&self.db.read)
+            .await
+            .ok()?
+            .into_iter()
+            .collect();
+        Some(tuner::InHome { name, accounts })
     }
 
     /// Whether the account is one of the household's (in Home).
@@ -1006,6 +1083,11 @@ impl LiveTv {
         {
             return Err(AppError::bad_request("the guide's address isn't a URL"));
         }
+        // A file is checked as its refresh will read it, so that the source
+        // isn't saved with a guide it never gets.
+        if let Some(Err(err)) = guide_file(input.guide_url.trim()) {
+            return Err(AppError::bad_request(err.to_string()));
+        }
         if !(0..=100).contains(&input.max_connections) {
             return Err(AppError::bad_request("connections must be between 0 (no limit) and 100"));
         }
@@ -1103,10 +1185,10 @@ impl LiveTv {
             .ok_or_else(|| AppError::not_found(format!("live TV source {id} not found")))
     }
 
-    /// Reads a source again in the background.
+    /// Reads a source again in the background, after a read under way.
     pub fn refresh_soon(self: &Arc<Self>, id: i64) {
         let this = self.clone();
-        tokio::spawn(async move { this.refresh(id, true, true).await });
+        tokio::spawn(async move { this.read_source(id, true, true, Asker::Admin).await });
     }
 
     /// Reads a source's details without saving them: what an administrator
@@ -1148,15 +1230,51 @@ impl LiveTv {
     }
 
     /// Reads a source's channels (when `channels`) and its guide (when
-    /// `guide`), saying how it went in the source.
+    /// `guide`) as they fall due, saying how it went in the source.
     pub async fn refresh(&self, id: i64, channels: bool, guide: bool) {
-        if !self.refreshing.lock().insert(id) {
-            return;
+        self.read_source(id, channels, guide, Asker::Schedule).await;
+    }
+
+    /// [`Self::refresh`] for `asker`.
+    async fn read_source(&self, id: i64, mut channels: bool, mut guide: bool, asker: Asker) {
+        {
+            let mut refreshing = self.refreshing.lock();
+            if !refreshing.insert(id) {
+                match asker {
+                    Asker::Schedule => {}
+                    Asker::Admin => {
+                        self.again.lock().insert(id, true);
+                    }
+                    Asker::ChannelsSet => {
+                        self.again.lock().entry(id).or_insert(false);
+                    }
+                }
+                return;
+            }
         }
-        self.tried.lock().insert(id, Instant::now());
+        if asker != Asker::ChannelsSet {
+            self.tried.lock().insert(id, Instant::now());
+        }
         self.changed();
         // One source at a time: guides are large.
         let _one = self.refresh_lock.lock().await;
+        loop {
+            self.read_source_once(id, channels, guide).await;
+            let next = {
+                let mut refreshing = self.refreshing.lock();
+                let next = self.again.lock().remove(&id);
+                if next.is_none() {
+                    refreshing.remove(&id);
+                }
+                next
+            };
+            let Some(next_channels) = next else { break };
+            (channels, guide) = (next_channels, true);
+        }
+        self.changed();
+    }
+
+    async fn read_source_once(&self, id: i64, channels: bool, guide: bool) {
         if channels {
             let result = self.refresh_channels(id).await;
             if let Err(err) = &result {
@@ -1170,22 +1288,61 @@ impl LiveTv {
             self.changed();
         }
         if guide {
-            let result = self.refresh_guide(id).await;
-            match &result {
-                Ok(Some(n)) => tracing::info!(source = id, programs = n, "live TV guide read"),
-                Ok(None) => {}
-                Err(err) => tracing::warn!(source = id, "reading the live TV guide failed: {err:#}"),
-            }
-            if let Err(err) = result {
-                let _ = sqlx::query("UPDATE live_sources SET guide_error = ? WHERE id = ?")
-                    .bind(format!("{err:#}"))
-                    .bind(id)
-                    .execute(&self.db.write)
-                    .await;
-            }
+            self.read_guide(id).await;
         }
-        self.refreshing.lock().remove(&id);
-        self.changed();
+    }
+
+    /// Reads a source's guide, saying in the source how it went.
+    async fn read_guide(&self, id: i64) {
+        let result = self.refresh_guide(id).await;
+        match &result {
+            Ok(Some(n)) => tracing::info!(source = id, programs = n, "live TV guide read"),
+            Ok(None) => {}
+            Err(err) => tracing::warn!(source = id, "reading the live TV guide failed: {err:#}"),
+        }
+        if let Err(err) = result {
+            let _ = sqlx::query("UPDATE live_sources SET guide_error = ? WHERE id = ?")
+                .bind(format!("{err:#}"))
+                .bind(id)
+                .execute(&self.db.write)
+                .await;
+        }
+    }
+
+    /// Reads again the guides of the sources of channels `ids`, given a
+    /// guide channel with no programmes (when `guide_set`) or a name that
+    /// decides their guide channel (when `renamed`). A guide read keeps the
+    /// guide channels some channel took then, by guide channel or by name,
+    /// so one set by hand since has nothing until the next read. A source
+    /// being read now is read once more after it, unless that read hadn't
+    /// chosen its channels yet.
+    async fn read_guides_wanted(&self, ids: &[i64], guide_set: bool, renamed: bool) -> Result<(), AppError> {
+        let ids: HashSet<i64> = ids.iter().copied().collect();
+        let lineup = self.lineup().await?;
+        // The name decides only for channels given no guide channel by hand,
+        // whose playlist's guide channel the guide lacks: none, or one with
+        // no programmes (see `ChannelRow::guide_key`).
+        let by_name = |c: &ChannelRow| {
+            c.custom_guide_id.as_deref().is_none_or(str::is_empty)
+                && (c.guide_id.is_empty() || !lineup.guided.contains(&(c.source_id, c.guide_id.clone())))
+        };
+        let unguided: HashSet<i64> = lineup
+            .rows
+            .iter()
+            .filter(|c| ids.contains(&c.id) && ((guide_set && !lineup.has_guide(c)) || (renamed && by_name(c))))
+            .map(|c| c.source_id)
+            .collect();
+        if unguided.is_empty() {
+            return Ok(());
+        }
+        let sources = self.source_rows().await.map_err(|e| AppError::Internal(e.into()))?;
+        for source in sources {
+            if !source.enabled || source.effective_guide_url().is_none() || !unguided.contains(&source.id) {
+                continue;
+            }
+            self.read_source(source.id, false, true, Asker::ChannelsSet).await;
+        }
+        Ok(())
     }
 
     async fn list_channels(&self, source: &SourceRow) -> anyhow::Result<Listed> {
@@ -1258,7 +1415,9 @@ impl LiveTv {
                 "INSERT INTO live_channels (source_id, key, name, number, group_name, logo_url, guide_id, stream_url, \
                  user_agent, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
                  ON CONFLICT(source_id, key) DO UPDATE SET name = excluded.name, number = excluded.number, \
-                 group_name = excluded.group_name, logo_url = excluded.logo_url, guide_id = excluded.guide_id, \
+                 group_name = excluded.group_name, logo_url = excluded.logo_url, \
+                 matched_guide_id = CASE WHEN guide_id = excluded.guide_id THEN matched_guide_id END, \
+                 guide_id = excluded.guide_id, \
                  offline_since = CASE WHEN stream_url = excluded.stream_url THEN offline_since END, \
                  stream_url = excluded.stream_url, user_agent = excluded.user_agent, position = excluded.position, \
                  missing_since = NULL",
@@ -1310,6 +1469,14 @@ impl LiveTv {
         let source = self.source_row(id).await.map_err(|e| anyhow::anyhow!("{e}"))?;
         let Some(url) = source.effective_guide_url() else { return Ok(None) };
         let path = self.download_guide(&url, &source).await?;
+        // Channels set by hand until now are seen by this read: no guide read
+        // after it for them (one asked for by an administrator stays).
+        {
+            let mut again = self.again.lock();
+            if again.get(&id) == Some(&false) {
+                again.remove(&id);
+            }
+        }
         let channels = self.channel_rows(Some(id), true).await.map_err(|e| anyhow::anyhow!("{e}"))?;
         let days = i64::from(self.settings().guide_days);
         let (from, to) = (now() - GUIDE_BEHIND, now() + days * 86_400);
@@ -1326,27 +1493,19 @@ impl LiveTv {
             };
             let mut matches: HashMap<i64, String> = HashMap::new();
             let guide = xmltv::read(input, from, to, |guide_channels| {
-                let ids: HashSet<&str> = guide_channels.iter().map(|c| c.id.as_str()).collect();
-                let mut by_name: HashMap<String, &str> = HashMap::new();
-                for c in guide_channels {
-                    for name in &c.names {
-                        by_name.entry(normalize(name)).or_insert(&c.id);
-                    }
-                }
+                let index = GuideIndex::new(guide_channels);
                 let mut wanted = HashSet::new();
                 for c in &channels_for_match {
                     for id in [c.custom_guide_id.as_deref(), Some(c.guide_id.as_str())].into_iter().flatten() {
-                        if ids.contains(id) {
+                        if index.ids.contains(id) {
                             wanted.insert(id.to_owned());
                         }
                     }
-                    let named = [c.custom_guide_id.as_deref(), Some(c.guide_id.as_str())]
-                        .into_iter()
-                        .flatten()
-                        .any(|id| ids.contains(id));
-                    if !named && let Some(id) = by_name.get(&normalize(c.display_name())) {
-                        matches.insert(c.id, (*id).to_owned());
-                        wanted.insert((*id).to_owned());
+                    // Made whether or not a guide channel is set, so that
+                    // clearing it falls back to this at once.
+                    if let Some(id) = index.matching(&c.guide_id, c.display_name()) {
+                        matches.insert(c.id, id.to_owned());
+                        wanted.insert(id.to_owned());
                     }
                 }
                 wanted
@@ -1429,8 +1588,19 @@ impl LiveTv {
         use tokio::io::AsyncWriteExt;
         tokio::fs::create_dir_all(&self.downloads).await?;
         let path = self.downloads.join(format!("{}.xml", uuid::Uuid::new_v4().simple()));
-        if let Some(local) = url.strip_prefix("file://").or_else(|| url.starts_with('/').then_some(url)) {
-            tokio::fs::copy(local, &path).await.with_context(|| format!("{local} can't be read"))?;
+        if let Some(local) = guide_file(url) {
+            // Also one a playlist named before playlists' guides had to be
+            // web addresses: a file of a guide's size on this computer, not
+            // a device or a pipe, which would never end.
+            let local = local?;
+            let meta =
+                tokio::fs::metadata(&local).await.with_context(|| format!("{} can't be read", local.display()))?;
+            anyhow::ensure!(meta.is_file(), "{} isn't a file", local.display());
+            anyhow::ensure!(meta.len() <= MAX_GUIDE_BYTES, "the guide is larger than {} GB", MAX_GUIDE_BYTES >> 30);
+            if let Err(err) = tokio::fs::copy(&local, &path).await {
+                let _ = tokio::fs::remove_file(&path).await;
+                return Err(err).with_context(|| format!("{} can't be read", local.display()));
+            }
             return Ok(path);
         }
         let mut req = self.http.get(url).timeout(Duration::from_secs(15 * 60));
@@ -1546,7 +1716,7 @@ impl LiveTv {
             .into_iter()
             .map(|s| (s.id, s.uid))
             .collect();
-        let lineup = Arc::new(Lineup { rows, shown, names, groups, guided, source_uids });
+        let lineup = Arc::new(Lineup { rows, shown, names, groups, guided, source_uids, search: Default::default() });
         let mut kept = self.lineup.lock();
         // A change while it was read: this one is already out of date.
         if self.generation.load(Ordering::SeqCst) == generation {
@@ -1710,13 +1880,30 @@ impl LiveTv {
         let lineup = self.lineup().await?;
         let search = search.trim().to_lowercase();
         let airing = if search.is_empty() { HashSet::new() } else { self.airing_titled(&search).await? };
+        // By name: as typed, its words in any order, words read as others.
+        // On a thread of its own: the first search of a lineup reads its names.
+        let found = if search.is_empty() {
+            HashMap::new()
+        } else {
+            let (lineup, search) = (lineup.clone(), search.clone());
+            tokio::task::spawn_blocking(move || lineup.find(&search))
+                .await
+                .map_err(|e| AppError::Internal(anyhow::anyhow!("searching the lineup: {e}")))?
+        };
+        let by_number_or_airing = |c: &ChannelRow| {
+            c.display_number().is_some_and(|n| n.starts_with(&search))
+                || c.guide_key().is_some_and(|k| airing.contains(&(c.source_id, k.to_owned())))
+        };
+        let only_alike = |c: &ChannelRow| {
+            matches!(found.get(&c.id), Some(crate::search::Found::Alike(_))) && !by_number_or_airing(c)
+        };
         let matches = |i: usize, c: &ChannelRow| {
             search.is_empty()
                 || lineup.names[i].contains(&search)
-                || c.display_number().is_some_and(|n| n.starts_with(&search))
-                || c.guide_key().is_some_and(|k| airing.contains(&(c.source_id, k.to_owned())))
+                || found.contains_key(&c.id)
+                || by_number_or_airing(c)
         };
-        let listed: Vec<&ChannelRow> = match category {
+        let mut listed: Vec<&ChannelRow> = match category {
             Category::Recent => {
                 let by_id: HashMap<i64, usize> = lineup.rows.iter().enumerate().map(|(i, c)| (c.id, i)).collect();
                 self.recent(user, RECENT)
@@ -1745,6 +1932,26 @@ impl LiveTv {
                     .collect()
             }
         };
+        // Names only alike to the search (nothing was found by its words)
+        // give way to channels found by number or by what's on.
+        if listed.iter().any(|c| !only_alike(c)) {
+            listed.retain(|c| !only_alike(c));
+        }
+        // Found ones come closest first, the lineup's order among equals:
+        // by name as typed, then by number or what's on, then by words read
+        // as others, then alike; recent ones stay in the order they were watched.
+        if !search.is_empty() && *category != Category::Recent {
+            use crate::search::Found;
+            listed.sort_by_cached_key(|c| {
+                let how = match found.get(&c.id) {
+                    Some(Found::AsTyped) => (0, std::cmp::Reverse(0)),
+                    None => (1, std::cmp::Reverse(0)),
+                    Some(Found::Corrected(close)) => (2, *close),
+                    Some(Found::Alike(close)) => (3, *close),
+                };
+                (channel_rank(&search, c.display_name(), c.display_number().as_deref()), how)
+            });
+        }
         let limit = limit.clamp(1, MAX_PAGE);
         let offset = match around.and_then(|id| listed.iter().position(|c| c.id == id)) {
             Some(at) => at / limit * limit,
@@ -1755,21 +1962,50 @@ impl LiveTv {
     }
 
     /// The guide channels (by source) airing a programme whose title has `search` in it.
+    /// Titles are compared as search compares names ([`crate::search::text::finds`]):
+    /// "lakeside games" finds "Winter Games - Lakeside 2020".
+    /// The titles are read and folded once a minute at most, not with every
+    /// search: a guide has thousands of channels, and search asks as people type.
     async fn airing_titled(&self, search: &str) -> Result<HashSet<(i64, String)>, AppError> {
-        let pattern = format!("%{}%", search.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
         let at = now();
-        Ok(sqlx::query_as::<_, (i64, String)>(
-            "SELECT DISTINCT source_id, guide_id FROM live_programs WHERE start <= ? AND stop > ? \
-             AND title LIKE ? ESCAPE '\\'",
-        )
-        .bind(at)
-        .bind(at)
-        .bind(pattern)
-        .fetch_all(&self.db.read)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?
-        .into_iter()
-        .collect())
+        let generation = self.generation.load(Ordering::SeqCst);
+        let kept = self.airing.lock().clone().filter(|a| a.generation == generation && at - a.read_at < 60);
+        let airing = match kept {
+            Some(airing) => airing,
+            None => {
+                let rows = sqlx::query_as::<_, (i64, String, i64, i64, String)>(
+                    "SELECT source_id, guide_id, start, stop, title FROM live_programs WHERE start <= ? AND stop > ?",
+                )
+                .bind(at + 60)
+                .bind(at)
+                .fetch_all(&self.db.read)
+                .await
+                .map_err(|e| AppError::Internal(e.into()))?;
+                let programs = tokio::task::spawn_blocking(move || {
+                    rows.into_iter()
+                        .map(|(source_id, guide_id, start, stop, title)| AiringProgram {
+                            source_id,
+                            guide_id,
+                            start,
+                            stop,
+                            title: crate::search::text::fold(&title).into_boxed_str(),
+                        })
+                        .collect()
+                })
+                .await
+                .map_err(|e| AppError::Internal(anyhow::anyhow!("reading what's on: {e}")))?;
+                let airing = Arc::new(Airing { read_at: at, generation, programs });
+                *self.airing.lock() = Some(airing.clone());
+                airing
+            }
+        };
+        let search = crate::search::text::Finder::new(search);
+        Ok(airing
+            .programs
+            .iter()
+            .filter(|p| p.start <= at && p.stop > at && search.finds_folded(&p.title))
+            .map(|p| (p.source_id, p.guide_id.clone()))
+            .collect())
     }
 
     /// The channels `user` watched last, newest first.
@@ -1922,7 +2158,7 @@ impl LiveTv {
     }
 
     /// Changes channels `ids` as `patch` says.
-    pub async fn patch_channels(&self, ids: &[i64], patch: &ChannelPatch) -> Result<(), AppError> {
+    pub async fn patch_channels(self: &Arc<Self>, ids: &[i64], patch: &ChannelPatch) -> Result<(), AppError> {
         if ids.is_empty() {
             return Ok(());
         }
@@ -1971,6 +2207,16 @@ impl LiveTv {
             }
         }
         self.changed();
+        // A guide channel, or a name the guide may know, that the last read
+        // left out: in the background, as the lineup is read again for it.
+        if guide.is_some() || name.is_some() {
+            let (this, ids, guide_set, renamed) = (self.clone(), ids.to_vec(), guide.is_some(), name.is_some());
+            tokio::spawn(async move {
+                if let Err(err) = this.read_guides_wanted(&ids, guide_set, renamed).await {
+                    tracing::warn!("reading the guides of channels set again failed: {err}");
+                }
+            });
+        }
         Ok(())
     }
 
@@ -2160,6 +2406,21 @@ fn sort_channels(rows: &mut [ChannelRow]) {
     rows.sort_by(|a, b| key(a).partial_cmp(&key(b)).unwrap_or(std::cmp::Ordering::Equal));
 }
 
+/// How closely a channel named `name` answers a search for `search`, best
+/// first: its number in full, then by name as titles are
+/// ([`crate::search::match_rank`], a region before the name not counting),
+/// then those found by their number's beginning or by what's on.
+fn channel_rank(search: &str, name: &str, number: Option<&str>) -> u8 {
+    if number.is_some_and(|n| n.trim().eq_ignore_ascii_case(search)) {
+        return 0;
+    }
+    if !name.to_lowercase().contains(search) {
+        return 4;
+    }
+    let rank = crate::search::match_rank(search, name);
+    split_region(name).map_or(rank, |(_, rest)| rank.min(crate::search::match_rank(search, rest)))
+}
+
 /// A group name's region and the rest, when it begins with one the way
 /// providers write them: "UK| Sport", "|UK| Sport", "UK: Sport", "[UK] Sport".
 fn split_region(name: &str) -> Option<(&str, &str)> {
@@ -2189,6 +2450,75 @@ fn is_divider(name: &str) -> bool {
     name.chars().take_while(|c| "#=*-~_+•●★☆✦━─|".contains(*c)).count() >= 3 || !name.chars().any(char::is_alphanumeric)
 }
 
+/// A guide's channels, as a source's channels are looked up in them.
+struct GuideIndex<'a> {
+    ids: HashSet<&'a str>,
+    /// By [`loose_id`].
+    loose: HashMap<String, &'a str>,
+    /// By [`normalize`]d name.
+    by_name: HashMap<String, &'a str>,
+}
+
+impl<'a> GuideIndex<'a> {
+    fn new(channels: &'a [xmltv::GuideChannel]) -> Self {
+        let mut index = GuideIndex { ids: HashSet::new(), loose: HashMap::new(), by_name: HashMap::new() };
+        let mut ambiguous = HashSet::new();
+        for c in channels {
+            index.ids.insert(&c.id);
+            let loose = loose_id(&c.id);
+            if !loose.is_empty() {
+                match index.loose.get(&loose) {
+                    Some(id) if *id != c.id => {
+                        ambiguous.insert(loose);
+                    }
+                    Some(_) => {}
+                    None => {
+                        index.loose.insert(loose, &c.id);
+                    }
+                }
+            }
+            for name in &c.names {
+                index.by_name.entry(normalize(name)).or_insert(&c.id);
+            }
+        }
+        // Two guide channels written alike would be a guess between them.
+        for loose in ambiguous {
+            index.loose.remove(&loose);
+        }
+        index
+    }
+
+    /// The guide's channel for one whose source gives it `id` and `name`,
+    /// when the guide doesn't have `id` as it is: `id` written otherwise
+    /// (`Kika.de` for `KIKA.de`, `ARD-alpha.de` for `ARD.alpha.de`), else the
+    /// channel of its name.
+    fn matching(&self, id: &str, name: &str) -> Option<&'a str> {
+        if self.ids.contains(id) {
+            return None;
+        }
+        let loose = loose_id(id);
+        let by_id = if loose.is_empty() { None } else { self.loose.get(&loose) };
+        by_id.or_else(|| self.by_name.get(&normalize(name))).copied()
+    }
+}
+
+/// A guide id as compared when it isn't found as it is: lower case, letters
+/// and digits only. Sources and guides often write the same id in another
+/// case or with other dots and dashes. Between two digits a separator stays,
+/// as one dot: `21.1` and `2.11` are different channels.
+fn loose_id(id: &str) -> String {
+    let mut loose = String::with_capacity(id.len());
+    let mut chars = id.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c.is_alphanumeric() {
+            loose.extend(c.to_lowercase());
+        } else if loose.ends_with(|p: char| p.is_ascii_digit()) && chars.peek().is_some_and(|n| n.is_ascii_digit()) {
+            loose.push('.');
+        }
+    }
+    loose
+}
+
 /// A channel name as compared with the guide's: lower case, letters and
 /// digits only, and a trailing quality said or not (`HD`, `FHD`, `4K`).
 fn normalize(name: &str) -> String {
@@ -2200,6 +2530,38 @@ fn normalize(name: &str) -> String {
         }
     }
     s
+}
+
+/// The file a guide's address names, when it names one (`/…`, `file://…`)
+/// rather than a web address: checked to be on this computer
+/// ([`local_guide`]).
+fn guide_file(url: &str) -> Option<anyhow::Result<PathBuf>> {
+    url.strip_prefix("file://").or_else(|| url.starts_with('/').then_some(url)).map(local_guide)
+}
+
+/// The file on this computer `local` names: never one on another computer
+/// (`//host/share/…`, `\\host\share\…`), which Windows signs in to, as the
+/// account Pley runs as, wherever it is, nor a device (`\\.\…`).
+fn local_guide(local: &str) -> anyhow::Result<PathBuf> {
+    use std::path::{Component, Prefix};
+    let path = PathBuf::from(local);
+    // On Windows, `/…` is on the drive Pley runs from.
+    anyhow::ensure!(path.has_root(), "the guide's file is named from the top of its drive (/…)");
+    // Windows takes any two separators at the start as a share's, `/\host`
+    // too, though Rust sees no prefix there.
+    let separator = |c: char| c == '/' || c == '\\';
+    let mut start = local.chars();
+    let share = start.next().is_some_and(separator) && start.next().is_some_and(separator);
+    let mut components = path.components();
+    let here = !share
+        && match components.next() {
+            Some(Component::Prefix(prefix)) => matches!(prefix.kind(), Prefix::Disk(_)),
+            // `\??\…` is a path Windows passes on as it is, a share's
+            // (`\??\UNC\host\share\…`) too.
+            _ => components.next() != Some(Component::Normal("??".as_ref())),
+        };
+    anyhow::ensure!(here, "a guide on another computer is read from its web address (http:// or https://)");
+    Ok(path)
 }
 
 /// `text` with `secret` (a password in a URL) blanked out.
@@ -2226,6 +2588,113 @@ fn describe(e: &reqwest::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_channel_missing_from_the_guide_is_matched_by_its_id_written_otherwise_then_its_name() {
+        let channel =
+            |id: &str, name: &str| xmltv::GuideChannel { id: id.into(), names: vec![name.into()], icon: None };
+        let channels =
+            [channel("KIKA.de", "KiKA"), channel("ARD.alpha.de", "ARD alpha"), channel("WDR.de", "WDR Fernsehen")];
+        let index = GuideIndex::new(&channels);
+        // The guide has the id: nothing to match.
+        assert_eq!(index.matching("KIKA.de", "Anything"), None);
+        assert_eq!(index.matching("Kika.de", "Anything"), Some("KIKA.de"));
+        assert_eq!(index.matching("ARD-alpha.de", "Anything"), Some("ARD.alpha.de"));
+        // An id the guide has in no form: the name decides.
+        assert_eq!(index.matching("WDRFernsehen.de", "WDR Fernsehen HD"), Some("WDR.de"));
+        assert_eq!(index.matching("", "KiKA HD"), Some("KIKA.de"));
+        assert_eq!(index.matching("-", "Nothing like it"), None);
+
+        // Digits keep their separator, and ids two channels share in their
+        // loose form match neither.
+        let channels =
+            [channel("2.11", "Two"), channel("SPORT.de", "S1"), channel("Sport.de", "S2"), channel("5-1", "Five")];
+        let index = GuideIndex::new(&channels);
+        assert_eq!(index.matching("21.1", "Anything"), None);
+        assert_eq!(index.matching("2-11", "Anything"), Some("2.11"));
+        assert_eq!(index.matching("5.1", "Anything"), Some("5-1"));
+        assert_eq!(index.matching("sport.de", "Anything"), None);
+    }
+
+    #[test]
+    fn a_match_comes_before_an_id_the_guide_lacks() {
+        let row = |custom: Option<&str>, matched: Option<&str>| ChannelRow {
+            id: 1,
+            source_id: 1,
+            name: "KiKA".into(),
+            number: None,
+            group_name: String::new(),
+            logo_url: String::new(),
+            guide_id: "Kika.de".into(),
+            matched_guide_id: matched.map(Into::into),
+            stream_url: String::new(),
+            user_agent: None,
+            position: 0,
+            hidden: false,
+            custom_name: None,
+            custom_number: None,
+            custom_guide_id: custom.map(Into::into),
+            offline_since: None,
+        };
+        assert_eq!(row(None, None).guide_key(), Some("Kika.de"));
+        assert_eq!(row(None, Some("KIKA.de")).guide_key(), Some("KIKA.de"));
+        assert_eq!(row(Some("kika.example"), Some("KIKA.de")).guide_key(), Some("kika.example"));
+        assert_eq!(row(Some(""), Some("KIKA.de")).guide_key(), Some("KIKA.de"));
+    }
+
+    #[test]
+    fn channels_found_come_closest_first() {
+        assert_eq!(channel_rank("101", "Anything", Some("101")), 0);
+        assert_eq!(channel_rank("news", "News", Some("7")), 0);
+        // A region before the name doesn't count.
+        assert_eq!(channel_rank("news", "UK| News", None), 0);
+        assert_eq!(channel_rank("news", "UK| News HD", None), 1);
+        assert_eq!(channel_rank("news", "World News", None), 2);
+        assert_eq!(channel_rank("news", "Newsroom", None), 1);
+        assert_eq!(channel_rank("ews", "News", None), 3);
+        // Found by its number's beginning or by what's on.
+        assert_eq!(channel_rank("10", "Sport", Some("101")), 4);
+        assert_eq!(channel_rank("quiz", "Sport", None), 4);
+    }
+
+    #[test]
+    fn a_local_guide_is_a_file_on_this_computer() {
+        for elsewhere in [
+            "//host/share/guide.xml",
+            r"\\host\share\guide.xml",
+            r"\\?\UNC\host\share\guide.xml",
+            r"\??\UNC\host\share\guide.xml",
+            r"/\host\share\guide.xml",
+            r"/??/UNC/host/share/guide.xml",
+        ] {
+            assert!(local_guide(elsewhere).is_err(), "{elsewhere}");
+        }
+        assert!(local_guide("guide.xml").is_err(), "nowhere in particular");
+        let here = if cfg!(windows) { "C:/guides/guide.xml" } else { "/srv/guides/guide.xml" };
+        assert_eq!(local_guide(here).unwrap(), PathBuf::from(here));
+        // On Windows, on Pley's own drive.
+        assert_eq!(local_guide("/guides/guide.xml").unwrap(), PathBuf::from("/guides/guide.xml"));
+        assert!(guide_file("https://p.example/guide.xml").is_none(), "a web address");
+        assert_eq!(guide_file("file:///guides/guide.xml").unwrap().unwrap(), PathBuf::from("/guides/guide.xml"));
+    }
+
+    /// A source isn't saved with a guide file its refresh would refuse.
+    #[test]
+    fn a_source_is_saved_only_with_a_guide_it_can_read() {
+        let input = |guide: &str| -> SourceInput {
+            let source =
+                serde_json::json!({"name": "P", "kind": "m3u", "url": "http://p.example/list.m3u", "guide_url": guide});
+            serde_json::from_value(source).unwrap()
+        };
+        for refused in
+            ["//host/share/guide.xml", r"\\host\share\guide.xml", "file://host/share/guide.xml", "file://guide.xml"]
+        {
+            assert!(LiveTv::check_input(&input(refused)).is_err(), "{refused}");
+        }
+        for taken in ["", "https://p.example/guide.xml.gz", "/guides/guide.xml", "file:///guides/guide.xml"] {
+            assert!(LiveTv::check_input(&input(taken)).is_ok(), "{taken}");
+        }
+    }
 
     /// A 100×100 logo: `ink` drawn in its middle, on nothing or on `ground`.
     fn logo(ink: [u8; 3], ground: Option<[u8; 3]>) -> image::DynamicImage {

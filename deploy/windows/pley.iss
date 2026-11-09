@@ -743,7 +743,8 @@ begin
   N := Lowercase(Name);
   Result := (N = 'logs') or (N = 'tmp');
   if All and not Result then
-    Result := (Copy(N, 1, 5) = 'pley.') or (N = 'secret.key') or (N = 'plex-machine-id') or (N = 'transcode') or
+    Result := (Copy(N, 1, 5) = 'pley.') or (N = 'secret.key') or (N = 'server-id') or
+      (N = 'plex-machine-id') or (N = 'transcode') or
       (N = 'cache') or (N = 'metadata') or (N = 'media') or (N = 'avatars') or (N = 'backups');
 end;
 
@@ -1040,7 +1041,9 @@ end;
 
 // Lets pley through Windows Firewall on the kinds of network chosen. pley
 // decides where it listens and on which ports, which its Settings change:
-// the rule is for pley, wherever it listens.
+// the rule is for pley, wherever it listens. Its UDP half takes in
+// discovery's broadcast on the web port and Bonjour's queries on 5353
+// (mDNS), so neither needs a rule of its own.
 procedure Firewall;
 var
   Code: Integer;

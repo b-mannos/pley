@@ -34,6 +34,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import app.pley.android.common.AppLanguage
 import app.pley.android.data.AppSettings
 import app.pley.android.data.SessionState
 import app.pley.android.data.Settings
@@ -43,11 +44,11 @@ import app.pley.android.player.PlaybackServices
 import app.pley.android.player.PlayerEngine
 import app.pley.android.player.PlayerPhase
 import app.pley.android.player.PlayerUiState
+import app.pley.android.player.PlayerWindows
 import app.pley.android.player.engine.VideoMediaSession
 import app.pley.android.player.session.SavedPlaybackState
 import app.pley.android.screens.PleyGraphOwner
 import app.pley.android.ui.phone.theme.PhoneTheme
-import java.lang.ref.WeakReference
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -70,9 +71,9 @@ import kotlinx.coroutines.withTimeoutOrNull
  * - picture in picture by itself when leaving while it plays (Android 12
  *   and later; Home on older ones), growing from the video, with play and
  *   pause; never while paused;
- * - leaving otherwise pauses, reports and lets go of the decoders; back
- *   within 90 s it carries on with the same server session, later with a
- *   new one at the same place.
+ * - leaving otherwise pauses, reports and lets go of the decoders, and
+ *   the remote isn't obeyed meanwhile; back within 90 s it carries on with
+ *   the same server session, later with a new one at the same place.
  */
 class PhonePlayerActivity : ComponentActivity(), PlayerHost {
     private lateinit var services: PlaybackServices
@@ -102,12 +103,14 @@ class PhonePlayerActivity : ComponentActivity(), PlayerHost {
         }
     }
 
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(AppLanguage.wrap(newBase))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // One player at a time, as one video plays at a time: an older one (in picture in picture) goes.
-        live.mapNotNull { it.get() }.filter { it !== this }.forEach { it.finish() }
-        live.removeAll { it.get() == null || it.get()?.isFinishing == true }
-        live += WeakReference(this)
+        // One player at a time, as one thing plays at a time: an older one (in picture in picture, or Live TV's) goes.
+        PlayerWindows.opened(this)
 
         immersive()
         if (resources.configuration.smallestScreenWidthDp < TABLET_DP) {
@@ -236,6 +239,7 @@ class PhonePlayerActivity : ComponentActivity(), PlayerHost {
             // Within 90 s: the same session, at the same place, still paused.
             controller.value?.engine?.player?.prepare()
         }
+        controller.value?.setAway(false)
         decodersReleased = false
         attachEngine()
         immersive()
@@ -250,6 +254,7 @@ class PhonePlayerActivity : ComponentActivity(), PlayerHost {
         // picture in picture (onPictureInPictureModeChanged).
         val c = controller.value ?: return
         c.pause()
+        c.setAway(true)
         // Lets go of the decoders and the buffers; the session stays for 90 s.
         c.engine?.player?.let {
             it.stop()
@@ -272,7 +277,7 @@ class PhonePlayerActivity : ComponentActivity(), PlayerHost {
     }
 
     override fun onDestroy() {
-        live.removeAll { it.get() == null || it.get() === this }
+        PlayerWindows.closed(this)
         runCatching { unregisterReceiver(pipReceiver) }
         detachEngine()
         if (isFinishing) {
@@ -436,9 +441,6 @@ class PhonePlayerActivity : ComponentActivity(), PlayerHost {
         private const val MIN_BRIGHTNESS = 0.01f
 
         internal const val ACTION_PLAY_PAUSE = "app.pley.android.player.PLAY_PAUSE"
-
-        /** The player screens alive, so a new one ends an older one. */
-        private val live = mutableListOf<WeakReference<PhonePlayerActivity>>()
 
         fun intent(context: Context, playback: String): Intent =
             Intent(context, PhonePlayerActivity::class.java).putExtra(EXTRA_PLAYBACK, playback)

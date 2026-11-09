@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Navigate, useNavigate, useParams, useSearchParams } from "react-router";
+import { useTranslation } from "react-i18next";
+import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { LoaderCircle, TriangleAlert } from "lucide-react";
 import { errorMessage } from "@/api/client";
 import { keys, useItem } from "@/api/hooks";
 import type { Id } from "@/api/types";
+import { castOf } from "@/lib/castReceiver";
 import { decodeId, idParam } from "@/lib/ids";
 import { androidPlayer } from "@/lib/shell";
 import { itemUrl } from "@/lib/urls";
@@ -18,6 +20,7 @@ function num(v: string | null): number | null {
 }
 
 function PlayerMessage({ title, message, onBack }: { title: string; message: string; onBack: () => void }) {
+  const { t } = useTranslation("player");
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-black p-6 text-center text-white">
       <TriangleAlert className="size-12 text-accent" />
@@ -26,7 +29,7 @@ function PlayerMessage({ title, message, onBack }: { title: string; message: str
         <p className="mt-1 text-sm text-white/70">{message}</p>
       </div>
       <button type="button" onClick={onBack} className="rounded-md bg-white/10 px-5 py-2 text-sm font-semibold hover:bg-white/20">
-        Go back
+        {t("page.goBack")}
       </button>
     </div>
   );
@@ -43,6 +46,7 @@ function Loading() {
 const PLAYABLE = new Set(["movie", "episode", "extra"]);
 
 export function PlayerPage() {
+  const { t } = useTranslation("player");
   const { id } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
@@ -59,6 +63,8 @@ export function PlayerPage() {
   const fileId = decodeId(params.get("file"));
   const audio = num(params.get("audio"));
   const sub = num(params.get("sub"));
+  // A cast starts the player again, though it plays that title already.
+  const cast = castOf(useLocation().state);
 
   // In the Android app its own player takes over, and this page steps back
   // (`?web=1`: it couldn't, the web player plays).
@@ -99,18 +105,18 @@ export function PlayerPage() {
   // A failed background refetch (e.g. after watch state changed) keeps the
   // previous data: don't tear down a playing video because of it.
   if (!data) {
-    return <PlayerMessage title="Can't play this item" message={errorMessage(item.error)} onBack={() => back("/")} />;
+    return <PlayerMessage title={t("page.cantPlay")} message={errorMessage(item.error)} onBack={() => back("/")} />;
   }
   if (!PLAYABLE.has(data.kind)) return <Navigate to={itemUrl(data.id)} replace />;
   if (!data.files.length) {
     return (
-      <PlayerMessage title="Nothing to play" message="This item has no media files." onBack={() => back(itemUrl(data.id))} />
+      <PlayerMessage title={t("page.nothingToPlay")} message={t("page.noFiles")} onBack={() => back(itemUrl(data.id))} />
     );
   }
 
   return (
     <VideoPlayer
-      key={`${data.id}:${queue?.index ?? ""}`}
+      key={`${data.id}:${queue?.index ?? ""}:${cast ?? ""}`}
       item={data}
       startMs={startMs}
       fileId={fileId}

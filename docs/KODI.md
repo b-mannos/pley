@@ -47,31 +47,56 @@ python apps/kodi/package.py        # dist/plugin.video.pley-<version>.zip
 - When the server requires two-step sign-in, the screen with the code says
   so under its notes. Someone who doesn't use it yet sets it up on the
   phone or computer where they approve the code.
-- In a household of more than one profile, Kodi asks "Who's watching?" each
-  time it starts, and the PIN of the profile it was left on when that
-  profile has one, as the other TVs do; a profile with a PIN shows a lock.
+- Kodi starts as the profile it was left on, straight into Home, when that
+  profile has no PIN. In a household of more than one profile it asks
+  "Who's watching?" each time it starts when that profile has one, and
+  going on as it asks the PIN, as the other TVs do; a profile with a PIN
+  shows a lock.
   A PIN is typed in Kodi's number dialog and never kept. A wrong one, or
   too many, asks again with the reason in the dialog's heading, the only
   line the dialog has; a PIN locked after too many wrong tries is said on
   the screen.
 - The same server found at another address must be signed in to again,
   since anything on the network can answer the broadcast.
+- Before its token goes to the server's address, the add-on has the server
+  prove it is the one signed in to, at that address
+  ([API.md](API.md#telling-servers-apart)): for the access token, a proof
+  made within the half hour on the same network (Kodi's address changing,
+  its waking from sleep, or a request there that got no answer asks for a
+  new one); for the refresh token, a profile's PIN and signing out, one
+  made then. What can't prove itself gets no token: Pley says another
+  device answers at the server's address.
 - Switch profile, Sign out and Choose a server are in the profile's menu
   (the rail's avatar) and in the add-on's settings.
 
 ### Screens
 
 - **The rail:** the profile, Search, Home, Live TV (where the server has
-  channels), the first three libraries, Playlists, Collections and
-  Settings. With more than three libraries, Libraries takes Collections'
-  place.
+  channels), the first five libraries, Playlists, Collections and
+  Settings. With more libraries, Libraries takes Collections' place. Its
+  entries keep fixed places, nine of them over Settings at the other TV
+  apps' size, so beside Live TV it lists four libraries.
 - **The profile's menu** has Discover and Your requests where the server
   takes requests; they open in Kodi's lists ([Requests](#requests)).
 - **The menu key** on a tile: mark watched, My List, add to a playlist,
   remove from Continue Watching, go to the show. In a playlist it also
   moves and removes entries.
+- **A library's Library tab** sorts as on the other apps (Bitrate and
+  Your rating too; shows have no Duration, music only Title, Date added,
+  Your rating and Last played) and filters by what is watched, genre,
+  year, resolution and dynamic range. Resolution and Dynamic range are in
+  the Filter menu after Year where the library's titles differ in them,
+  and the Filter chip says what is chosen ("4K · DV"): the chip
+  row has no room for a chip each. Sorted by bitrate, the line under each
+  poster is its bitrate and size ("42 Mbps · 23.4 GB"); sorted by bitrate
+  or filtered by resolution or dynamic range, posters show "4K" and their
+  dynamic range ("DV", "HDR+", "HDR", "HLG"). The tab a library was
+  left on is kept; its sort and filters start afresh each time it opens.
 - **Library order** is the profile's, saved for all its devices: Sort
   libraries in the profile's menu, or a library's menu key.
+- **Search** asks the server for up to 200 titles, 200 people and 200
+  Live TV channels, and shows a row for each kind holding all it found.
+  Kodi's lists show every title and channel found.
 - **Kodi's lists:** Settings → Screens → "Kodi's lists, in this skin's
   views" shows the add-on as folders in the skin's own views. Skin widgets
   and favourites always get these folders.
@@ -110,7 +135,9 @@ Settings → Playback → Quality offers [the menu](QUALITY.md#the-menu):
 Original, Automatic (the default), 30 Mbps 4K down to 2 Mbps 480p. Kodi's
 player has no Pley quality menu, so you choose before playing, and one
 setting serves every title: the server converts a file above it and plays
-one below it as it is.
+one below it as it is. The remote on your other devices changes it while
+a title plays ([Remote control](#remote-control)), and the title plays
+again where it was at the new quality.
 
 Automatic follows the rules for
 [players that go black between streams](QUALITY.md#players-that-go-black-between-streams).
@@ -146,16 +173,156 @@ Live TV works as in the [Android app](ANDROID.md#live-tv). On Kodi:
   deinterlaces it itself, surround reaches a receiver, the server converts
   nothing, and it starts at once.
 - **Tuning:** the add-on first asks `POST …/watch` with this Kodi's
-  `client_id`, then Kodi reads the stream under the same id, so changing
-  channel never holds two connections.
+  `client_id`, then Kodi reads the stream for that session as
+  `<client_id>-stream`, so changing channel never holds two connections,
+  and the watch session stays while Kodi reads it: it is the one your
+  other devices see and control ([Remote control](#remote-control)).
+- **Leaving:** when Kodi stops reading a channel (you stop it, another
+  channel or a title plays, Kodi exits), the service ends its session
+  with `DELETE /api/live/sessions/{session}` at once, rather than the
+  server waiting 45 s, so it doesn't hold a connection or stay on your
+  remotes. A session the server ended (taken over, stopped from
+  elsewhere) is left as it is.
 - **No pause or seeking:** the stream has no length and no
   `Accept-Ranges`, so Kodi's controls offer only Previous, Stop and Next.
 - **Channel up and down:** the channels around the one playing (100 each
   side) are Kodi's video queue, so the player's Next and Previous (the
   remote's skip keys, `.` and `,`) change channel. Up and Down don't.
 - **Every connection in use (`409`):** Kodi's list offers "Watch here
-  instead" where the server allows it. A connection taken by someone else
-  ends with "The server stopped this stream." (`stream.ts` can't say who).
+  instead" where the server allows it.
+- **Taken over:** the server's `live_taken_over` event for the channel
+  playing stops it at once and empties Kodi's queue of channels, so Kodi
+  doesn't tune the next one. A dialog, "Live TV stopped", gives the
+  server's words with OK and Watch again, which plays the channel as any
+  channel plays. A stream that ends without that event within a second
+  says "The server stopped this stream."
+- **Stopped from another device** (`session_stopped` for the channel's
+  session): it stops as when taken over, and the dialog says "Live TV was
+  stopped from another device." or "Live TV was stopped by the server's
+  administrator.", with their words on the next line.
+
+### Remote control
+
+Your other devices control what Kodi plays (see
+[API.md](API.md#remote-control)); Kodi itself shows no remote. The
+service (`service.py`) acts on `player_command` for the session playing
+here, by the shared remote-control rule, written in `remote.py` and
+tested against every case of `packages/tv/test/fixtures/remote.json`:
+
+- **What it says:** each play request and Live TV watch lists what Kodi
+  obeys (`controls`), names it by the name it was given in Kodi's Settings,
+  Services, General, Device name (at most 64 characters) and says it is a
+  TV (`device_kind: tv`): Kodi is made for the TV, on a computer too, so
+  remotes list it with the TVs. Until it is given a name, Kodi calls itself
+  "Kodi" with the computer's host name after it, which isn't sent: the
+  server names it from the add-on instead.
+- **Movies and episodes:** play, pause, seek, skip, audio, subtitles and
+  quality, and next when Kodi's queue has something after it. An episode
+  always lists next: with nothing queued after it, Next plays the episode
+  after it, as Up Next does (and does nothing on a show's last).
+- **Audio and subtitles:** a video lists `audio` and `subtitles` when its
+  file has tracks of them, and both while its details are still loading
+  (they come with the server's answer). A pick switches Kodi's player to
+  that track, found by its place in Kodi's lists as a pick in Kodi's own
+  menu is (`tracks.py`), and is saved for the show or movie the same way
+  once it has held 2 seconds. Kodi switches only to what it lists: a
+  converted stream carries only the audio the server put in, subtitles
+  drawn onto the video stay, and picture subtitles Kodi wasn't given as a
+  file can't be picked. Such a pick does nothing.
+- **Quality:** the Quality setting is Kodi's Quality menu. A video lists
+  `quality`, and the remote picks among what the menu offers for the file
+  ([QUALITY.md](QUALITY.md#the-menu)). A pick changes the setting, as
+  choosing it there does (Automatic picked again starts afresh), and the
+  title plays again where it is at it, a new session that the remote
+  sees as it starts. The quality picked already reports again; one the
+  file isn't offered does nothing.
+- **What plays:** every progress report of a video says the audio and
+  subtitles Kodi plays, by the server's stream indexes (`audio_index`,
+  `subtitle_index`, `-1` for none), so remotes tick them. A track the
+  server doesn't know (captions Kodi found in the video, subtitles added
+  from Kodi's dialog) is left out, and the server keeps the one it knew.
+  It says the quality picked too (`quality`): the setting, or Original
+  for a file that isn't offered it, which then plays as it is.
+- **Music:** play, pause, seek, skip, next and previous. Previous starts the
+  track again past 3 seconds in, or on the first track, else plays the one
+  before.
+- **Live TV:** next and previous change channel within Kodi's queue of
+  channels, round its ends, when there is one; the stream can't pause or
+  go back, so nothing else. Without a queue (a channel played again with
+  Watch again), it obeys only Stop.
+- Play while playing, pause while paused, or the audio, subtitles or
+  quality that play already change nothing and report again, so a remote
+  a little behind settles. A seek, a skip or another track is reported at
+  once; another title, channel or quality reports with its own session.
+- Kodi stopped or playing something else obeys nothing. A command it
+  doesn't know, or a seek or skip without its place, does nothing.
+- **What shows:** the add-on brings up nothing of Kodi's player for a
+  command. What the remote did to a video shows for 2 seconds as a Kodi
+  notification with the add-on's icon, without its sound: "Paused",
+  "Playing", the skip asked for ("+30 s", "−10 s"), where a seek went
+  ("Jumped to 12:34"), the audio or subtitles switched to, by the
+  language and title Kodi's own Audio and Subtitles menus name them by
+  ("Audio: French - Commentary", "Subtitles off"), and the quality picked
+  as the Quality setting names it. A command that changes nothing shows nothing; next
+  and channel up and down show what Kodi shows as it plays the title or
+  channel, and music shows nothing. Kodi's own pause and seek bar are its
+  skin's: most skins show the seek bar while paused and for a moment
+  after a seek, whoever made it, and the add-on can't keep it away (a
+  skin opens it again while its condition holds).
+
+### Casting
+
+Your other devices play things on Kodi (their Play on…, see
+[API.md](API.md#casting)); Kodi itself casts to nothing. The service does
+it (`casting.py`):
+
+- **Taking casts:** its event stream makes Kodi a receiver, by the
+  `client_id` its plays are made with, as a TV named as its plays are
+  named. It takes titles and playlists always, and Live TV's channels
+  where the account has Live TV as the stream opens, and says it switches
+  to the profile of a remote of another profile that casts to it
+  (`casts=…,switch`).
+- **What plays:** what is sent plays as the add-on's own Play plays it,
+  through the plugin's play routes, in place of what plays:
+  - a movie or an episode from where it was sent, else where Play starts
+    it (its resume point), with the audio and subtitles picked on the
+    remote's page in place of the account's choice for that play, where
+    the file it plays (its first) has them: the audio is asked for with
+    the play request's `audio_index`, the subtitles shown as the account's
+    choice would be, and neither is saved. A track of another version
+    leaves the account's choice. Played again (another quality,
+    Automatic), it keeps them;
+  - a show or a season its next episode;
+  - an album or an artist as Kodi's music queue, shuffled when asked, and
+    a track its album from it;
+  - a playlist what it holds: music as Kodi's music queue, titles as
+    Kodi's video queue, played through;
+  - a channel in Kodi's queue of channels, the lineup's channels around
+    it, so channel up and down work as for a channel played from Live TV.
+- **Where it came from:** "Playing from {device}" ("Playing from another
+  device" when the remote's has no name) shows for 4 seconds as a Kodi
+  notification with the add-on's icon, and "Nothing to play" when a show
+  has no next episode or an album or a playlist is empty.
+- **From another profile:** a remote on another profile of the household
+  casts with its profile and a ticket, and Kodi switches to that profile
+  first, with the switch-profile grant and the ticket in place of a PIN
+  (the remote gave its own). What played ends as the profile it played
+  as: the switch waits up to 5 seconds for its last report, its
+  session's end and its live channel's to go, and what hasn't gone by
+  then is dropped rather than sent as the new profile. Until the switch
+  is done, any other cast heard is dropped, whichever profile it names;
+  once switched, casts play as usual. The add-on then acts as the
+  remote's profile:
+  Pley's window goes to its Home, a listing of the add-on on screen shows
+  again, and "Who's watching?" counts as answered until Kodi starts over.
+  A switch that fails (the ticket spent or out of time, the server out of
+  reach) says "Couldn't switch to the remote's profile" for 4 seconds,
+  plays nothing and stops what played, which was ended for the cast.
+- **Not taken:** a cast for another device, one naming another profile
+  without a ticket, or one that comes while the add-on is signed out or
+  while Pley's window asks "Who's watching?" as Kodi starts (a cast
+  neither plays past its PINs nor switches profile while one is picked),
+  does nothing. Of two casts close together, the later plays.
 
 ### Requests
 
@@ -243,6 +410,57 @@ Discover's plots end with "Details and pictures from TMDB."; the add-on's
 description, in its information in Kodi, ends with "This product uses the
 TMDB API but is not endorsed or certified by TMDB."
 
+### Language
+
+The add-on is in English, French and Spanish, in the language
+[API.md](API.md#language) describes: the account's own, else the one
+chosen in the add-on's settings, else Kodi's where Pley has it, else the
+server's, else English. `packages/tv/test/fixtures/language.json` pins
+that order for the Samsung apps, and the add-on's tests hold it to the
+same answers.
+
+- **Kodi's language:** what Kodi says of its own
+  (`xbmc.getLanguage(xbmc.ISO_639_1)`). A region doesn't count: a Kodi
+  in Canadian French is in French.
+- **This device's choice:** Settings → Screens → Language: Automatic,
+  English, Français or Español, each named in itself. Kodi has no globe
+  as the TVs' sign-in screens do; this setting stands for it, and its
+  Automatic is Kodi's language, else the server's. Signed in, a profile's
+  own language comes first.
+- **Profile language:** in the profile's menu, and in the add-on's
+  settings under Switch profile: "Automatic (Français)", with what that is
+  here, then English, Français and Español. A choice is the profile's on
+  all its devices (`PUT /api/me/language`), and shows once the server has
+  it. A Pley from before languages keeps no account's language (its
+  `GET /api/server` names none, and that route answers 404 or 405):
+  there Profile language is this device's choice, as the Language setting
+  is, whose Automatic is Kodi's language; a choice shows at once and stays
+  on this device, with no error. So does a choice a server answers with
+  404 or 405 though it names a language, until another server, or this
+  one updated, is the one in use. A 403 (no permission) is said, as other
+  refusals are.
+- **When it changes:** the account's language is heard as the service's
+  event stream opens (as Kodi starts, on another sign-in or profile, when
+  the server is back), on signing in, and in the profile's menu; the
+  server's at the same times and on the sign-in screen, so a Kodi in a
+  language Pley doesn't have shows the server's. Signing out leaves this
+  device's. The last ones heard are kept on the device
+  (`remembered.json`), so Kodi starts in the language it showed last.
+  Pley's window draws its page again in the new language, Kodi's lists
+  refresh, and the service's notices follow.
+- **Requests** to the server carry `Accept-Language` with the language
+  shown, so what the server writes itself (Home's rows) comes in it.
+- **Dates and numbers** are written in the language shown: "Mar 5, 2024",
+  "5 mars 2024", "5 mar 2024"; "12,345", "12 345", "12.345"; "7.4" or
+  "7,4". Times of Live TV's guide take Kodi's region format, unless Kodi
+  is in another of Pley's languages than the one shown: then they take
+  that language's own clock (24 hours in French and Spanish). Counts take each language's plural forms, as CLDR
+  has them: English one and other, French and Spanish one, many and
+  other.
+- **What Kodi draws itself** stays in Kodi's language: the add-on's
+  settings screen, and Kodi's own dialogs' buttons. Track languages in the
+  player's notices are named as Kodi's menus name them.
+
 ## Building and testing
 
 ### How it works
@@ -269,8 +487,9 @@ TMDB API but is not endorsed or certified by TMDB."
   5, which has none, is converted instead.
 - **Progress** goes to the server every 10 seconds while playing, every 30
   while paused, and on stop.
-- **Events:** the service keeps `GET /api/events` open and refreshes what
-  is on screen, never behind a playing video.
+- **Events:** the service keeps `GET /api/events` open, as a receiver of
+  casts ([Casting](#casting)), and refreshes what is on screen, never
+  behind a playing video.
 - **Requests** (`requests.py` holds the rules and words, `asking.py` the
   listings, `news.py` the service's part): the service reads the summary
   as Kodi starts, on another sign-in or profile, when the event stream
@@ -291,6 +510,19 @@ TMDB API but is not endorsed or certified by TMDB."
   fail. `bun scripts/render-kodi-skin.mjs` renders its pictures from the
   Android app's icons, and `bun scripts/render-icons.mjs` the add-on's icon
   and fanart.
+- **The words** are in `resources/language/resource.language.<code>/strings.po`
+  (`en_gb`, `fr_fr`, `es_es`), in Kodi's layout, each by its id. Kodi's
+  `getLocalizedString` would give them in Kodi's language only, so the
+  add-on reads the files itself (`i18n.py`) in the language shown:
+  `kodi.text("name")` by the names in `kodi.TEXT`, `kodi.count("name", n)`
+  for a count, whose three ids in a row are its forms one, many and other
+  (`kodi.COUNTS`; English writes many as other). Values are `%s` and `%d`,
+  or `{name}` where languages order them differently (dates). A word a
+  language lacks shows in English. The windows' XML draws its words from
+  Home window properties (`pley.word.<id>`, the ids in `layout.WORDS`)
+  that the add-on fills in the language shown, since Kodi's `$ADDON[]`
+  would be in Kodi's. Kodi's settings screen reads the same files, in
+  Kodi's language.
 - **Python 3.8:** Kodi 21 runs Python 3.8 on Windows, so the add-on uses
   nothing newer. CI checks.
 
@@ -305,7 +537,8 @@ python -m unittest discover -s . -p "test_*.py"
 ```
 
 `test_e2e.py` runs the add-on against a real server: sign-in, browsing,
-direct play, a converted stream, progress, token renewal and sign-out. It
+direct play, a converted stream, progress, a cast, token renewal and
+sign-out. It
 needs the server and transcoder built
 (`cargo build -p pley-server -p pley-transcoder`) and FFmpeg:
 
@@ -316,7 +549,11 @@ PLEY_BIN=target/debug/pley PLEY_FFMPEG_DIR=/usr/bin python -m unittest test_e2e
 `test_asking.py` covers Discover, search's Discover entry, the picker
 and the requests' lists and actions, `test_news.py` the service's
 summary, refreshes and notices, and `test_requests.py` the rules and
-words; none reaches TMDB. CI runs all of them.
+words; none reaches TMDB. `test_language.py` holds every language to
+English's words with the same values, French and Spanish to their
+punctuation, the language order to `packages/tv/test/fixtures/language.json`,
+and checks the lookup, counts, dates and Profile language. CI runs all of
+them.
 
 By hand, use a portable Kodi (`kodi.exe -p` on Windows) with the add-on
 copied into `portable_data/addons`. With JSON-RPC on (Settings → Services →
@@ -346,6 +583,9 @@ add-on's changelog.
   show; the profile's choice is burned in from the start.
 - Discover and the requests open in Kodi's lists, not Pley's own screens.
   Approve takes what was asked: no choice of profile, folder or seasons.
+  With no title page to stop on, a show partly in a library opens there,
+  as one a library has whole does, with Request more seasons in its
+  context menu; the other apps open its Discover page.
 - Live TV has no guide grid: Kodi draws one only for PVR add-ons. Kodi's
   PVR IPTV Simple client isn't used either: it would mean another add-on to
   set up, and favourites and recents the server doesn't know.

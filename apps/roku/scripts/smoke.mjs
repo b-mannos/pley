@@ -1,16 +1,20 @@
 // Runs the whole app, SceneGraph and Tasks included, in brs-node against
 // a fake pley server on 127.0.0.1 (scripts/fixture-server.mjs), and walks
 // it with the remote: sign in with the TV code and its QR code on a server
-// that requires two-step sign-in, Home, a title's details, the player, the
-// Options key, a library's grid, its A to Z and the pages a jump passes
-// over, filters saved as a smart playlist, collections played (movies and
-// a smart one of shows), a show's page, its episodes and a person's page,
-// music (an artist, an album, Now Playing), playlists, Live TV (its guide,
-// a channel watched, the next one, the channel list, a favourite, every
-// connection in use, the Channels tab), Search (and its Discover row's
+// that requires two-step sign-in, Home, a title's details, the player and
+// subtitles picked in its menu, the Options key, a library's grid, its A
+// to Z and the pages a jump passes over, a sort by bitrate and a filter
+// by resolution with their quality badges, filters saved as a smart
+// playlist, collections played (movies and a smart one of shows), a
+// show's page, its episodes and a person's
+// page, music (an artist, an album, Now Playing), playlists, Live TV (its
+// guide, a channel watched, the next one, the channel list, a favourite
+// and another category listed there, every connection in use, the
+// Channels tab), Search (and its Discover row's
 // See all), Discover (a movie asked for, a show's seasons picked), the
-// managers' Requests (Approve, a ready-to-watch notice whose movie's
-// audio and subtitles are picked on its page, then Yours), Settings, the
+// managers' Requests (Approve, then Yours), a ready-to-watch notice on
+// Home whose movie's audio and subtitles are picked on its page, Settings
+// (its Language chosen for the account, Home asked for again in it), the
 // server gone and Try again, then signing out and in again on a server
 // too old for QR codes, requests and two-step sign-in. Then it starts
 // the app again, signed in,
@@ -159,6 +163,20 @@ function noticeDrawn() {
   return false;
 }
 
+// The ready-to-watch card's Open, focused (in the accent), at the bottom
+// right (MainScene.xml's card at 1104, 702; RequestNotice.xml's buttons
+// from 308, 180 in it).
+function readyNoticeDrawn() {
+  if (!frame) return false;
+  for (let y = 896; y < 930; y += 4) {
+    for (let x = 1424; x < 1580; x += 4) {
+      const at = (Math.round(y * (frame.height / 1080)) * frame.width + Math.round(x * (frame.width / 1920))) * 4;
+      if (frame.data[at] < 120 && frame.data[at + 1] > 150 && frame.data[at + 2] > 200) return true;
+    }
+  }
+  return false;
+}
+
 // A Settings text page's text (TextScreen.xml, from 96, 180), in the app's
 // text colour.
 function pageTextDrawn() {
@@ -289,8 +307,9 @@ async function waitFor(pattern, since, what, { ms = 30000, settles = true } = {}
 }
 
 // brs-node drops a key now and then: menu entries are reached from the
-// top of the menu (twelve entries at most: Live TV, Discover and Requests come before
-// Settings) and checked by the request they lead to.
+// top of the menu (twelve entries at most, Settings the last, which 11
+// reaches whatever the menu holds) and checked by the request they lead
+// to.
 async function openFromMenu(index, pattern, what, then = async () => {}) {
   for (let attempt = 0; attempt < 3; attempt++) {
     await press("left", 3);
@@ -310,12 +329,12 @@ async function openFromMenu(index, pattern, what, then = async () => {}) {
 }
 
 // From Settings: Sign out, and Sign out again in the dialog. Sign out is
-// the last of ten buttons, Subtitle language showing once subtitles come
-// on always.
+// the last of eleven buttons, Subtitle language showing once subtitles
+// come on always.
 async function signOut() {
   for (let attempt = 0; attempt < 3; attempt++) {
     const since = mark();
-    await press("down", 9);
+    await press("down", 10);
     await press("select");
     await sleep(800);
     await press("select");
@@ -328,18 +347,34 @@ async function signOut() {
 }
 
 const qr = { shown: false, hidden: false };
+// Home asked for in the language chosen in Settings.
+const language = { home: false, refusedHome: false, afterRefused: "" };
 // The line saying the server requires two-step sign-in.
 const twoStep = { shown: false, hidden: false };
 // The player's notice when every connection is in use.
 const live = { busy: false };
 const sync = { label: false };
+// The picture subtitles the app draws: one of their PNGs loaded.
+const pictures = { loaded: false };
+// Subtitles picked in the player's own menu.
+const menuTracks = { picked: false };
+// Within ms, whether a picture subtitle's PNG was fetched.
+async function loadedWithin(ms) {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    if (fixture.picturesFetched.length > 0) return true;
+    await sleep(100);
+  }
+  return false;
+}
 const pages = { diagnostics: false, licences: false };
 // Home asks again only after playing, or when its rows are a minute old.
 const home = { kept: false };
 // From when the server knew nothing of requests (an older one).
 const older = { since: -1 };
-// The ready-to-watch notice's Open led to the title.
-const notice = { opened: false };
+// The ready-to-watch notice: it waited while the requests showed, then
+// showed on Home, where its Open led to the title.
+const notice = { waited: false, shown: false, opened: false };
 // What Play played on a collection's page: its first movie, a show's next
 // episode.
 const collections = { movies: false, shows: false };
@@ -379,8 +414,11 @@ async function walk() {
   twoStep.shown = seen(/^GET \/api\/server$/, 0) && (await drawnWithin(1000, twoStepDrawn));
   shoot("sign-in");
   await waitFor(/^GET \/api\/hubs\/home$/, 0, "Home");
+  await settle();
   shoot("home");
   let since = mark();
+  // The hero's Resume has the focus: Down to the rows.
+  await press("down");
   await press("select"); // the first of Continue Watching: an episode
   await waitFor(/^GET \/api\/items\/103$/, since, "its details");
   shoot("details");
@@ -408,10 +446,32 @@ async function walk() {
   await press("back");
   fixture.playbackDelayMs = 0;
   await waitFor(/^DELETE \/api\/playback\/s1$/, since, "closing the session answered after Back");
-  // Played this time, then left.
+  // Played this time: the picture subtitles picked are the app's to draw,
+  // so nothing is burned in. Their list is asked for from where the
+  // playback starts, with the session's key, then again until it is
+  // whole; the first picture to come loads. Then left.
   since = mark();
   await press("select"); // Resume
   await waitFor(/^POST \/api\/playback$/, since, "a playback session");
+  await waitFor(/^GET \/api\/media\/pley_mk_s2\/subtitles-4\.json\?at=\d+$/, since, "the picture subtitles where the playback starts");
+  const firstList = mark();
+  await waitFor(/^GET \/api\/media\/pley_mk_s2\/subtitles-4\.json\?at=\d+$/, firstList, "the rest of the picture subtitles", { ms: 10000 });
+  pictures.loaded = await loadedWithin(5000);
+  shoot("player-pictures");
+  since = mark();
+  await press("back");
+  await waitFor(/^DELETE \/api\/playback\/s2$/, since, "closing the session that drew pictures");
+  // A server without them (404): burned in after all, in a new session
+  // from where the video was, and for the rest of this playback.
+  fixture.picturesMissing = true;
+  since = mark();
+  const sessionsBefore = fixture.playbacks.length;
+  await press("select"); // Resume
+  await waitFor(/^GET \/api\/media\/pley_mk_s3\/subtitles-4\.json\?at=\d+$/, since, "the picture subtitles of a server without them", { settles: false });
+  const burnedUntil = Date.now() + 10000;
+  while (fixture.playbacks.length < sessionsBefore + 2 && Date.now() < burnedUntil) await sleep(100);
+  if (fixture.playbacks.length < sessionsBefore + 2) throw new Error("no request for a session with the picture subtitles burned in");
+  await settle();
   shoot("player");
   // pley's menu (Down), and its subtitle sync: right moves the subtitles
   // later, and Back closes it, the stream opening again with its text
@@ -419,7 +479,7 @@ async function walk() {
   await press("down");
   await sleep(300);
   shoot("player-menu");
-  await press("down"); // Subtitle sync
+  await press("down", 2); // past Subtitles and Quality: Subtitle sync
   await press("select");
   await press("right", 3);
   sync.label = await drawnWithin(2500, syncDrawn);
@@ -472,6 +532,20 @@ async function walk() {
   await waitFor(/^POST \/api\/items\/103\/subtitles$/, since, "the subtitles picked, added");
   await waitFor(/^PUT \/api\/items\/103\/streams$/, since, "the added subtitles saved as the pick");
   await waitFor(/^POST \/api\/playback$/, since, "a session without the picture subtitles drawn");
+  await settle();
+  // The menu's Subtitles, at its top: the file's every track, English
+  // (SRT) picked, saved as the pick, and the stream opened again with it.
+  since = mark();
+  const streamsBefore = fixture.streams.length;
+  await press("down");
+  await press("up", 8);
+  await press("select");
+  await press("up", 3); // Off
+  await press("down"); // English (SRT)
+  await press("select");
+  await waitFor(/^PUT \/api\/items\/103\/streams$/, since, "the subtitles picked in the player's menu, saved");
+  await waitFor(/^POST \/api\/playback$/, since, "the stream opened again with the subtitles picked");
+  menuTracks.picked = fixture.streams.slice(streamsBefore).some((s) => s.item === 103 && s.subtitle_index === 3);
   since = mark();
   await press("back"); // stopped, then the session closed
   await waitFor(/^DELETE \/api\/playback\//, since, "closing the session");
@@ -501,10 +575,11 @@ async function walk() {
   // Live TV: the categories and the guide of every channel (a page, its
   // programmes for those channels), OK on what's on now watches the
   // channel, Up the next one (the server ends the first by the
-  // client_id), the channel list and a favourite, then a channel whose
+  // client_id), the channel list, a favourite and another category
+  // listed there, then a channel whose
   // source has no connection left; Back leaves to the guide at that
   // channel, then the Channels tab.
-  await openFromMenu(1, /^GET \/api\/live\/guide\?/, "Live TV's guide");
+  await openFromMenu(4, /^GET \/api\/live\/guide\?/, "Live TV's guide");
   await sleep(1500);
   shoot("live-guide");
   await press("right"); // the guide
@@ -524,6 +599,19 @@ async function walk() {
   since = mark();
   await press("options");
   await waitFor(/^PUT \/api\/live\/channels\/2\/favorite$/, since, "a channel put in the favourites");
+  // Left in the list: the categories, on All channels; Favourites, two up,
+  // lists its channels there. Back closes the list: up and down still go
+  // through All channels.
+  since = mark();
+  await press("left");
+  await waitFor(/^GET \/api\/live\/groups$/, since, "the categories in the player's list");
+  await settle();
+  await press("up", 2);
+  since = mark();
+  await press("select");
+  await waitFor(/^GET \/api\/live\/browse\?.*category=favorites/, since, "the favourites listed in the player");
+  await sleep(800);
+  shoot("live-list-favourites");
   await press("back");
   since = mark();
   await press("up");
@@ -556,7 +644,7 @@ async function walk() {
   await press("back"); // Home
   await settle();
   since = mark();
-  await openFromMenu(2, /^GET \/api\/libraries\/1\/items\?.*offset=0/, "Movies");
+  await openFromMenu(5, /^GET \/api\/libraries\/1\/items\?.*offset=0/, "Movies");
   // Sorted by title: the A to Z, once every title's letter came, right of
   // the grid's last column (a right press more than needed, which the
   // letters take). Down from "#" to W, whose first title is on the third
@@ -579,7 +667,44 @@ async function walk() {
   await waitFor(/^GET \/api\/libraries\/1\/items\?.*offset=70/, since, "the page before");
   shoot("library-scrolled");
   await press("back");
-  await openFromMenu(3, /^GET \/api\/libraries\/2\/items/, "TV Shows");
+  // Movies again, sorted by bitrate: the posters' quality badges, and
+  // their bitrate and size under them. Then the Filter panel, which adds
+  // Resolution and Dynamic range once the server says the movies differ in
+  // them, and Resolution's 4K: the grid lists 4K titles only, and the chip
+  // says so.
+  await openFromMenu(5, /^GET \/api\/libraries\/1\/items\?.*offset=0/, "Movies again");
+  await settle();
+  await press("up"); // the tabs, on Library
+  await press("right", 2); // past Collections to the sort
+  await press("select");
+  await sleep(500);
+  since = mark();
+  await press("down", 10); // Bitrate, the last
+  await press("select");
+  await waitFor(/^GET \/api\/libraries\/1\/items\?.*sort=bitrate/, since, "the library sorted by bitrate");
+  await settle();
+  shoot("library-bitrate");
+  await press("right"); // the filters
+  since = mark();
+  await press("select");
+  await waitFor(/^GET \/api\/libraries\/1\/filters$/, since, "what a library can be filtered by");
+  await settle();
+  shoot("library-filters");
+  await press("down", 3); // Resolution, after Year
+  await press("select");
+  await sleep(500);
+  shoot("library-resolutions");
+  since = mark();
+  await press("down"); // 4K
+  await press("select");
+  await waitFor(/^GET \/api\/libraries\/1\/items\?.*resolution=4k/, since, "the library filtered by resolution");
+  await settle();
+  shoot("library-filtered");
+  await press("back"); // the chips
+  await settle();
+  shoot("library-4k");
+  await press("back");
+  await openFromMenu(6, /^GET \/api\/libraries\/2\/items/, "TV Shows");
   // Its tabs: Recommended, Collections, then Library again, sorted by year.
   since = mark();
   await press("up"); // the tabs, on Library
@@ -729,7 +854,7 @@ async function walk() {
   // shuffling, the album's order again (Previous plays the one before), and
   // the sleep timer's button. Now Playing stopped; then the album's second
   // disc played from its list and stopped, and Back to Home.
-  await openFromMenu(4, /^GET \/api\/libraries\/3\/items\?.*offset=0/, "Music");
+  await openFromMenu(7, /^GET \/api\/libraries\/3\/items\?.*offset=0/, "Music");
   shoot("music");
   since = mark();
   await press("select"); // the artist
@@ -806,16 +931,19 @@ async function walk() {
     await press("back"); // the artist, the library, Home
     await settle();
   }
-  await openFromMenu(6, /^GET \/api\/search\?.*q=mo/, "Search", async () => {
+  await openFromMenu(0, /^GET \/api\/search\?.*q=mo/, "Search", async () => {
     await sleep(800);
     await press("lit_m");
     await press("lit_o");
   });
   shoot("search");
-  // The results in rows by kind, People first: Right past the keyboard's
-  // last column reaches them, and OK on the first opens their page.
+  // The results in rows by kind, People last, just above Discover: Right
+  // past the keyboard's last column reaches them, and OK on the person
+  // opens their page.
   since = mark();
   await press("right", 7);
+  await press("down", 12); // Discover, the last row
+  await press("up"); // People
   await press("select");
   await waitFor(/^GET \/api\/people\/11$/, since, "the person found, first of the results");
   shoot("search-person");
@@ -848,7 +976,7 @@ async function walk() {
   // first since one of its results was opened; OK on it searches it again
   // at once. Back to Home.
   since = mark();
-  await openFromMenu(6, /^GET \/api\/search\?.*q=mo/, "a recent search searched again", async () => {
+  await openFromMenu(0, /^GET \/api\/search\?.*q=mo/, "a recent search searched again", async () => {
     await sleep(800);
     shoot("search-recent");
     await press("right", 7); // past the keyboard's last column
@@ -861,7 +989,7 @@ async function walk() {
   // key's Move, then taken out, and the playlist played from the top. Then
   // New playlist, for Movies & TV, named on the keyboard: it opens, made.
   // Back to Home.
-  await openFromMenu(5, /^GET \/api\/playlists$/, "Playlists");
+  await openFromMenu(8, /^GET \/api\/playlists$/, "Playlists");
   shoot("playlists");
   since = mark();
   await press("select"); // the first playlist
@@ -918,7 +1046,7 @@ async function walk() {
   // Discover: the first trending title over its backdrop, its Request
   // asked after a question (Anna's asks are approved as she asks), then a
   // show of the trending row, its seasons picked.
-  await openFromMenu(7, /^GET \/api\/discover\/trending\?page=1$/, "Discover");
+  await openFromMenu(2, /^GET \/api\/discover\/trending\?page=1$/, "Discover");
   shoot("discover");
   since = mark();
   await press("select"); // the hero's Request: its page, asking at once
@@ -954,10 +1082,10 @@ async function walk() {
   }
   // The managers' Requests, on Needs attention: the Options key on the
   // oldest, Approve. Meanwhile Anna's download came into a library, which
-  // no event told of: the summary asked after Approve has news, and its
-  // notice opens the title. Then Yours, the last tab, which marks Anna's
-  // news seen.
-  await openFromMenu(8, /^GET \/api\/requests\?.*attention=1/, "Requests");
+  // no event told of: the summary asked after Approve has news, whose
+  // notice waits while the requests show. Then Yours, the last tab, which
+  // marks Anna's news seen.
+  await openFromMenu(3, /^GET \/api\/requests\?.*attention=1/, "Requests");
   shoot("requests");
   since = mark();
   await press("options");
@@ -967,6 +1095,22 @@ async function walk() {
   await press("select"); // Approve
   await waitFor(/^POST \/api\/requests\/1\/approve$/, since, "a request approved");
   await waitFor(/^GET \/api\/requests\?.*unseen=1/, since, "the requests with news");
+  notice.waited = !(await drawnWithin(2500, readyNoticeDrawn));
+  shoot("requests-approved");
+  for (let attempt = 0; attempt < 3 && !seen(/^GET \/api\/requests\?.*mine=1/, since); attempt++) {
+    await press("up"); // the tabs
+    await press("left", 8);
+    await press("right", 7); // Yours
+    await press("select");
+    await sleep(1500);
+  }
+  await waitFor(/^POST \/api\/requests\/seen$/, since, "the news marked seen");
+  shoot("requests-yours");
+  // Home: the notice's card, once the remote has rested, with Open
+  // focused.
+  await press("back");
+  notice.shown = await drawnWithin(8000, readyNoticeDrawn);
+  // An OK in the card's first 0.6 s was meant for the page.
   await sleep(800);
   shoot("ready-to-watch");
   since = mark();
@@ -1010,7 +1154,7 @@ async function walk() {
   await waitFor(/^DELETE \/api\/playback\//, pickedSince, "the version's session closed");
   // Back on its page, its Trailer, past My List, played from its start;
   // then More…: Media info, its two files and their streams; Back to More,
-  // to the buttons, to the requests.
+  // to the buttons, to Home.
   await settle();
   shoot("movie-details");
   pickedSince = mark();
@@ -1030,21 +1174,9 @@ async function walk() {
   shoot("movie-media-info");
   await press("back");
   await press("back");
-  await press("back"); // the requests
+  await press("back"); // Home
   await settle();
-  shoot("requests-approved");
-  for (let attempt = 0; attempt < 3 && !seen(/^GET \/api\/requests\?.*mine=1/, since); attempt++) {
-    await press("up"); // the tabs
-    await press("left", 8);
-    await press("right", 7); // Yours
-    await press("select");
-    await sleep(1500);
-  }
-  await waitFor(/^POST \/api\/requests\/seen$/, since, "the news marked seen");
-  shoot("requests-yours");
-  await press("back");
-  await settle();
-  await openFromMenu(9, /^GET \/api\/auth\/me$/, "Settings");
+  await openFromMenu(11, /^GET \/api\/auth\/me$/, "Settings");
   shoot("settings");
   // Diagnostics and the licences, at the right; Left back to the settings.
   await press("right");
@@ -1060,9 +1192,9 @@ async function walk() {
   await press("back");
   await settle();
   await press("left");
-  // Quality, after Audio language and Subtitles: Automatic checked, then
-  // 8 Mbps 1080p chosen, kept on the Roku.
-  await press("down", 2);
+  // Quality, after Language, Audio language and Subtitles: Automatic
+  // checked, then 8 Mbps 1080p chosen, kept on the Roku.
+  await press("down", 3);
   await press("select");
   await sleep(500);
   shoot("settings-quality");
@@ -1106,18 +1238,71 @@ async function walk() {
   await press("back"); // Home, which asks for its libraries again
   await waitFor(/^GET \/api\/libraries$/, since, "Home's libraries after sorting");
   await press("right"); // the rows, where the next steps start
-  await openFromMenu(9, /^GET \/api\/auth\/me$/, "Settings");
+  await openFromMenu(11, /^GET \/api\/auth\/me$/, "Settings");
+  // Language, the first row: Español for the account, the screen in
+  // Spanish once the server has it, and Home asked for again in it, its
+  // rows' titles being the server's; then Automatic again, which the rest
+  // of the walk expects.
+  await settle();
+  since = mark();
+  await press("select"); // Language: its choices, Automatic checked
+  await sleep(500);
+  await press("down", 3); // Español
+  await press("select");
+  await waitFor(/^PUT \/api\/me\/language$/, since, "the account's language saved");
+  shoot("settings-language");
+  since = mark();
+  await press("back"); // Home, made again in Spanish
+  await waitFor(/^GET \/api\/hubs\/home$/, since, "Home in Spanish");
+  language.home = fixture.requests.slice(since).some((r) => r.path === "/api/hubs/home" && r.language === "es");
+  shoot("home-spanish");
+  await press("right");
+  await openFromMenu(11, /^GET \/api\/auth\/me$/, "Settings");
+  await settle();
+  since = mark();
+  await press("select"); // Language, Español checked
+  await sleep(500);
+  await press("up", 3); // Automatic
+  await press("select");
+  await waitFor(/^PUT \/api\/me\/language$/, since, "Automatic saved");
+  // A server without the route, though it names a language: Français is
+  // answered 404 and kept on this Roku, the screen and Home in French.
+  // Settings opened again still says Français, and Automatic there forgets
+  // it with no request, the screen in English again.
+  fixture.languageRoute = false;
+  await settle();
+  since = mark();
+  await press("select"); // Language, Automatic checked
+  await sleep(500);
+  await press("down", 2); // Français
+  await press("select");
+  await waitFor(/^PUT \/api\/me\/language$/, since, "Français answered 404");
+  await settle();
+  since = mark();
+  await press("back"); // Home, made again in French
+  await waitFor(/^GET \/api\/hubs\/home$/, since, "Home in French");
+  language.refusedHome = fixture.requests.slice(since).some((r) => r.path === "/api/hubs/home" && r.language === "fr");
+  await press("right");
+  await openFromMenu(11, /^GET \/api\/auth\/me$/, "Settings");
+  await settle();
+  await press("select"); // Language, Français checked
+  await sleep(500);
+  await press("up", 2); // Automatic
+  await press("select");
+  await settle();
+  fixture.languageRoute = true;
   // Subtitles: from "Only for foreign dialogue" to "Always", saved at once
   // with the languages left as they were; Subtitle language shows then.
   await settle();
   since = mark();
-  await press("down");
+  await press("down", 2);
   await press("select"); // Subtitles: its choices, Forced focused
   await sleep(500);
   await press("down", 2);
   shoot("settings-subtitles");
   await press("select"); // Always
   await waitFor(/^PUT \/api\/me\/track-defaults$/, since, "the subtitle mode saved");
+  language.afterRefused = fixture.requests.slice(since).find((r) => r.path === "/api/me/track-defaults")?.language ?? "";
   await settle();
   shoot("settings-saved");
   // Switch profile, five rows down: "Who's watching?", Ben chosen, and
@@ -1136,7 +1321,7 @@ async function walk() {
   fixture.down = true;
   await press("left", 3);
   await press("up", 11);
-  await press("down", 2);
+  await press("down", 5); // Movies, after Search, Home, Discover, Your requests and Live TV
   await press("select");
   await sleep(3000);
   shoot("unreachable");
@@ -1150,7 +1335,7 @@ async function walk() {
   // code shows on its own, the sign-in asks for no scope the server
   // doesn't know, and nothing is said of two-step sign-in.
   await press("back");
-  await openFromMenu(9, /^GET \/api\/auth\/me$/, "Settings");
+  await openFromMenu(11, /^GET \/api\/auth\/me$/, "Settings");
   fixture.qr = false;
   fixture.requestScopes = false;
   fixture.twoStep = false;
@@ -1228,17 +1413,28 @@ const checks = [
   ["said the server requires two-step sign-in", twoStep.shown],
   ["polled with the device code", asked(/^POST \/api\/oauth\/token$/)],
   ["refreshed its token", fixture.refreshes > 0],
+  // The fake server says so when a token goes before a proof.
+  ["had the server prove itself before its token went", fixture.proofs > 0],
   ["loaded Home", asked(/^GET \/api\/hubs\/home$/)],
   ["asked to play with its capabilities", asked(/^POST \/api\/playback$/)],
-  ["asked for the picture subtitles to be drawn", fixture.playbacks.some((p) => p.item === 103 && p.subtitle_index === 4)],
+  ["drew the PGS subtitles picked itself: nothing burned in, their list asked for where the playback starts", fixture.playbacks.some((p) => p.item === 103 && p.subtitle_index === null && p.keyed && p.draws_pgs) && fixture.picturesAsked.some((p) => p.session === "s2" && p.index === 4)],
+  ["asked again for picture subtitles not whole yet", fixture.picturesAsked.filter((p) => p.session === "s2").length >= 2],
+  ["loaded the picture subtitles drawn", pictures.loaded && fixture.picturesFetched.every((name) => /^subtitles-4-\d+\.png$/.test(name))],
+  ["burned the PGS subtitles in where the server has no pictures of them, from then on, saying it doesn't draw them", fixture.playbacks[3]?.subtitle_index === 4 && fixture.playbacks[3]?.draws_pgs === false && !fixture.requests.some((r) => /^\/api\/media\/pley_mk_s4\/subtitles/.test(r.path))],
   ["found subtitles from the player's menu and added the first", fixture.subtitlesAdded.some((a) => a.item === 103 && a.result === "opensubtitles:1" && a.file_id === 7103)],
   ["looked for subtitles in a language picked above the results", asked(/^GET \/api\/items\/103\/subtitles\/search\?file_id=7103&language=ara$/)],
   ["saved the added subtitles as the pick", fixture.streams.some((s) => s.item === 103 && s.subtitle_index === 10001)],
+  ["picked subtitles in the player's own menu, saved and played", menuTracks.picked],
   ["asked the server what it knows of the network before playing in Automatic", asked(/^GET \/api\/playback\/network\?client_id=/)],
   ["ran a speed test of 8 MiB where the server asked for one", fixture.speedTests.length > 0 && fixture.speedTests.every((n) => n === 8388608)],
   ["told the server what the speed test measured", fixture.networkTold.some((t) => t.probe_kbps > 0 && t.probe_complete === false && t.client_id)],
   ["kept the server's answer instead of asking before each play", fixture.requests.filter((r) => r.method === "GET" && r.path.startsWith("/api/playback/network")).length < fixture.playbacks.filter((p) => p.kind !== "track").length],
   ["played the original in Automatic, the default", fixture.playbacks.length > 0 && fixture.playbacks.filter((p) => p.kind !== "track").every((p) => p.mode === "auto" && p.max_bitrate === null)],
+  ["chose Español for the account in Settings, Home asked for again in it, then Automatic", JSON.stringify(fixture.languagesSaved) === '["es",null]' && language.home],
+  [
+    "on a server without the language route, Français kept on the Roku, and Automatic in Settings opened again forgot it with no request",
+    JSON.stringify(fixture.languagesRefused) === '["fr"]' && language.refusedHome && language.afterRefused === "en",
+  ],
   ["kept 8 Mbps 1080p chosen in Settings", registry !== null && /playback.quality","8m"/.test(JSON.stringify([...registry]))],
   ["kept Anna as the profile to always start as", registry !== null && /startAs\.http[^"]*","1"/.test(JSON.stringify([...registry]))],
   ["showed subtitle sync", sync.label],
@@ -1254,6 +1450,8 @@ const checks = [
   ["closed a session that came after Back", fixture.closed.includes("s1")],
   ["closed the session it played", fixture.closed.length > 1],
   ["reported where it stopped", fixture.progress.some((p) => p.state === "stopped" && p.session_id)],
+  // The fake server says so when a report has them wrong, or music's has them.
+  ["said which audio and subtitles play in a video's reports", fixture.videoReports > 0],
   ["loaded a library's next page", asked(/^GET \/api\/libraries\/1\/items\?.*offset=70/)],
   ["showed the A to Z beside a library sorted by title, W in focus", library.letters],
   [
@@ -1271,6 +1469,9 @@ const checks = [
   ["showed a library's Library tab from its Recommended row's See all", asked(/^GET \/api\/libraries\/2\/items\?.*order=desc.*sort=added/)],
   ["sorted a library by year, newest first", asked(/^GET \/api\/libraries\/2\/items\?.*order=desc.*sort=year/)],
   ["kept the library's tab and sort on the Roku", registry !== null && /libraryViews.*\\"sort\\":\\"year\\"/.test(JSON.stringify([...registry]))],
+  ["sorted a library by bitrate", asked(/^GET \/api\/libraries\/1\/items\?.*order=desc.*sort=bitrate/)],
+  ["filtered a library by a resolution its titles have", asked(/^GET \/api\/libraries\/1\/filters$/) && asked(/^GET \/api\/libraries\/1\/items\?.*resolution=4k/)],
+  ["kept the library's resolution on the Roku", registry !== null && /libraryViews.*\\"resolution\\":\\"4k\\"/.test(JSON.stringify([...registry]))],
   [
     "saved a library's filters and order as a smart playlist, named on the keyboard",
     fixture.smartPlaylists.some((p) => p.library_id === 2 && p.title.length > 0 && p.smart_filter === "unwatched=1&sort=year%3Adesc"),
@@ -1302,16 +1503,18 @@ const checks = [
   ["stepped the sleep timer through End of this track back to Off", music.sleepEnd && music.sleepCycled],
   ["played the track OK was on under an album's second disc", music.disc === 5203],
   ["played a playlist from its top, the next entry to come", fixture.playbacks.some((p) => p.item === 101)],
-  ["searched", asked(/^GET \/api\/search\?/)],
-  ["showed search's results in rows by kind, People first, a person's page opened from it", asked(/^GET \/api\/people\/11$/)],
+  ["searched, asking for every title, person and channel found", asked(/^GET \/api\/search\?limit=200&/)],
+  ["showed search's results in rows by kind, People last, a person's page opened from it", asked(/^GET \/api\/people\/11$/)],
   ["searched a recent search again from the list shown before typing", searched.again],
   ["kept the recent searches on the Roku for the server and profile", registry !== null && /searches\.http[^"]*\|1","\[\\"mo\\"\]"/.test(JSON.stringify([...registry]))],
   ["showed Live TV's guide, its programmes for the channels in view", fixture.liveGuides.length > 0 && fixture.liveGuides.every((g) => g.ids.length > 0 && g.ids.length <= 50)],
   ["listed channels a page at a time", fixture.liveBrowses.length > 0 && fixture.liveBrowses.every((b) => b.limit <= 50)],
   ["opened Live TV back at the channel watched", fixture.liveBrowses.some((b) => b.around === 3)],
+  ["kept the last channel watched on the Roku for the server and profile", registry !== null && /liveViews\.http[^"]*\|1","\{[^}]*\\"channel\\":3\b/.test(JSON.stringify([...registry]))],
   ["watched channels with one client_id, so zapping holds one connection", fixture.liveWatches.length >= 2 && new Set(fixture.liveWatches.map((w) => w.client_id)).size === 1 && fixture.liveWatches[0].client_id !== null],
   ["asked for a channel's playlist before playing it", fixture.livePlaylists.length >= 2],
   ["put a channel in the favourites from the player's list", fixture.liveFavoriteChanges.some((c) => c.id === 2 && c.favorite)],
+  ["listed another category's channels in the player's list", fixture.liveBrowses.some((b) => b.category === "favorites")],
   ["said every connection is in use", live.busy],
   ["took over the connection with Watch here instead", fixture.liveWatches.some((w) => w.id === 3 && w.take_over === 1)],
   ["left the channels it watched", fixture.liveLeft.length > 0 && fixture.liveSessions.size === 0],
@@ -1325,6 +1528,7 @@ const checks = [
   ["asked for a show's missing seasons, ticked to start with", fixture.requestsAsked.some((a) => a.kind === "show" && a.tmdb_id === 8004 && JSON.stringify(a.seasons) === "[1,2,3]")],
   ["approved a request from the Options key", fixture.requestsActed.some((a) => a.id === 1 && a.action === "approve")],
   ["marked the profile's news seen once its requests showed", fixture.requestsActed.some((a) => a.action === "seen")],
+  ["kept a ready-to-watch notice from the requests, showing it in a card once they were left and the remote rested", notice.waited && notice.shown],
   ["told of a title ready to watch, which Open opened", notice.opened],
   ["asked a show's page what of it may still be asked for", asked(/^GET \/api\/items\/99\/request$/)],
   [

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -14,6 +14,7 @@ use crate::auth::{AdminUser, AuthUser};
 use crate::catalog::{self, ItemSummary, LibraryQuery, ME_CTE, SortKey, VISIBLE, VISIBLE_ITEMS};
 use crate::error::{ApiResult, AppError};
 use crate::events::ServerEvent;
+use crate::i18n;
 use crate::library::{LibraryKind, LibraryRow, get_library, set_order};
 use crate::state::AppState;
 use crate::util::now;
@@ -31,11 +32,16 @@ pub struct LibraryDto {
 }
 
 /// `lib` as `viewer` sees it: its count leaves out the titles their age
-/// limit hides (administrators and profiles without one see them all).
+/// limit and label rules hide (administrators and profiles without either
+/// see them all).
 async fn to_dto(state: &AppState, lib: &LibraryRow, viewer: Option<&AuthUser>) -> ApiResult<LibraryDto> {
     let kind = lib.kind().top_level_kind();
+    let limited = match viewer {
+        Some(user) => crate::access::limited(&state.db, user).await?,
+        None => false,
+    };
     let count: i64 = match viewer {
-        Some(user) if !user.is_admin && user.max_age.is_some() => {
+        Some(user) if limited => {
             let sql = format!(
                 "{ME_CTE} SELECT COUNT(*) FROM {VISIBLE_ITEMS} WHERE {VISIBLE} AND i.library_id = ? AND i.kind = ?"
             );
@@ -379,6 +385,18 @@ pub async fn items(
         ),
     };
     let year = query.get("year").and_then(|y| y.parse().ok());
+    // An unknown value is refused, not ignored: the listing would hold everything.
+    let named = |key: &str, named: fn(&str) -> &'static [&'static str]| -> ApiResult<&'static [&'static str]> {
+        match query.get(key).map(|v| v.trim()).filter(|v| !v.is_empty()) {
+            None => Ok(&[]),
+            Some(v) => match named(v) {
+                [] => Err(AppError::bad_request(format!("unknown {key} '{v}'"))),
+                found => Ok(found),
+            },
+        }
+    };
+    let resolutions = named("resolution", catalog::resolutions_named)?;
+    let dynamic_ranges = named("dynamic_range", catalog::dynamic_ranges_named)?;
     let q = LibraryQuery {
         library_id: lib.id,
         kind: lib.kind().top_level_kind(),
@@ -387,6 +405,8 @@ pub async fn items(
         genre: query.get("genre").map(String::as_str).filter(|g| !g.is_empty()),
         year,
         watched: query.get("watched").map(|w| truthy(w)),
+        resolutions,
+        dynamic_ranges,
         offset: query.get("offset").and_then(|o| o.parse().ok()).unwrap_or(0),
         limit: query.get("limit").and_then(|l| l.parse().ok()),
     };
@@ -398,7 +418,7 @@ pub async fn items(
         .map(|r| catalog::ItemSummary { backdrop_url: None, thumb_url: None, ..r.to_summary_with(summaries) })
         .collect();
     // The posters say what the files are like.
-    let mut media = catalog::media_summaries(&state.db, &items).await?;
+    let mut media = catalog::media_summaries(&state.db, &items, q.files()).await?;
     for item in &mut items {
         item.media = media.remove(&item.id);
     }
@@ -411,8 +431,17 @@ pub async fn filters(
     Path(id): Path<i64>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let lib = visible_library(&state, &user, id).await?;
-    let (genres, years) = catalog::library_filters(&state.db, user.id, lib.id, lib.kind().top_level_kind()).await?;
-    Ok(Json(serde_json::json!({ "genres": genres, "years": years })))
+    let kind = lib.kind().top_level_kind();
+    let ((genres, years), media) = tokio::try_join!(
+        catalog::library_filters(&state.db, user.id, lib.id, kind),
+        catalog::media_filters(&state.db, user.id, lib.id, kind),
+    )?;
+    Ok(Json(serde_json::json!({
+        "genres": genres,
+        "years": years,
+        "resolutions": media.resolutions,
+        "dynamic_ranges": media.dynamic_ranges,
+    })))
 }
 
 #[derive(Serialize)]
@@ -428,8 +457,14 @@ pub struct Hubs {
     pub hubs: Vec<Hub>,
 }
 
-pub async fn hubs(State(state): State<AppState>, user: AuthUser, Path(id): Path<i64>) -> ApiResult<Json<Hubs>> {
+pub async fn hubs(
+    State(state): State<AppState>,
+    user: AuthUser,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<Hubs>> {
     let lib = visible_library(&state, &user, id).await?;
+    let language = i18n::for_user(&state.db, user.id, &state.settings.get().language, &headers).await?;
     let kind = lib.kind();
     let video = kind != LibraryKind::Music;
     let top = kind.top_level_kind();
@@ -443,21 +478,21 @@ pub async fn hubs(State(state): State<AppState>, user: AuthUser, Path(id): Path<
         async { if video { catalog::top_rated(db, user.id, lib.id, top, 30).await } else { Ok(Vec::new()) } },
     )?;
     let added_title = match kind {
-        LibraryKind::Music => "Recently Added Albums",
-        LibraryKind::Shows => "Recently Added Shows",
-        LibraryKind::Movies => "Recently Added",
+        LibraryKind::Music => "hubs.recentlyAddedAlbums",
+        LibraryKind::Shows => "hubs.recentlyAddedShows",
+        LibraryKind::Movies => "hubs.recentlyAdded",
     };
     let hub = |key: &str, title: &str, rows: Vec<catalog::ItemRow>| Hub {
         key: format!("{key}:{id}"),
-        title: title.into(),
+        title: i18n::t(language, title),
         library_id: Some(id),
         items: rows.iter().map(|r| r.to_summary()).collect(),
     };
     let mut hubs = vec![
-        hub("continue_watching", "Continue Watching", continuing),
+        hub("continue_watching", "hubs.continueWatching", continuing),
         hub("recently_added", added_title, added),
-        hub("recently_released", "Recently Released", released),
-        hub("top_rated", "Top Rated", rated),
+        hub("recently_released", "hubs.recentlyReleased", released),
+        hub("top_rated", "hubs.topRated", rated),
     ];
     hubs.retain(|h| !h.items.is_empty());
     Ok(Json(Hubs { hubs }))

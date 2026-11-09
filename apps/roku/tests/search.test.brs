@@ -18,20 +18,48 @@ sub test_search_rows_by_kind_in_order()
     for each row in rows
         keys.Push(row.key)
     end for
-    tkEqual(keys, ["person", "channel", "movie", "show", "episode", "album"], "the other apps' order; extras left out")
-    tkEqual(rows[0].title, "People")
-    tkEqual(rows[0].tiles.Count(), 1)
-    tkEqual(rows[0].tiles[0].kind, "person")
-    tkEqual(rows[1].title, "Live TV")
-    tkEqual(rows[1].tiles[0].channelId, 1)
-    tkEqual(rows[1].tiles[0].line, "Morning Briefing", "what's on")
-    tkEqual(rows[2].tiles[0].title, "Arrival")
-    tkFalse(rows[2].wide)
-    tkTrue(rows[4].wide, "episodes are wide")
-    tkTrue(rows[4].tiles[0].wide)
-    tkEqual(rows[4].tiles[0].subtitle, "S1 E1 · Good News About Hell")
-    tkTrue(rows[5].square, "music is square")
+    tkEqual(keys, ["movie", "show", "episode", "album", "channel", "person"], "the other apps' order; extras left out")
+    tkEqual(rows[0].tiles[0].title, "Arrival")
+    tkFalse(rows[0].wide)
+    tkTrue(rows[2].wide, "episodes are wide")
+    tkTrue(rows[2].tiles[0].wide)
+    tkEqual(rows[2].tiles[0].subtitle, "S1 E1 · Good News About Hell")
+    tkTrue(rows[3].square, "music is square")
+    tkEqual(rows[4].title, "Live TV")
+    tkEqual(rows[4].tiles[0].channelId, 1)
+    tkEqual(rows[4].tiles[0].line, "Morning Briefing", "what's on")
+    tkEqual(rows[5].title, "People")
+    tkEqual(rows[5].tiles.Count(), 1)
+    tkEqual(rows[5].tiles[0].kind, "person")
     tkEqual(searchRows(invalid, contentTestServer(), 0, true), [])
+end sub
+
+sub test_search_rows_in_french_and_spanish()
+    i18nUse("fr")
+    titles = []
+    for each group in searchGroups()
+        titles.Push(group.title)
+    end for
+    tkEqual(titles, ["Films", "Séries", "Saisons", "Épisodes", "Artistes", "Albums", "Titres", "TV en direct", "Personnes"])
+    i18nUse("es")
+    rows = searchRows({ items: [contentTestMovie(), contentTestEpisode()], people: [], channels: [] }, contentTestServer(), 0, false)
+    tkEqual(rows[0].title, "Películas")
+    tkEqual(rows[1].title, "Episodios")
+    tkEqual(rows[1].tiles[0].subtitle, "T1 E1 · Good News About Hell")
+end sub
+
+sub test_search_asks_for_and_keeps_every_result()
+    tkEqual(searchPath("star wars"), "/api/search?limit=200&q=star%20wars", "the most the server gives of each kind")
+    items = []
+    people = []
+    for i = 1 to 150
+        items.Push({ id: i, kind: "movie", title: "Movie " + i.ToStr() })
+        people.Push({ id: i, name: "Person " + i.ToStr() })
+    end for
+    rows = searchRows({ items: items, people: people, channels: [] }, contentTestServer(), 0, true)
+    tkEqual(rows.Count(), 2)
+    tkEqual(rows[0].tiles.Count(), 150, "every title")
+    tkEqual(rows[1].tiles.Count(), 150, "every person, where the server stopped at 12")
 end sub
 
 sub test_search_row_sizes()

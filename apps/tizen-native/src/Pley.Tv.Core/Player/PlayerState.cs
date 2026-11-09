@@ -28,7 +28,8 @@ public sealed record PlayerPhase(PhaseKind Kind, string? Message = null, bool Ca
     public static readonly PlayerPhase Paused = new PlayerPhase(PhaseKind.Paused);
     public static readonly PlayerPhase Ended = new PlayerPhase(PhaseKind.Ended);
 
-    public static PlayerPhase Error(string message, bool canRetry, string title = PlayerText.ErrorTitle) => new PlayerPhase(PhaseKind.Error, message, canRetry, title);
+    /// <param name="title">The heading; "Can't play this item" (<see cref="PlayerText.ErrorTitle"/>) without.</param>
+    public static PlayerPhase Error(string message, bool canRetry, string? title = null) => new PlayerPhase(PhaseKind.Error, message, canRetry, title ?? PlayerText.ErrorTitle);
 
     /// <summary>Meant to play (Play/Pause shows Pause): playing, or on its way to.</summary>
     public bool WantsToPlay => Kind is PhaseKind.Playing or PhaseKind.Buffering or PhaseKind.Preparing;
@@ -61,6 +62,11 @@ public sealed record TrickplaySet(long FileId, TrickplayInfo Info);
 public sealed record PlayerState
 {
     public PlayerPhase Phase { get; init; } = PlayerPhase.Preparing;
+    /// <summary>
+    /// The remote paused it, and nothing has played it since: a pause the person here didn't make,
+    /// which keeps no controls on screen until they press a key.
+    /// </summary>
+    public bool PausedByRemote { get; init; }
     /// <summary>The item playing; 0 until known.</summary>
     public long ItemId { get; init; }
     /// <summary>"movie", "episode", "extra"; null until its details come.</summary>
@@ -98,6 +104,8 @@ public sealed record PlayerState
     public long SubtitleOffsetMs { get; init; }
     /// <summary>The subtitles chosen can be moved: text drawn by the app.</summary>
     public bool SubtitleSync { get; init; }
+    /// <summary>The subtitles chosen are text, which the subtitles' look (size, background, font, position) is for: pictures keep their own.</summary>
+    public bool SubtitleStyled { get; init; }
     /// <summary>The playback speed, 1 normal, for this title only.</summary>
     public double Speed { get; init; } = 1;
     /// <summary>The speeds the TV's player plays with their sound; empty when only normal speed (Speed isn't offered then).</summary>

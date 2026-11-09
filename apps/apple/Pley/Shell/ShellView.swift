@@ -1,0 +1,479 @@
+import PleyModel
+import PleyScreens
+import SwiftUI
+
+/// The signed-in app. On iPhone, and on iPad in a narrow window, a tab bar
+/// with Home, Libraries, Search, Playlists and Me; on iPad at regular width
+/// and on the Mac, a sidebar with Home, Search and Playlists, the libraries in the
+/// profile's order (Edit, or a drag, puts them in another), and at its foot
+/// the profile signed in (Me). Each section keeps its own navigation, and
+/// choosing the section showing goes back to its start. Add to playlist and
+/// New playlist are sheets over it; the toast shows at the bottom; while
+/// the player is open VoiceOver reads only the player. While music has a
+/// queue, the mini player sits above the tab bar (in its bottom accessory
+/// from iOS 26.1) or at the foot of the sidebar layout's page, and Now
+/// Playing opens from it. While another of the profile's devices is on,
+/// the remote's bar opens the remote as a sheet on iPhone and iPad: in the
+/// tab bar's accessory from iOS 26.1, or, while music plays here, a button
+/// beside the mini player there; before, a card above the mini player. On
+/// the Mac the toolbar's remote button opens it.
+/// Me's tab, and Me's row at the sidebar's foot, carry the number on the
+/// way into requests.
+struct ShellView: View {
+    @ObservedObject var app: AppModel
+    @ObservedObject private var shell: ShellModel
+    @ObservedObject private var remote: RemoteModel
+    private let layout = WideLayout()
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    init(app: AppModel) {
+        self.app = app
+        _shell = ObservedObject(wrappedValue: app.shell)
+        _remote = ObservedObject(wrappedValue: app.remote)
+    }
+
+    var body: some View {
+        Group {
+            if layout.wide {
+                split
+            } else {
+                tabs
+            }
+        }
+        // While the server can't be reached, the screens show what was saved, and say so.
+        .safeAreaInset(edge: .top, spacing: 0) { OfflineBanner(app: app) }
+        .overlay(alignment: .bottom) { ToastView(shell: shell) }
+        #if os(iOS)
+        .background { KeyboardShortcuts(shell: shell) }
+        #endif
+        .sheet(item: Binding(get: { shell.sheet }, set: { shell.sheet = $0 })) { sheet in
+            ShellSheet(app: app, sheet: sheet)
+        }
+        #if os(iOS)
+        .sheet(isPresented: Binding(get: { shell.nowPlayingOpen }, set: { shell.nowPlayingOpen = $0 })) {
+            NavigationStack {
+                NowPlayingView(app: app) { shell.nowPlayingOpen = false }
+            }
+        }
+        // It closes by itself once no other device is on, and opens closed when one is again.
+        .sheet(isPresented: Binding(get: { remote.presented && !remote.devices.isEmpty },
+                                    set: { remote.presented = $0 })) {
+            RemoteSheet(app: app, remote: remote) { remote.presented = false }
+        }
+        .onValueChange(of: remote.devices.isEmpty) { empty in
+            if empty { remote.presented = false }
+        }
+        #endif
+        // The profile's sessions are read again whenever they may have changed.
+        .task(id: app.sessionsVersion) { await remote.reload() }
+        .accessibilityHidden(app.player != nil || app.livePlayer != nil)
+    }
+
+    /// What sits at the foot of a page, above the tabs, unless the tab
+    /// bar's accessory holds it: the remote's bar, then the mini player.
+    @ViewBuilder private func foot(inAccessory: Bool) -> some View {
+        if !inAccessory {
+            VStack(spacing: 0) {
+                #if os(iOS)
+                RemoteBar(remote: remote) { remote.presented = true }
+                #endif
+                FootMiniPlayer(app: app)
+            }
+        }
+    }
+
+    /// Whether the tab bar holds the mini player and the remote's bar itself
+    /// (iOS 26.1's bottom accessory); before, each section's page has them at its foot.
+    private var accessoryHoldsMiniPlayer: Bool {
+        #if os(iOS)
+        if #available(iOS 26.1, *) { return true }
+        #endif
+        return false
+    }
+
+    // MARK: Tabs
+
+    @ViewBuilder private var tabs: some View {
+        // A library opened from the sidebar shows under Libraries.
+        let view = TabView(selection: Binding(get: { Self.tab(shell.section) }, set: { shell.select($0) })) {
+            ForEach(shell.sections, id: \.self) { section in
+                stack(section == Self.tab(shell.section) ? shell.section : section)
+                    .safeAreaInset(edge: .bottom, spacing: 0) { foot(inAccessory: accessoryHoldsMiniPlayer) }
+                    .tabItem { Label(Self.title(section), systemImage: Self.symbol(section)) }
+                    .badge(section == .me ? shell.requestsEntry.badgeText.map { Text($0) } : nil)
+                    #if os(iOS)
+                    .background { TabBadgeColour(alarm: shell.requestsEntry.alarm) }
+                    #endif
+                    .tag(section)
+            }
+        }
+        #if os(iOS)
+        if #available(iOS 26.1, *) {
+            view.tabViewBottomAccessory(isEnabled: shell.nowPlaying || !remote.devices.isEmpty) {
+                if shell.nowPlaying {
+                    HStack(spacing: 0) {
+                        MiniPlayer(app: app, inAccessory: true)
+                        RemoteAccessoryButton(remote: remote) { remote.presented = true }
+                    }
+                } else {
+                    RemoteBar(remote: remote, inAccessory: true) { remote.presented = true }
+                }
+            }
+        } else {
+            view
+        }
+        #else
+        view
+        #endif
+    }
+
+    private static func tab(_ section: ShellSection) -> ShellSection {
+        // A library, and Live TV, opened from the sidebar show under Libraries.
+        if case .library = section { return .libraries }
+        if section == .liveTv { return .libraries }
+        return section
+    }
+
+    // MARK: Sidebar
+
+    private var split: some View {
+        NavigationSplitView {
+            Sidebar(app: app)
+                .safeAreaInset(edge: .bottom) { meRow }
+                .navigationTitle(Text(verbatim: "Pley"))
+                #if os(macOS)
+                .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 300)
+                #else
+                // Wider at the accessibility text sizes, so "Playlists" stays one word.
+                .navigationSplitViewColumnWidth(typeSize.isAccessibilitySize ? 400 : 320)
+                #endif
+        } detail: {
+            // The split view shows the detail's navigation stack itself,
+            // without what is around it: each page has the mini player.
+            stack(shell.section, footMiniPlayer: true)
+                // Another section, another navigation.
+                .id(shell.section)
+        }
+        #if os(macOS)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                RemoteToolbarButton(app: app, remote: remote)
+            }
+        }
+        #endif
+    }
+
+    /// The profile signed in, at the sidebar's foot: it opens Me.
+    private var meRow: some View {
+        Button {
+            shell.select(.me)
+        } label: {
+            HStack(spacing: 10) {
+                if let user = app.user {
+                    AvatarView(app: app, name: user.displayName ?? user.name, path: user.avatarUrl,
+                               color: user.avatarColor, size: 32)
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(app.user.map { $0.displayName ?? $0.name } ?? localized("Me"))
+                        .lineLimit(1)
+                    Text(app.server?.name ?? "")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                if let badge = shell.requestsEntry.badgeText {
+                    CountBadge(text: badge, alarm: shell.requestsEntry.alarm)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(shell.section == .me ? Color.accentColor.opacity(0.18) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(8)
+        #if os(iOS)
+        // The rows scroll under it: they mustn't show through.
+        .background(Color(uiColor: .systemGroupedBackground))
+        #endif
+        .accessibilityLabel("Me, \(app.user.map { $0.displayName ?? $0.name } ?? "")")
+        .accessibilityValue(shell.requestsEntry.spoken ?? "")
+        .accessibilityAddTraits(shell.section == .me ? .isSelected : [])
+        .accessibilityIdentifier("shell.me")
+    }
+
+    // MARK: Sections
+
+    /// `section`'s navigation: its start, with the pages opened from it on top.
+    /// `footMiniPlayer`: each page has the mini player at its foot, and the
+    /// remote's bar above it (iPad; the Mac's remote is in the toolbar).
+    private func stack(_ section: ShellSection, footMiniPlayer: Bool = false) -> some View {
+        NavigationStack(path: Binding(get: { shell.path(for: section) },
+                                      set: { shell.setPath($0, for: section) })) {
+            start(section)
+                .safeAreaInset(edge: .bottom, spacing: 0) { if footMiniPlayer { foot(inAccessory: false) } }
+                .navigationDestination(for: Screen.self) { screen in
+                    ScreenView(app: app, screen: screen)
+                        .safeAreaInset(edge: .bottom, spacing: 0) { if footMiniPlayer { foot(inAccessory: false) } }
+                }
+        }
+    }
+
+    @ViewBuilder private func start(_ section: ShellSection) -> some View {
+        switch section {
+        case .home: HomeView(app: app)
+        case .libraries: LibrariesView(app: app)
+        case .library(let id): LibraryView(app: app, libraryId: id)
+        case .search: SearchView(app: app)
+        case .playlists: PlaylistsView(app: app)
+        case .me, .settings, .nowPlaying: MeView(app: app)
+        case .liveTv: LiveTvView(app: app)
+        // Apple TV's tab only: here requests are under Me.
+        case .requests: RequestsView(app: app)
+        }
+    }
+
+    /// The section's name, in the language shown.
+    static func title(_ section: ShellSection) -> String {
+        switch section {
+        case .home: localized("Home")
+        case .libraries: localized("Libraries")
+        case .search: localized("Search")
+        case .playlists: localized("Playlists")
+        case .me: localized("Me")
+        case .settings: localized("Settings")
+        case .liveTv: localized("Live TV")
+        case .nowPlaying: localized("Now Playing")
+        case .requests: localized("Requests")
+        case .library: localized("Library")
+        }
+    }
+
+    static func symbol(_ section: ShellSection) -> String {
+        switch section {
+        case .home: "house"
+        case .libraries: "square.stack"
+        case .search: "magnifyingglass"
+        case .playlists: "music.note.list"
+        case .me: "person.crop.circle"
+        case .settings: "gearshape"
+        case .liveTv: "tv"
+        case .requests: "list.bullet.rectangle"
+        case .nowPlaying: "music.note"
+        case .library: "folder"
+        }
+    }
+}
+
+#if os(iOS)
+/// An iPad's keyboard: Search (⌘F) and Reload (⌘R), as the Mac's View menu has them.
+private struct KeyboardShortcuts: View {
+    @ObservedObject var shell: ShellModel
+
+    var body: some View {
+        ZStack {
+            Button("Search") { shell.findInSearch() }
+                .keyboardShortcut("f")
+            Button("Reload") { Task { await shell.reloadShowing() } }
+                .keyboardShortcut("r")
+                .disabled(!shell.canReload)
+        }
+        .opacity(0)
+        .frame(width: 0, height: 0)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Colours the tab bar's badge as Android colours its tab's number: the
+/// accent colour, and red only while a request couldn't be sent, so the
+/// red keeps its meaning. SwiftUI has no say in a badge's colour, so the
+/// tab bar's own appearance is set, again whenever the alarm changes.
+private struct TabBadgeColour: UIViewControllerRepresentable {
+    let alarm: Bool
+
+    func makeUIViewController(context: Context) -> Painter { Painter() }
+
+    func updateUIViewController(_ painter: Painter, context: Context) {
+        painter.alarm = alarm
+        painter.paint()
+    }
+
+    final class Painter: UIViewController {
+        var alarm = false
+
+        override func viewWillAppear(_ animated: Bool) {
+            super.viewWillAppear(animated)
+            paint()
+        }
+
+        func paint() {
+            guard let bar = tabBarController?.tabBar else { return }
+            let colour = alarm ? UIColor.systemRed : UIColor(Color.accentColor)
+            bar.standardAppearance = Self.painted(bar.standardAppearance, colour)
+            if let edge = bar.scrollEdgeAppearance { bar.scrollEdgeAppearance = Self.painted(edge, colour) }
+        }
+
+        private static func painted(_ appearance: UITabBarAppearance, _ colour: UIColor) -> UITabBarAppearance {
+            let painted = appearance.copy()
+            for item in [painted.stackedLayoutAppearance, painted.inlineLayoutAppearance,
+                         painted.compactInlineLayoutAppearance] {
+                item.normal.badgeBackgroundColor = colour
+                item.selected.badgeBackgroundColor = colour
+            }
+            return painted
+        }
+    }
+}
+#endif
+
+/// The mini player at the foot of a page, while music has a queue.
+private struct FootMiniPlayer: View {
+    let app: AppModel
+    @ObservedObject private var shell: ShellModel
+
+    init(app: AppModel) {
+        self.app = app
+        _shell = ObservedObject(wrappedValue: app.shell)
+    }
+
+    var body: some View {
+        if shell.nowPlaying {
+            MiniPlayer(app: app)
+        }
+    }
+}
+
+/// The sidebar: Home, Live TV when it shows, Search and Playlists, then the libraries in the profile's order, each
+/// with its kind's symbol; a drag (or Edit on iPad, or VoiceOver's Move up
+/// and Move down) puts them in another order.
+private struct Sidebar: View {
+    @ObservedObject var app: AppModel
+    @ObservedObject private var shell: ShellModel
+    @StateObject private var model: LibrariesModel
+
+    init(app: AppModel) {
+        self.app = app
+        _shell = ObservedObject(wrappedValue: app.shell)
+        _model = StateObject(wrappedValue: LibrariesModel(app: app))
+    }
+
+    var body: some View {
+        List(selection: Binding<ShellSection?>(get: { shell.section == .me ? nil : shell.section },
+                                               set: { if let section = $0 { shell.select(section) } })) {
+            Label(ShellView.title(.home), systemImage: ShellView.symbol(.home))
+                .tag(ShellSection.home)
+                .accessibilityIdentifier("shell.sidebar.home")
+            if shell.showsLiveTv {
+                Label(ShellView.title(.liveTv), systemImage: ShellView.symbol(.liveTv))
+                    .tag(ShellSection.liveTv)
+                    .accessibilityIdentifier("shell.sidebar.liveTv")
+            }
+            Label(ShellView.title(.search), systemImage: ShellView.symbol(.search))
+                .tag(ShellSection.search)
+                .accessibilityIdentifier("shell.sidebar.search")
+            Label(ShellView.title(.playlists), systemImage: ShellView.symbol(.playlists))
+                .tag(ShellSection.playlists)
+                .accessibilityIdentifier("shell.sidebar.playlists")
+            Section("Libraries") {
+                ForEach(model.entries) { entry in
+                    HStack {
+                        Label(entry.name, systemImage: entry.symbol)
+                        Spacer(minLength: 0)
+                        if entry.scanning {
+                            ProgressView().controlSize(.small).accessibilityHidden(true)
+                        }
+                    }
+                    .tag(ShellSection.library(entry.id))
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(entry.spoken)
+                    .accessibilityActions {
+                        if model.entries.first?.id != entry.id {
+                            Button("Move up") { model.move(entry.id, by: -1) }
+                        }
+                        if model.entries.last?.id != entry.id {
+                            Button("Move down") { model.move(entry.id, by: 1) }
+                        }
+                    }
+                    .contextMenu { LibraryMoveButtons(model: model, entry: entry) }
+                    .accessibilityIdentifier("shell.sidebar.library.\(entry.id)")
+                }
+                .onMove(perform: model.reorderable ? { model.move(fromOffsets: $0, toOffset: $1) } : nil)
+            }
+        }
+        // A container of its own, so its identifier doesn't replace its rows'.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("shell.sidebar")
+        #if os(iOS)
+        .toolbar {
+            if model.reorderable {
+                ToolbarItem(placement: .primaryAction) {
+                    EditButton().accessibilityIdentifier("shell.sidebar.edit")
+                }
+            }
+        }
+        #endif
+        .task { await model.reload() }
+    }
+}
+
+/// The page a `Screen` names.
+struct ScreenView: View {
+    let app: AppModel
+    let screen: Screen
+
+    var body: some View {
+        switch screen {
+        case .item(let id):
+            ItemView(app: app, itemId: id)
+        case .artist(let id):
+            ArtistView(app: app, itemId: id)
+        case .album(let id, let track):
+            AlbumView(app: app, itemId: id, track: track)
+        case .person(let id):
+            PersonView(app: app, personId: id)
+        case .library(let id, let view):
+            LibraryView(app: app, libraryId: id, view: view)
+        case .libraries:
+            LibrariesView(app: app)
+        case .collection(let id):
+            CollectionView(app: app, collectionId: id)
+        case .collections(let library):
+            CollectionsPage(app: app, libraryId: library)
+        case .playlist(let id):
+            PlaylistView(app: app, playlistId: id)
+        case .history:
+            HistoryView(app: app)
+        case .settings:
+            #if os(macOS)
+            // The Mac's Settings is a window of its own (⌘,).
+            MeView(app: app)
+            #else
+            SettingsView(app: app)
+            #endif
+        case .diagnostics:
+            DiagnosticsView(app: app)
+        case .about:
+            AboutView()
+        case .trackDefaults:
+            MeView(app: app)
+        case .liveTv:
+            LiveTvView(app: app)
+        case .downloads:
+            DownloadsView(app: app)
+        case .downloadSettings:
+            DownloadSettingsView(app: app)
+        case .discover:
+            DiscoverView(app: app)
+        case .discoverResults(let query):
+            DiscoverResultsView(app: app, query: query)
+        case .discoverList(let list):
+            DiscoverResultsView(app: app, source: .list(list))
+        case .discoverTitle(let kind, let tmdbId, let pick):
+            DiscoverTitleView(app: app, kind: kind, tmdbId: tmdbId, pick: pick)
+        case .requests:
+            RequestsView(app: app)
+        }
+    }
+}

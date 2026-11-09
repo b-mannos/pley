@@ -146,6 +146,13 @@ public enum NetworkFailure
     ConnectionFailed,
     /// <summary>The request was stopped on purpose (<see cref="HttpRequest.Cancel"/>).</summary>
     Cancelled,
+    /// <summary>
+    /// What answers at the server's address can't prove it is the server signed in to
+    /// (<see cref="Auth.ServerProofs"/>): the TV treats it as the server being out of reach.
+    /// </summary>
+    AnotherDevice,
+    /// <summary>The server, or a proxy before it, answered a proof with a server error: out of reach for now.</summary>
+    ServerFailed,
 }
 
 /// <summary>No answer: the network, a timeout, or a request cancelled. Its message is the reason, in a few words.</summary>
@@ -188,16 +195,18 @@ public static class Transports
     /// <summary>The words for each failure, as the Android app says them (its <c>describe</c>).</summary>
     public static string Reason(NetworkFailure failure) => failure switch
     {
-        NetworkFailure.NothingAnswers => "nothing answers there",
-        NetworkFailure.NoAnswerInTime => "no answer in time",
-        NetworkFailure.UnknownAddress => "that address isn't known on this network",
-        NetworkFailure.SecureConnection => "its secure connection failed",
-        NetworkFailure.Cancelled => "cancelled",
+        NetworkFailure.NothingAnswers => Strings.T("common.network.nothingAnswers"),
+        NetworkFailure.NoAnswerInTime => Strings.T("common.network.noAnswerInTime"),
+        NetworkFailure.UnknownAddress => Strings.T("common.network.unknownAddress"),
+        NetworkFailure.SecureConnection => Strings.T("common.network.secureConnection"),
+        NetworkFailure.Cancelled => Strings.T("common.network.cancelled"),
+        NetworkFailure.AnotherDevice => Strings.T("common.network.anotherDevice"),
+        NetworkFailure.ServerFailed => Strings.T("common.network.serverFailed"),
         _ => ConnectionFailed,
     };
 
     /// <summary>What a network failure without words of its own says.</summary>
-    public const string ConnectionFailed = "the connection to the server failed";
+    public static string ConnectionFailed => Strings.T("common.network.connectionFailed");
 
     static readonly Type? SocketsHandler = Type.GetType("System.Net.Http.SocketsHttpHandler, System.Net.Http", throwOnError: false);
 
@@ -306,6 +315,19 @@ public static class Transports
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var h in req.Headers ?? new Dictionary<string, string>()) headers[h.Key] = h.Value;
         headers["User-Agent"] = userAgent;
+        return inner(req with { Headers = headers });
+    };
+
+    /// <summary>
+    /// <paramref name="inner"/>, every request asking for answers in <paramref name="language"/>
+    /// (<c>Accept-Language</c>, the language shown): what the server writes itself, Home's rows,
+    /// comes in it when neither the account nor the server has a language of its own.
+    /// </summary>
+    public static Transport WithLanguage(Transport inner, Func<string> language) => req =>
+    {
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var h in req.Headers ?? new Dictionary<string, string>()) headers[h.Key] = h.Value;
+        headers["Accept-Language"] = language();
         return inner(req with { Headers = headers });
     };
 

@@ -13,16 +13,16 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use pley_transcoder_api::{
     AudioCodec, AudioMode, AudioRequest, DolbyVisionLayer, DolbyVisionMode, DynamicRange, FileContainer, JobRequest,
-    JobStatus, MediaInfo, MediaStream, OutputRange, StreamKind, SubtitleBurnRequest, VariantRequest, VideoCodec,
-    VideoMode, VideoPlan, VideoRequest, default_video_kbps, video_range_label,
+    JobStatus, MediaInfo, MediaStream, OutputRange, SegmentFormat, StreamKind, SubtitleBurnRequest, VariantRequest,
+    VideoCodec, VideoMode, VideoPlan, VideoRequest, default_video_kbps, video_range_label,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
 use crate::catalog::FileRow;
-use crate::events::{EventBus, ServerEvent};
+use crate::events::EventBus;
 use crate::transcoder::Transcoder;
-use crate::util::now;
+use crate::util::{now, now_ms};
 
 /// What a player plays as it is, sent with every play request.
 ///
@@ -94,6 +94,13 @@ pub struct Caps {
     /// video.
     #[serde(default)]
     pub picture_subtitles_sideload: Option<bool>,
+    /// The picture codecs the player shows from their own file next to a
+    /// stream (with [`Caps::picture_subtitles_sideload`]); left out, every
+    /// picture codec in `subtitle_codecs`. Kodi shows VobSub and DVB from
+    /// a file it plays as it is, and has them burned into a stream: it
+    /// names PGS alone.
+    #[serde(default)]
+    pub picture_subtitles_sideload_codecs: Option<Vec<String>>,
     /// The player switches a file's audio tracks itself.
     #[serde(default)]
     pub audio_track_switching: Option<bool>,
@@ -136,7 +143,9 @@ pub struct DolbyVisionDecoder {
 pub struct HlsCaps {
     /// Reads multivariant playlists.
     pub master_playlist: bool,
-    /// Segment formats: "ts", "fmp4".
+    /// Segment formats, "ts" and "fmp4", the one it would rather have
+    /// first: fMP4 segments go to a player that puts "fmp4" before "ts"
+    /// ([`Caps::segment_format`]).
     pub segments: Vec<String>,
     /// Moves between a multivariant playlist's variants by itself, as its
     /// connection allows (adaptive bitrate): its transcodes come in several
@@ -158,7 +167,7 @@ pub struct DisplayCaps {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct DeviceCaps {
-    /// "phone", "tablet", "tv" or "unknown".
+    /// "phone", "tablet", "tv", "desktop" or "unknown".
     pub form: String,
     /// "low", "mid" or "high".
     pub tier: Option<String>,
@@ -213,12 +222,13 @@ impl Caps {
 
     /// The player draws these picture subtitles itself from their own file
     /// (`/api/files/{id}/subtitles/{index}.mks`) next to whatever plays
-    /// ([`Caps::picture_subtitles_sideload`]). Read from players of either
-    /// version: the web app says so in a version 1 report, which these two
-    /// fields change nothing else of.
+    /// ([`Caps::picture_subtitles_sideload`]): those it names
+    /// ([`Caps::picture_subtitles_sideload_codecs`]), else those it shows.
+    /// Read from players of either version: the web app says so in a
+    /// version 1 report, which these fields change nothing else of.
     pub fn sideloads_pictures(&self, codec: &str) -> bool {
-        self.picture_subtitles_sideload == Some(true)
-            && self.subtitle_codecs.as_deref().is_some_and(|list| listed(list, codec))
+        let codecs = self.picture_subtitles_sideload_codecs.as_deref().or(self.subtitle_codecs.as_deref());
+        self.picture_subtitles_sideload == Some(true) && codecs.is_some_and(|list| listed(list, codec))
     }
 
     /// A version 2 player that reads multivariant playlists: its HLS
@@ -232,6 +242,34 @@ impl Caps {
     /// The player moves between variants by itself ([`HlsCaps::variants`]).
     pub fn adaptive(&self) -> bool {
         self.hls.as_ref().is_some_and(|hls| hls.variants)
+    }
+
+    /// Where the version 2 player lists this segment format: `None` when it
+    /// doesn't.
+    fn segments_listed(&self, format: &str) -> Option<usize> {
+        let hls = self.hls.as_ref().filter(|_| self.is_v2())?;
+        hls.segments.iter().position(|x| x.eq_ignore_ascii_case(format))
+    }
+
+    /// How this player's HLS segments are packaged: fMP4 for a version 2
+    /// player that lists "fmp4" before "ts" (or without it), when the
+    /// transcoder makes fMP4 (`transcoder_fmp4`, its `fmp4_segments`);
+    /// MPEG-TS otherwise. A player that lists "ts" first plays MPEG-TS as
+    /// it did before fMP4 existed.
+    pub fn segment_format(&self, transcoder_fmp4: bool) -> SegmentFormat {
+        match (self.segments_listed("fmp4"), self.segments_listed("ts")) {
+            (Some(fmp4), ts) if transcoder_fmp4 && ts.is_none_or(|ts| fmp4 < ts) => SegmentFormat::Fmp4,
+            _ => SegmentFormat::Ts,
+        }
+    }
+
+    /// The player plays everything MPEG-TS segments carry: not a version 2
+    /// player whose segment formats leave out "ts" (Apple's players, which
+    /// take only H.264 from MPEG-TS). Such a player gets H.264 in MPEG-TS
+    /// from a transcoder that makes no fMP4.
+    fn plays_ts_fully(&self) -> bool {
+        let lists = self.hls.as_ref().filter(|hls| self.is_v2() && !hls.segments.is_empty());
+        lists.is_none() || self.segments_listed("ts").is_some()
     }
 }
 
@@ -308,14 +346,101 @@ pub struct PlaybackRequest {
     /// of their own instead ([`Session::media_key`]).
     #[serde(default)]
     pub keyed_urls: bool,
+    /// The commands this player obeys from a remote (`player_command`):
+    /// none unless it says so, so a remote never shows a button the player
+    /// ignores. Values this server doesn't know are left out.
+    #[serde(default, deserialize_with = "known_controls")]
+    pub controls: Controls,
+    /// What the player calls the device it plays on ("Living room TV"),
+    /// shown to the user's remotes. Cleaned like an app's name
+    /// ([`crate::oauth::clients::clean_name`]); without one the server names
+    /// the device from its User-Agent.
+    #[serde(default)]
+    pub device_name: Option<String>,
+    /// What kind of device the player plays on (a TV, a phone), for remotes
+    /// that pick TVs out from phones and browsers. Without one the server
+    /// goes by the app ([`crate::api::remote::device_kind_of`]). A value
+    /// this server doesn't know is left out rather than refused.
+    #[serde(default, deserialize_with = "known_device_kind")]
+    pub device_kind: Option<DeviceKind>,
     /// The transcoder keeps HDR in transcodes (its `hdr_transcode`
     /// capability): set by the server, never read from the player.
     #[serde(skip)]
     pub hdr_transcodes: bool,
+    /// The transcoder makes fMP4 segments (its `fmp4_segments`
+    /// capability): set by the server for playback, never read from the
+    /// player.
+    #[serde(skip)]
+    pub fmp4_segments: bool,
     /// A file made for downloading (`POST /api/conversions`), kept on the
     /// player: set by the server, never read from the player.
     #[serde(skip)]
     pub download: bool,
+}
+
+/// A command a remote sends a player (`POST /api/sessions/{id}/command`),
+/// and what a player says it obeys. Stopping isn't one: every player obeys
+/// `session_stopped`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Control {
+    Play,
+    Pause,
+    Seek,
+    Skip,
+    Next,
+    Previous,
+    /// Another of the file's audio tracks.
+    Audio,
+    /// Another of the file's subtitle tracks, or none.
+    Subtitles,
+    /// Another quality of the player's Quality menu (docs/QUALITY.md), by id.
+    Quality,
+}
+
+/// The commands a player obeys, each once, in a fixed order.
+pub type Controls = std::collections::BTreeSet<Control>;
+
+/// A player's `controls`: those this server knows. Others (from a newer
+/// player, or not strings at all) are left out rather than refusing the
+/// play request, and so is `null`.
+pub(crate) fn known_controls<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Controls, D::Error> {
+    let listed = Option::<Vec<serde_json::Value>>::deserialize(deserializer)?.unwrap_or_default();
+    Ok(listed.into_iter().filter_map(|value| serde_json::from_value(value).ok()).collect())
+}
+
+/// What kind of device a player plays on, as remotes tell TVs from phones
+/// and browsers: what the player said (`device_kind`), else what the
+/// server makes of its app ([`crate::api::remote::device_kind_of`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DeviceKind {
+    Tv,
+    Phone,
+    Tablet,
+    Computer,
+    /// The web app in a browser.
+    Browser,
+    /// Not known: the Android app until it says, an app by another
+    /// publisher, a Jellyfin or Plex app.
+    Other,
+}
+
+impl DeviceKind {
+    /// The kind named `name` (`"tv"`), if this server knows it.
+    pub fn from_name(name: &str) -> Option<DeviceKind> {
+        serde_json::from_value(serde_json::Value::String(name.to_owned())).ok()
+    }
+}
+
+/// A player's `device_kind`: the kind named, if this server knows it. One
+/// it doesn't (from a newer player), a number or `null` is left out rather
+/// than refusing the play request.
+pub(crate) fn known_device_kind<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<DeviceKind>, D::Error> {
+    let named = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(named.and_then(|value| serde_json::from_value(value).ok()))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -407,6 +532,91 @@ pub const QUALITIES: [(&str, u32, u32); 7] = [
     ("2m", 2_000, 480),
 ];
 
+/// One entry of the Quality menu: id, label, and the kbps and lines it
+/// holds the video to (`None` for the original and Automatic).
+type MenuEntry = (&'static str, &'static str, Option<(u32, u32)>);
+
+/// The Quality menu every player offers, in its order (docs/QUALITY.md,
+/// "The menu").
+pub const MENU: [MenuEntry; 9] = [
+    ("original", "Original", None),
+    ("auto", "Automatic", None),
+    ("30m", "30 Mbps 4K", Some((30_000, 2160))),
+    ("15m", "15 Mbps 4K", Some((15_000, 2160))),
+    ("20m", "20 Mbps 1080p", Some((20_000, 1080))),
+    ("12m", "12 Mbps 1080p", Some((12_000, 1080))),
+    ("8m", "8 Mbps 1080p", Some((8_000, 1080))),
+    ("4m", "4 Mbps 720p", Some((4_000, 720))),
+    ("2m", "2 Mbps 480p", Some((2_000, 480))),
+];
+
+/// `id` as one of the menu's, when it is one.
+pub fn menu_id(id: &str) -> Option<&'static str> {
+    MENU.iter().map(|q| q.0).find(|known| *known == id)
+}
+
+/// One quality of the menu as players offer it for a file: what a remote
+/// shows, and the id it sends.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct QualityOption {
+    pub id: &'static str,
+    pub label: String,
+}
+
+/// The qualities a player's menu offers for a `width`×`height` file of
+/// `bitrate` (bits per second), as every app works them out
+/// (apps/web/src/player/quality.ts, `qualitiesFor`): the original and
+/// Automatic, then each copy with fewer lines than the file or at most 80 %
+/// of its bitrate (every one when neither is known), named by the file's
+/// own lines when taller, once for each bitrate and lines, tallest first.
+pub fn offered_qualities(width: Option<i64>, height: Option<i64>, bitrate: Option<i64>) -> Vec<QualityOption> {
+    let (w, h) = (width.unwrap_or(0), height.unwrap_or(0));
+    let lines = (w > 0 || h > 0).then_some(if w >= 3800 || h >= 2100 {
+        2160
+    } else if w >= 1800 || h >= 1000 {
+        1080
+    } else if w >= 1200 || h >= 700 {
+        720
+    } else {
+        480
+    });
+    let kbps = bitrate.filter(|b| *b > 0).map(|b| b as f64 / 1000.0);
+    let height = height.filter(|h| *h > 0);
+    let known = kbps.is_some() || height.is_some();
+    let mut out = Vec::new();
+    let mut copies: Vec<(QualityOption, u32, u32)> = Vec::new();
+    for (id, label, cap) in MENU {
+        let Some((cap_kbps, cap_lines)) = cap else {
+            out.push(QualityOption { id, label: label.to_owned() });
+            continue;
+        };
+        if !known {
+            out.push(QualityOption { id, label: label.to_owned() });
+            continue;
+        }
+        let fewer_lines = height.is_some_and(|h| i64::from(cap_lines) < h);
+        let lighter = kbps.is_some_and(|k| f64::from(cap_kbps) <= k * 0.8);
+        if !fewer_lines && !lighter {
+            continue;
+        }
+        let shown = lines.map_or(cap_lines, |l| cap_lines.min(l));
+        if copies.iter().any(|c| (c.1, c.2) == (cap_kbps, shown)) {
+            continue;
+        }
+        let label = match lines {
+            Some(l) if cap_lines > l => {
+                let named = if l >= 2160 { "4K".to_owned() } else { format!("{l}p") };
+                format!("{} Mbps {named}", cap_kbps / 1000)
+            }
+            _ => label.to_owned(),
+        };
+        copies.push((QualityOption { id, label }, cap_kbps, shown));
+    }
+    copies.sort_by(|a, b| b.2.cmp(&a.2).then(b.1.cmp(&a.1)));
+    out.extend(copies.into_iter().map(|c| c.0));
+    out
+}
+
 /// What a transcode of the original aims for, instead of the file's own
 /// size and bitrate (heavy to make and to send, for no better picture): the
 /// closest quality players offer. It keeps the file's resolution and never
@@ -489,12 +699,21 @@ pub struct Decision {
     /// The transcode's lower renditions, for a player that moves between
     /// them ([`ladder`]).
     pub variants: Vec<VariantRequest>,
+    /// How the HLS segments are packaged ([`Caps::segment_format`]).
+    pub segment_format: SegmentFormat,
 }
 
 /// The lines of adaptive bitrate's renditions below a transcode's own size,
 /// each a 16:9 picture's (a film wider than 16:9 is made narrower, so as
 /// tall as it fits).
 const LADDER_LINES: [i64; 4] = [1080, 720, 540, 360];
+
+/// The width of a 16:9 picture `lines` tall, even: a quality fits a video
+/// into that box, so a film wider than 16:9 comes no wider than the screen
+/// it was picked for (1080p is at most 1920×1080, a 2.40:1 film 1920×800).
+fn box_width(lines: i64) -> i64 {
+    (lines * 16 / 9 + 1) / 2 * 2
+}
 
 /// The lower renditions of a transcode of a `width`×`height` video as
 /// `top` asks, for a player that moves between them by itself as its
@@ -527,7 +746,7 @@ pub fn ladder(width: Option<i64>, height: Option<i64>, top: &VideoRequest) -> Ve
         above = own;
     }
     for rung in LADDER_LINES.into_iter().filter(|l| *l < lines * 9 / 10) {
-        let width = (rung * 16 / 9 + 1) / 2 * 2;
+        let width = box_width(rung);
         let kbps = default_video_kbps(width, rung).min(cap);
         if u64::from(kbps) * 3 > u64::from(above) * 2 {
             continue;
@@ -551,7 +770,9 @@ fn range_problem(v: &MediaStream, caps: &Caps) -> Option<String> {
     }
     let label = v.dynamic_range_label();
     if range == DynamicRange::DolbyVision {
-        if caps.dolby_vision {
+        // A file that doesn't name its Dolby Vision gives the player its
+        // base layer.
+        if caps.dolby_vision && !v.dv_unnamed {
             return None;
         }
         if v.is_dolby_vision_only() {
@@ -622,8 +843,11 @@ const DV_BL_BLU_RAY: i64 = 6;
 /// a player listing 8 but not 7; and Dolby Vision + HDR10+ streams
 /// repackaged without their HDR10+ for a player that would decode them as
 /// Dolby Vision, never played as they are, unless it says it shows them
-/// ([`Caps::dolby_vision_hdr10plus`]; androidx/media#1895). Without a
-/// master playlist, those are repackaged as their base layer. A stream
+/// ([`Caps::dolby_vision_hdr10plus`]; androidx/media#1895). A stream whose
+/// file doesn't name its Dolby Vision ([`MediaStream::dv_unnamed`]) is
+/// repackaged for them to name it: as it is, its base layer would play.
+/// Without a master playlist, those are repackaged as their base layer
+/// (played as it is, for a file that doesn't name it). A stream
 /// whose file says a higher level than its decoder takes, though its size
 /// and frame rate need one it takes (a re-encode's 10 for 4K at 24 fps), is
 /// repackaged to keep Dolby Vision, named at the level it needs; a
@@ -714,6 +938,20 @@ fn video_v2(v: &MediaStream, caps: &Caps, converted: OutputRange, download: bool
                     if base.direct {
                         base.direct = false;
                         base.reasons.push(format!("{label} plays as {base_layer}."));
+                    }
+                    base
+                }
+                // A file that doesn't name its Dolby Vision gives the
+                // player its base layer as it is: repackaged, it's named.
+                Some(_) if level_ok && v.dv_unnamed => {
+                    if signal && !download {
+                        return VideoVerdict {
+                            direct: false,
+                            copy: true,
+                            dolby_vision: DolbyVisionMode::Signal,
+                            reasons: vec![format!("The file doesn't name its {}.", v.dolby_vision_label())],
+                            ..Default::default()
+                        };
                     }
                     base
                 }
@@ -854,7 +1092,7 @@ pub fn video_range_shown(v: &MediaStream, caps: &Caps, delivery: Delivery) -> Op
             DynamicRange::Hdr10plus if !shows_hdr10plus => "HDR10 (this screen doesn't show HDR10+)".to_owned(),
             other => other.label().to_owned(),
         },
-        Delivery::Direct if decodes_dolby_vision(v, caps) => {
+        Delivery::Direct if decodes_dolby_vision(v, caps) && !v.dv_unnamed => {
             video_range_label(range, v.dv_profile, v.dv_bl_compat, v.dv_el, false)
         }
         Delivery::Copy { dolby_vision: DolbyVisionMode::To81, hdr10plus_stripped } => {
@@ -874,25 +1112,32 @@ pub fn video_range_shown(v: &MediaStream, caps: &Caps, delivery: Delivery) -> Op
                 // insisted on gets here.
                 format!("{dolby_vision} not decoded (wrong colours)")
             } else {
-                format!("{} (Dolby Vision base layer, as {})", base_layer_name(v, caps), base_layer_why(v, caps))
+                let direct = delivery == Delivery::Direct;
+                format!(
+                    "{} (Dolby Vision base layer, as {})",
+                    base_layer_name(v, caps),
+                    base_layer_why(v, caps, direct)
+                )
             }
         }
     };
     Some(shown)
 }
 
-/// Why a Dolby Vision stream the player gets as it is, or copied, shows as
-/// its base layer: the screen, the player, or a remux that doesn't name its
-/// Dolby Vision (the player reads no master playlist, the transcoder writes
-/// none, or the stream isn't HEVC). A player that lists profiles but no
-/// Dolby Vision screen decodes it: its screen is what's missing. One that
-/// lists none is told neither: Kodi and Roku can't tell their screen from
-/// their decoders.
-fn base_layer_why(v: &MediaStream, caps: &Caps) -> String {
+/// Why a Dolby Vision stream the player gets as it is (`direct`), or
+/// copied, shows as its base layer: the screen, the player, a file that
+/// doesn't name its Dolby Vision, or a remux that doesn't (the player
+/// reads no master playlist, the transcoder writes none, or the stream
+/// isn't HEVC). A player that lists profiles but no Dolby Vision screen
+/// decodes it: its screen is what's missing. One that lists none is told
+/// neither: Kodi and Roku can't tell their screen from their decoders.
+fn base_layer_why(v: &MediaStream, caps: &Caps, direct: bool) -> String {
     let profile = v.dv_profile.unwrap_or(0);
     if decodes_dolby_vision(v, caps) {
         return if caps.is_v2() && v.hdr10plus == Some(true) && !caps.dolby_vision_hdr10plus {
             "Dolby Vision with HDR10+ doesn't play here".to_owned()
+        } else if v.dv_unnamed && direct {
+            "the file doesn't name Dolby Vision".to_owned()
         } else {
             "its remux doesn't name Dolby Vision".to_owned()
         };
@@ -1108,10 +1353,15 @@ fn screen_lines(caps: &Caps) -> Option<u32> {
     (lines > 0).then(|| [2160, 1080, 720, 480].into_iter().find(|l| i64::from(*l) <= lines).unwrap_or(480))
 }
 
-/// Video codecs HLS can carry in MPEG-TS segments, which players unpack
-/// (hls.js turns them into fragmented MP4 for the browser).
-fn hls_copyable(codec: &str) -> bool {
-    matches!(codec, "h264" | "hevc")
+/// Video codecs HLS segments carry copied. MPEG-TS carries H.264, and
+/// HEVC for players that unpack it themselves (hls.js turns it into
+/// fragmented MP4 for the browser, Media3 reads it): not Apple's, which
+/// take HEVC only in fMP4 (`h264_only`). fMP4 carries VP9 and AV1 too.
+fn hls_copyable(codec: &str, format: SegmentFormat, h264_only: bool) -> bool {
+    match format {
+        SegmentFormat::Ts => codec == "h264" || (codec == "hevc" && !h264_only),
+        SegmentFormat::Fmp4 => matches!(codec, "h264" | "hevc" | "vp9" | "av1"),
+    }
 }
 
 /// Containers the browser can play natively (used when a file was never probed).
@@ -1123,6 +1373,13 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
     let caps = &req.caps;
     let container = file.container.as_deref().unwrap_or_default();
     let mut reasons = Vec::new();
+    // A download is one file, whatever the player streams.
+    let segment_format = if req.download { SegmentFormat::Ts } else { caps.segment_format(req.fmp4_segments) };
+    // A player that takes only H.264 from MPEG-TS (one that lists fMP4
+    // segments alone, with a transcoder that makes none): its HEVC is
+    // converted, and so is HDR, which converted HDR video (HEVC Main 10)
+    // can't keep.
+    let ts_h264_only = !req.download && segment_format == SegmentFormat::Ts && !caps.plays_ts_fully();
 
     let Some(info) = info else {
         // Never probed (transcoder was unavailable during the scan).
@@ -1141,6 +1398,7 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
             reasons: if direct { vec![] } else { vec!["File not analyzed yet.".into()] },
             quality: None,
             variants: Vec::new(),
+            segment_format,
         };
     };
 
@@ -1178,7 +1436,7 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
     // keeps HDR): HEVC Main 10 in HDR10 or HLG, else SDR. Picture subtitles
     // drawn onto it (converted video always has them drawn) make it SDR.
     let hdr_out = match video {
-        Some(v) if v2 && req.hdr_transcodes && pictures.is_none() => hdr_transcode(v, caps),
+        Some(v) if v2 && req.hdr_transcodes && pictures.is_none() && !ts_h264_only => hdr_transcode(v, caps),
         _ => OutputRange::Sdr,
     };
     let video_ok = match video {
@@ -1244,7 +1502,10 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
         reasons.push("Audio track switching not supported.".into());
     }
     let bitrate_ok = req.max_bitrate.is_none_or(|max| file.bitrate.unwrap_or(0) <= max as i64 * 1000);
-    let size_ok = req.max_height.is_none_or(|max| video.and_then(|v| v.height).unwrap_or(0) <= max as i64);
+    let size_ok = req.max_height.is_none_or(|max| {
+        let (w, h) = video.map_or((None, None), |v| (v.width, v.height));
+        h.unwrap_or(0) <= i64::from(max) && w.unwrap_or(0) <= box_width(i64::from(max))
+    });
     if !bitrate_ok || !size_ok {
         reasons.push("Lower quality picked.".into());
     }
@@ -1277,6 +1538,7 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
             reasons: Vec::new(),
             quality: None,
             variants: Vec::new(),
+            segment_format,
         };
     }
 
@@ -1285,13 +1547,18 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
         PlaybackMode::Transcode => reasons.push("Transcode requested.".into()),
         _ => {}
     }
+    // HEVC the player would take copied, in fMP4.
+    if ts_h264_only && req.mode != PlaybackMode::Transcode && video_copy_ok && video.is_some_and(|v| v.codec == "hevc")
+    {
+        reasons.push("HEVC not supported in MPEG-TS.".into());
+    }
     let mut quality = None;
     let video_req = video.map(|v| {
         // Whatever the client plays as it is goes through untouched, like
         // Plex's Direct Stream: only the audio or the container changes.
         let copy = req.mode != PlaybackMode::Transcode
             && video_copy_ok
-            && hls_copyable(&v.codec)
+            && hls_copyable(&v.codec, segment_format, ts_h264_only)
             && v.interlaced != Some(true)
             && bitrate_ok
             && size_ok
@@ -1346,7 +1613,7 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
             stream_index: Some(v.index),
             mode: if copy { VideoMode::Copy } else { VideoMode::Transcode },
             codec: if hdr == OutputRange::Sdr { VideoCodec::H264 } else { VideoCodec::Hevc },
-            max_width: None,
+            max_width: max_height.and_then(|h| u32::try_from(box_width(i64::from(h))).ok()),
             max_height,
             max_bitrate_kbps: max_bitrate.map(|b| b.saturating_sub(192).max(500)),
             dolby_vision: if copy { copy_dolby_vision } else { DolbyVisionMode::Copy },
@@ -1398,6 +1665,7 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
         reasons,
         quality,
         variants,
+        segment_format,
     }
 }
 
@@ -1429,32 +1697,42 @@ pub fn decide_with_audio(
 
 /// The picture subtitle track whose `.mks` the player of `req` will ask for
 /// (it draws them itself, [`Caps::sideloads_pictures`]), so the server has
-/// it copied out of its file at once: the track named in the request, else
-/// the one the user's choices pick (`chosen`, `streams::resolve`), when it
-/// is pictures the player draws and nothing burns them in. Not for a track
-/// in a file played as it is: a player that reads it from the file (the
-/// Android app, Kodi) needs no `.mks`, and one that doesn't asks for it at
-/// once anyway. Players change the track as they play: the `.mks` request
-/// starts the copy then.
+/// it copied out of its file at once: the one the user's choices pick
+/// (`chosen`, `streams::resolve`), when it is pictures the player draws and
+/// nothing burns them in. A track the request names needs none: it is
+/// text, pictures burned into a stream ([`decide`]), or read from a file
+/// played as it is. Only for a track in a stream: a player that reads it
+/// from a file played as it is (the Android app, Kodi) needs no `.mks`, and
+/// one that doesn't asks for it at once anyway. Never for a `.sup` next to
+/// the media (the only picture subtitle file Pley lists there): its copy
+/// reads only that file, and Kodi's `.sup` is the file itself. Players
+/// change the track as they play: the `.mks` request starts the copy then.
 pub fn picture_to_prepare(
     streams: &[MediaStream],
     req: &PlaybackRequest,
     decision: &Decision,
     chosen: Option<i64>,
 ) -> Option<i64> {
-    let index = req.subtitle_index.or(chosen)?;
+    if req.subtitle_index.is_some() {
+        return None;
+    }
+    let index = chosen?;
     let track = streams.iter().find(|s| s.index == index && s.kind == StreamKind::Subtitle)?;
     let drawn = !track.text_based.unwrap_or(true) && req.caps.sideloads_pictures(&track.codec);
-    let streamed = decision.method != Method::Direct || track.external;
+    let streamed = decision.method != Method::Direct && !track.external;
     (drawn && streamed && decision.burn_index != Some(index)).then_some(index)
 }
 
-/// Whether a player that draws picture subtitles itself may want one of
-/// these streams' (see [`picture_to_prepare`]).
+/// Whether [`picture_to_prepare`] may pick one of these streams for a
+/// player that draws picture subtitles itself: one in the file, in a codec
+/// it draws.
 pub fn may_draw_pictures(streams: &[MediaStream], caps: &Caps) -> bool {
-    streams
-        .iter()
-        .any(|s| s.kind == StreamKind::Subtitle && !s.text_based.unwrap_or(true) && caps.sideloads_pictures(&s.codec))
+    streams.iter().any(|s| {
+        s.kind == StreamKind::Subtitle
+            && !s.external
+            && !s.text_based.unwrap_or(true)
+            && caps.sideloads_pictures(&s.codec)
+    })
 }
 
 pub fn subtitle_tracks(file_id: i64, streams: &[MediaStream]) -> Vec<SubtitleTrack> {
@@ -1480,13 +1758,81 @@ pub fn subtitle_tracks(file_id: i64, streams: &[MediaStream]) -> Vec<SubtitleTra
         .collect()
 }
 
+/// One of a file's audio or subtitle tracks, as remotes offer it
+/// (`PlayingSession.tracks`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TrackOption {
+    pub index: i64,
+    pub language: Option<String>,
+    pub title: Option<String>,
+    pub codec: Option<String>,
+    /// An audio track's channels; `None` for subtitles.
+    pub channels: Option<i64>,
+    pub default: bool,
+    pub forced: bool,
+}
+
+/// The tracks a remote picks from for a session's file.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct TrackOptions {
+    pub audio: Vec<TrackOption>,
+    pub subtitles: Vec<TrackOption>,
+}
+
+/// The audio and subtitle tracks of a file's streams (sidecar and added
+/// subtitles included), in their order.
+pub fn track_options(streams: &[MediaStream]) -> TrackOptions {
+    let option = |s: &MediaStream| TrackOption {
+        index: s.index,
+        language: s.language.clone(),
+        title: s.title.clone(),
+        codec: Some(s.codec.clone()).filter(|c| !c.is_empty()),
+        channels: if s.kind == StreamKind::Audio { s.channels } else { None },
+        default: s.default,
+        forced: s.forced,
+    };
+    let of = |kind: StreamKind| streams.iter().filter(|s| s.kind == kind).map(option).collect();
+    TrackOptions { audio: of(StreamKind::Audio), subtitles: of(StreamKind::Subtitle) }
+}
+
 // ------------------------------------------------------------------ sessions
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PlayState {
     pub position_ms: i64,
     pub state: String,
+    /// Its player was last heard from: a report, or a request for media.
     pub updated_at: i64,
+    /// Its player's last progress report (unix ms), which `position_ms` is
+    /// as of; none before the first. Requests for media move `updated_at`
+    /// but not the place, so where the player is by now counts from this.
+    /// In milliseconds: remotes move the place on from it, and whole
+    /// seconds would put them up to a second out.
+    #[serde(skip)]
+    pub reported_at_ms: Option<i64>,
+    /// The audio track it plays, a stream index of the session's file: what
+    /// its player last said, else what its play request picked; `None` when
+    /// not known.
+    #[serde(skip)]
+    pub audio_index: Option<i64>,
+    /// The subtitles it shows, the same way; `-1`: none.
+    #[serde(skip)]
+    pub subtitle_index: Option<i64>,
+    /// The quality its Quality menu has picked (one of [`MENU`]'s ids), as
+    /// its player last said; `None` until it does.
+    #[serde(skip)]
+    pub quality: Option<&'static str>,
+}
+
+impl PlayState {
+    /// Where its player is by now: the last report's place, moved on since
+    /// at normal speed while it plays (`now_ms`: unix ms).
+    pub fn position_now(&self, now_ms: i64) -> i64 {
+        match self.reported_at_ms {
+            Some(at) if self.state == "playing" => self.position_ms.saturating_add((now_ms - at).max(0)),
+            _ => self.position_ms,
+        }
+    }
 }
 
 /// What a transcode session asked the transcoder for, kept to re-create the
@@ -1514,8 +1860,12 @@ pub struct Session {
     pub started_at: i64,
     pub play: Mutex<PlayState>,
     /// The app grant whose token started it (`None`: a session token). The
-    /// Plex API's token-less session files refuse these.
+    /// Jellyfin API's token-less session files refuse these.
     pub app_grant: Option<i64>,
+    /// The compatibility token that started it, through the Jellyfin API:
+    /// that API's token-less session files serve only these, while the
+    /// token works.
+    pub compatibility_token: Option<i64>,
     /// What the session's keyed addresses carry (`/api/media/{key}/…`) when
     /// its player asked for them (`keyed_urls`): 256 random bits that open
     /// this session's media and nothing else, for as long as it lasts.
@@ -1525,6 +1875,19 @@ pub struct Session {
     /// The video bitrate its player asked for since it started (kbps),
     /// which a recreated job goes on at too.
     pub bitrate: Mutex<Option<u32>>,
+    /// The commands its player obeys from a remote
+    /// ([`PlaybackRequest::controls`]); none for players that never said.
+    pub controls: Controls,
+    /// The device it plays on, as the user's remotes show it: what the
+    /// player called it, or a name from its User-Agent.
+    pub device: Option<String>,
+    /// Which device that is, the same for everything the device plays
+    /// ([`crate::api::remote::device_id_of`]); `session-<id>` until known.
+    pub device_id: String,
+    /// What kind of device it is ([`DeviceKind`]).
+    pub device_kind: DeviceKind,
+    /// Commands sent to it lately, which [`Session::take_command`] counts.
+    commands: Mutex<CommandWindow>,
     last_transcoder_touch: AtomicI64,
     /// Not heard from for [`ACTIVE_WINDOW_SECS`] (no report, heartbeat or
     /// request for media): out of "Now playing", its transcode stopped. The
@@ -1548,8 +1911,10 @@ impl Session {
         start_ms: i64,
     ) -> Self {
         let now = now();
+        let id = uuid::Uuid::new_v4().simple().to_string();
+        let device_id = format!("session-{id}");
         Self {
-            id: uuid::Uuid::new_v4().simple().to_string(),
+            id,
             user_id,
             username,
             client_id,
@@ -1560,11 +1925,25 @@ impl Session {
             transcode,
             job_id: Mutex::new(job_id),
             started_at: now,
-            play: Mutex::new(PlayState { position_ms: start_ms, state: "playing".into(), updated_at: now }),
+            play: Mutex::new(PlayState {
+                position_ms: start_ms,
+                state: "playing".into(),
+                updated_at: now,
+                reported_at_ms: None,
+                audio_index: None,
+                subtitle_index: None,
+                quality: None,
+            }),
             app_grant: None,
+            compatibility_token: None,
             media_key: None,
             recreate: tokio::sync::Mutex::new(()),
             bitrate: Mutex::new(None),
+            controls: Controls::new(),
+            device: None,
+            device_id,
+            device_kind: DeviceKind::Other,
+            commands: Mutex::new(CommandWindow::default()),
             last_transcoder_touch: AtomicI64::new(now),
             quiet: AtomicBool::new(false),
         }
@@ -1572,6 +1951,15 @@ impl Session {
 
     pub fn job_id(&self) -> Option<String> {
         self.job_id.lock().clone()
+    }
+
+    /// Says which device it plays on ([`Session::device_id`]), when that is
+    /// known, and what kind of device it is.
+    pub fn on_device(&mut self, id: Option<String>, kind: DeviceKind) {
+        if let Some(id) = id {
+            self.device_id = id;
+        }
+        self.device_kind = kind;
     }
 
     pub fn position_ms(&self) -> i64 {
@@ -1586,19 +1974,63 @@ impl Session {
     }
 
     /// Records a progress report; whether the play state (playing, paused,
-    /// stopped) changed or the session woke, which the dashboard and Plex
-    /// tools hear about at once.
+    /// stopped) changed, the place jumped (a seek, a skip) or the session
+    /// woke, which the dashboard and the user's remotes hear about at once.
     pub fn update(&self, position_ms: i64, state: &str) -> bool {
+        let now_ms = now_ms();
         let mut play = self.play.lock();
         let changed = play.state != state;
+        let jumped = play.reported_at_ms.is_some_and(|at| jumped(&play, at, now_ms, position_ms));
         play.position_ms = position_ms;
         if changed {
             play.state = state.to_owned();
         }
-        play.updated_at = now();
+        play.updated_at = now_ms / 1000;
+        play.reported_at_ms = Some(now_ms);
         drop(play);
         let woke = self.quiet.swap(false, Ordering::SeqCst);
-        changed || woke
+        changed || jumped || woke
+    }
+
+    /// The tracks its play request picked, which remotes show until its
+    /// player says which it plays.
+    pub fn picked_tracks(&mut self, audio_index: Option<i64>, subtitle_index: Option<i64>) {
+        let play = self.play.get_mut();
+        (play.audio_index, play.subtitle_index) = (audio_index, subtitle_index);
+    }
+
+    /// Records the tracks its player says it plays (a report's audio index,
+    /// and its subtitle index, `-1` for none); one it doesn't say, or one
+    /// out of range, leaves what was known. Whether either changed, which
+    /// the user's remotes hear about at once.
+    pub fn report_tracks(&self, audio_index: Option<i64>, subtitle_index: Option<i64>) -> bool {
+        let mut play = self.play.lock();
+        let before = (play.audio_index, play.subtitle_index);
+        if let Some(index) = audio_index.filter(|i| (0..=MAX_STREAM_INDEX).contains(i)) {
+            play.audio_index = Some(index);
+        }
+        if let Some(index) = subtitle_index.filter(|i| (-1..=MAX_STREAM_INDEX).contains(i)) {
+            play.subtitle_index = Some(index);
+        }
+        (play.audio_index, play.subtitle_index) != before
+    }
+
+    /// Records the quality its player says its menu has picked (one of
+    /// [`MENU`]'s ids; another, or none, leaves what was known). Whether it
+    /// changed, which the user's remotes hear about at once.
+    pub fn report_quality(&self, quality: Option<&str>) -> bool {
+        let Some(id) = quality.and_then(menu_id) else { return false };
+        let mut play = self.play.lock();
+        let changed = play.quality != Some(id);
+        play.quality = Some(id);
+        changed
+    }
+
+    /// Counts a command sent to it: whether it may go to its player, at
+    /// most [`COMMANDS_PER_SECOND`] each second. A remote held down, or a
+    /// script, mustn't flood the user's event streams.
+    pub fn take_command(&self) -> bool {
+        self.commands.lock().take()
     }
 
     /// Playing or paused, with a player that was heard from lately: what
@@ -1618,6 +2050,64 @@ impl Session {
         } else {
             false
         }
+    }
+}
+
+/// How far a report's place may be from where the session would be by now
+/// before it counts as a jump: more than reports drift between themselves.
+const JUMP_MS: i64 = 5_000;
+/// The slowest and fastest speeds players offer, as fractions: playing, a
+/// report may be anywhere between them from the last without a jump.
+const SLOWEST_SPEED: (i64, i64) = (1, 2);
+const FASTEST_SPEED: (i64, i64) = (2, 1);
+
+/// Whether a report at `position_ms` jumped from the last one, made at
+/// `reported_at_ms` (a seek, a skip). Playing, the place may have moved on at
+/// any speed a player offers since; otherwise it stays where it was. There
+/// is no expected place before a session's first report: until then its
+/// transcode starts and its player buffers, which takes a while.
+fn jumped(play: &PlayState, reported_at_ms: i64, now_ms: i64, position_ms: i64) -> bool {
+    let (low, high) = if play.state == "playing" {
+        let elapsed_ms = (now_ms - reported_at_ms).max(0);
+        let at = |(num, den): (i64, i64)| play.position_ms.saturating_add(elapsed_ms.saturating_mul(num) / den);
+        (at(SLOWEST_SPEED), at(FASTEST_SPEED))
+    } else {
+        (play.position_ms, play.position_ms)
+    };
+    position_ms < low.saturating_sub(JUMP_MS) || position_ms > high.saturating_add(JUMP_MS)
+}
+
+/// The highest stream index a player's report may name: embedded streams
+/// are below 1000, subtitle files and added subtitles below 10000
+/// ([`crate::subtitles`]).
+const MAX_STREAM_INDEX: i64 = 9999;
+
+/// Commands a session takes each second at most ([`Session::take_command`]).
+pub const COMMANDS_PER_SECOND: u32 = 10;
+
+/// The commands of the current second sent to one session (an item's or
+/// a Live TV viewer's), counted by [`CommandWindow::take`].
+#[derive(Debug, Clone, Default)]
+pub struct CommandWindow {
+    started: Option<std::time::Instant>,
+    count: u32,
+}
+
+impl CommandWindow {
+    /// Counts a command: whether it may go, at most [`COMMANDS_PER_SECOND`]
+    /// each second.
+    pub fn take(&mut self) -> bool {
+        let at = std::time::Instant::now();
+        match self.started {
+            Some(started) if at.duration_since(started) < Duration::from_secs(1) => {
+                if self.count >= COMMANDS_PER_SECOND {
+                    return false;
+                }
+                self.count += 1;
+            }
+            _ => *self = CommandWindow { started: Some(at), count: 1 },
+        }
+        true
     }
 }
 
@@ -2031,9 +2521,7 @@ impl Sessions {
                 for job in stop.filter_map(|s| s.job_id()).collect::<Vec<_>>() {
                     let _ = transcoder.delete_job(&job).await;
                 }
-                if !sweep.quieted.is_empty() || !sweep.forgotten.is_empty() {
-                    events.send(ServerEvent::SessionsChanged);
-                }
+                events.sessions_changed(sweep.quieted.iter().chain(&sweep.forgotten).map(|s| s.user_id));
             }
         });
     }
@@ -2395,7 +2883,11 @@ mod tests {
             client_id: None,
             keep_previous: false,
             keyed_urls: false,
+            controls: Controls::new(),
+            device_name: None,
+            device_kind: None,
             hdr_transcodes: false,
+            fmp4_segments: false,
             download: false,
         }
     }
@@ -2451,6 +2943,42 @@ mod tests {
         let d = decide(&file("mp4", 20_000_000), Some(&i), &i.streams, &request());
         assert_eq!(d.method, Method::Transcode);
         assert!(d.reasons.iter().any(|r| r.contains("Dolby Vision")));
+    }
+
+    /// The same cases as the web app's `qualitiesFor` (player/quality.test.ts).
+    #[test]
+    fn offered_qualities_are_the_players_menu() {
+        let mbps = |m: i64| Some(m * 1_000_000);
+        let ids = |w: Option<i64>, h: Option<i64>, b: Option<i64>| {
+            offered_qualities(w, h, b).into_iter().map(|q| q.id).collect::<Vec<_>>()
+        };
+        let labels = |w: i64, h: i64, m: i64| {
+            offered_qualities(Some(w), Some(h), mbps(m)).into_iter().map(|q| q.label).collect::<Vec<_>>()
+        };
+        assert_eq!(ids(Some(1920), Some(1080), mbps(9)), ["original", "auto", "4m", "2m"]);
+        assert_eq!(ids(Some(1920), Some(1080), mbps(10)), ["original", "auto", "8m", "4m", "2m"]);
+        assert_eq!(ids(Some(1280), Some(720), mbps(3)), ["original", "auto", "2m"]);
+        assert_eq!(ids(Some(3840), Some(2160), mbps(6)), ["original", "auto", "20m", "12m", "8m", "4m", "2m"]);
+        assert_eq!(
+            ids(Some(3840), Some(2160), mbps(60)),
+            ["original", "auto", "30m", "15m", "20m", "12m", "8m", "4m", "2m"]
+        );
+        assert_eq!(ids(Some(3840), Some(2160), mbps(20)), ["original", "auto", "15m", "20m", "12m", "8m", "4m", "2m"]);
+        assert_eq!(ids(None, None, None).len(), MENU.len(), "every one, when nothing is known");
+        assert_eq!(labels(1280, 720, 12), ["Original", "Automatic", "8 Mbps 720p", "4 Mbps 720p", "2 Mbps 480p"]);
+        assert_eq!(
+            labels(1920, 800, 25),
+            [
+                "Original",
+                "Automatic",
+                "20 Mbps 1080p",
+                "15 Mbps 1080p",
+                "12 Mbps 1080p",
+                "8 Mbps 1080p",
+                "4 Mbps 720p",
+                "2 Mbps 480p"
+            ]
+        );
     }
 
     #[test]
@@ -2752,6 +3280,32 @@ mod tests {
     }
 
     #[test]
+    fn a_quality_fits_a_wide_film_into_its_box() {
+        let mut i = info("h264", &["aac"], DynamicRange::Sdr);
+        (i.streams[0].width, i.streams[0].height) = (Some(2560), Some(1080));
+        let mut req = request();
+        req.max_height = Some(1080);
+        // Wider than 1920: converted, so no wider than the screen 1080p is for.
+        let d = decide(&file("mp4", 5_000_000), Some(&i), &i.streams, &req);
+        assert_eq!(d.method, Method::Transcode);
+        let v = d.video.as_ref().unwrap();
+        assert_eq!((v.max_width, v.max_height), (Some(1920), Some(1080)));
+        req.max_height = Some(720);
+        let v = decide(&file("mp4", 5_000_000), Some(&i), &i.streams, &req).video.unwrap();
+        assert_eq!((v.max_width, v.max_height), (Some(1280), Some(720)));
+        // The quality picked by itself fits the same way (4K into 3840×2160).
+        let mut i = info("hevc", &["aac"], DynamicRange::Sdr);
+        (i.streams[0].width, i.streams[0].height) = (Some(4096), Some(1716));
+        let v = decide(&file("mkv", 80_000_000), Some(&i), &i.streams, &request()).video.unwrap();
+        assert_eq!((v.max_width, v.max_height), (Some(3840), Some(2160)));
+        // A 2.40:1 film's 1080p ladder starts at 1920×800, with no second
+        // 1080p below it.
+        let top = VideoRequest { max_width: Some(1920), max_height: Some(1080), ..Default::default() };
+        let lines = ladder(Some(3840), Some(1600), &top).iter().map(|v| v.max_height.unwrap()).collect::<Vec<_>>();
+        assert!(!lines.contains(&1080), "{lines:?}");
+    }
+
+    #[test]
     fn hdr10_plays_directly_on_hdr_displays() {
         let i = info("hevc", &["aac"], DynamicRange::Hdr10);
         let mut req = request();
@@ -2959,15 +3513,25 @@ mod tests {
         assert_eq!(prepared(&req, Some(10)).1, None);
         assert_eq!(prepared(&req, None).1, None);
         // As it is, a track in the file: the player reads it there or asks
-        // at once. One next to it is prepared.
+        // at once.
         let mut direct = req.clone();
         direct.caps.audio_decode = Some(vec!["dts".into()]);
         assert_eq!(prepared(&direct, Some(9)), (Method::Direct, None));
-        assert_eq!(prepared(&direct, Some(1000)), (Method::Direct, Some(1000)));
-        // Named by the player: burned in, nothing to prepare.
+        // A file next to the media, as it is or beside a stream: its copy
+        // reads only that file.
+        assert_eq!(prepared(&direct, Some(1000)), (Method::Direct, None));
+        assert_eq!(prepared(&req, Some(1000)), (Method::Remux, None));
+        let next_to_it: Vec<_> = streams.iter().filter(|s| s.index != 9).cloned().collect();
+        assert!(!may_draw_pictures(&next_to_it, &req.caps));
+        // Named by the player: burned in, or text it shows; nothing to
+        // prepare, whatever the user's choices pick.
         let mut burn = req.clone();
         burn.subtitle_index = Some(9);
         assert_eq!(prepared(&burn, None).1, None);
+        assert_eq!(prepared(&burn, Some(9)).1, None);
+        let mut text = req.clone();
+        text.subtitle_index = Some(10);
+        assert_eq!(prepared(&text, Some(9)).1, None);
         // A player that doesn't draw them, or not these.
         let mut android = req.clone();
         android.caps.picture_subtitles_sideload = None;
@@ -2988,6 +3552,73 @@ mod tests {
         let d = decide(&f, Some(&i), &streams, &web);
         assert_eq!((d.method, d.burn_index), (Method::Remux, None), "DTS: repackaged, PGS not drawn on");
         assert_eq!(picture_to_prepare(&streams, &web, &d, Some(9)), Some(9));
+    }
+
+    /// Kodi's report (apps/kodi, caps.py): every picture codec shown from a
+    /// file played as it is, PGS alone beside a stream (as a `.sup` made of
+    /// its `.mks`).
+    fn kodi() -> Caps {
+        serde_json::from_value(serde_json::json!({
+            "caps_version": 2, "containers": ["mkv", "mp4"], "video_codecs": ["h264"], "audio_codecs": ["dts"],
+            "video": [{"codec": "h264"}], "audio_decode": ["dts"],
+            "subtitle_codecs": ["subrip", "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle"],
+            "picture_subtitles_sideload": true, "picture_subtitles_sideload_codecs": ["hdmv_pgs_subtitle"],
+            "audio_track_switching": true, "hls": {"master_playlist": false, "segments": ["ts"]}
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn picture_tracks_are_prepared_only_in_the_codecs_a_player_shows_beside_a_stream() {
+        let mut i = info("h264", &["dts"], DynamicRange::Sdr);
+        for (index, codec) in [(11, "dvd_subtitle"), (12, "dvb_subtitle")] {
+            i.streams.push(MediaStream {
+                index,
+                kind: StreamKind::Subtitle,
+                codec: codec.into(),
+                text_based: Some(false),
+                ..Default::default()
+            });
+        }
+        let f = file("mkv", 5_000_000);
+        let mut req = request();
+        req.caps = kodi();
+        assert!(req.caps.sideloads_pictures("hdmv_pgs_subtitle"));
+        assert!(!req.caps.sideloads_pictures("dvd_subtitle") && !req.caps.sideloads_pictures("dvb_subtitle"));
+        // A quality below the file's (Automatic's restart): converted, with
+        // the profile's track not named. Kodi asks again to have VobSub or
+        // DVB drawn on: their copy would never be read.
+        req.max_bitrate = Some(2_000);
+        let prepared = |req: &PlaybackRequest, chosen: Option<i64>| {
+            let d = decide(&f, Some(&i), &i.streams, req);
+            (d.method, picture_to_prepare(&i.streams, req, &d, chosen))
+        };
+        assert_eq!(prepared(&req, Some(9)), (Method::Transcode, Some(9)));
+        assert_eq!(prepared(&req, Some(11)), (Method::Transcode, None));
+        assert_eq!(prepared(&req, Some(12)), (Method::Transcode, None));
+        let no_pgs: Vec<_> = i.streams.iter().filter(|s| s.index != 9).cloned().collect();
+        assert!(may_draw_pictures(&i.streams, &req.caps) && !may_draw_pictures(&no_pgs, &req.caps));
+        // Without the list: every picture codec it shows, as before.
+        let mut every = req.clone();
+        every.caps.picture_subtitles_sideload_codecs = None;
+        for index in [9, 11, 12] {
+            assert_eq!(prepared(&every, Some(index)), (Method::Transcode, Some(index)));
+        }
+        assert!(may_draw_pictures(&no_pgs, &every.caps));
+        // The list changes no decision: a track named is burned into a
+        // stream, and shown by Kodi from a file played as it is.
+        for max_bitrate in [None, Some(2_000)] {
+            for subtitle_index in [None, Some(9), Some(11), Some(12)] {
+                let mut named = req.clone();
+                (named.max_bitrate, named.subtitle_index) = (max_bitrate, subtitle_index);
+                let mut unnamed = named.clone();
+                unnamed.caps.picture_subtitles_sideload_codecs = None;
+                let d = decide(&f, Some(&i), &i.streams, &named);
+                assert_eq!(format!("{d:?}"), format!("{:?}", decide(&f, Some(&i), &i.streams, &unnamed)));
+                let burned = subtitle_index.filter(|_| max_bitrate.is_some());
+                assert_eq!(d.burn_index, burned, "{max_bitrate:?} {subtitle_index:?}");
+            }
+        }
     }
 
     #[test]
@@ -3168,6 +3799,142 @@ mod tests {
     }
 
     #[test]
+    fn a_report_somewhere_else_than_expected_is_a_change() {
+        let s = session(1, None, false);
+        let reported = |ago: i64| s.play.lock().reported_at_ms = Some(now_ms() - ago * 1000);
+        assert!(!s.update(0, "playing"), "where it started");
+        // Twenty seconds on, playing: twenty seconds further is no jump.
+        reported(20);
+        assert!(!s.update(20_000, "playing"));
+        reported(20);
+        assert!(s.update(60_000 + JUMP_MS + 2_000, "playing"), "a seek forward");
+        assert!(s.update(5_000, "playing"), "a seek back");
+        assert!(s.update(5_000, "paused"));
+        // Paused, it stays where it was however long it has been.
+        reported(60);
+        assert!(!s.update(5_000, "paused"));
+        assert!(s.update(5_000 + JUMP_MS + 1, "paused"), "a seek while paused");
+    }
+
+    #[test]
+    fn a_report_at_another_speed_is_no_jump() {
+        let s = session(1, None, false);
+        assert!(!s.update(0, "playing"));
+        let reported = |ago: i64| s.play.lock().reported_at_ms = Some(now_ms() - ago * 1000);
+        reported(10);
+        assert!(!s.update(20_000, "playing"), "ten seconds at twice the speed");
+        reported(10);
+        assert!(!s.update(25_000, "playing"), "ten seconds at half the speed");
+        reported(10);
+        assert!(s.update(10_000, "playing"), "ten seconds back after ten seconds");
+    }
+
+    #[test]
+    fn requests_for_media_between_reports_are_no_jump() {
+        let s = session(1, None, false);
+        assert!(!s.update(0, "playing"));
+        s.play.lock().reported_at_ms = Some(now_ms() - 10_000);
+        // A segment fetched just now says it is alive, not where it is.
+        s.touch();
+        assert!(!s.update(10_000, "playing"));
+    }
+
+    #[test]
+    fn the_first_report_is_no_jump_however_long_it_took_to_start() {
+        let s = session(1, None, false);
+        s.play.lock().updated_at = now() - 30;
+        assert!(!s.update(0, "playing"), "it started where it began, thirty seconds later");
+        assert!(s.play.lock().reported_at_ms.is_some());
+    }
+
+    #[test]
+    fn commands_are_limited_each_second() {
+        let s = session(1, None, false);
+        assert!((0..COMMANDS_PER_SECOND).all(|_| s.take_command()));
+        assert!(!s.take_command());
+        s.commands.lock().started = Some(std::time::Instant::now() - Duration::from_secs(1));
+        assert!(s.take_command(), "the next second");
+    }
+
+    #[test]
+    fn a_report_says_which_tracks_play() {
+        let mut s = session(1, None, false);
+        s.picked_tracks(Some(1), Some(-1));
+        let tracks = |s: &Session| {
+            let play = s.play.lock();
+            (play.audio_index, play.subtitle_index)
+        };
+        assert!(!s.report_tracks(None, None), "a report that doesn't say");
+        assert!(!s.report_tracks(Some(1), Some(-1)), "the same tracks");
+        assert!(s.report_tracks(Some(2), None));
+        assert_eq!(tracks(&s), (Some(2), Some(-1)), "the subtitles it didn't say stay");
+        assert!(s.report_tracks(None, Some(1003)));
+        assert!(!s.report_tracks(Some(-1), Some(-2)), "no audio is -1, and nothing is -2");
+        assert!(!s.report_tracks(Some(MAX_STREAM_INDEX + 1), Some(i64::MAX)));
+        assert_eq!(tracks(&s), (Some(2), Some(1003)));
+        assert!(s.report_tracks(None, Some(-1)), "subtitles off");
+    }
+
+    #[test]
+    fn track_options_are_the_files_audio_and_subtitles() {
+        let stream = |index, kind, codec: &str| MediaStream { index, kind, codec: codec.into(), ..Default::default() };
+        let mut audio = stream(1, StreamKind::Audio, "eac3");
+        (audio.language, audio.channels, audio.default) = (Some("eng".into()), Some(6), true);
+        let mut forced = stream(1000, StreamKind::Subtitle, "subrip");
+        (forced.title, forced.forced, forced.channels, forced.external) = (Some("Signs".into()), true, Some(2), true);
+        let streams = [stream(0, StreamKind::Video, "hevc"), audio, stream(2, StreamKind::Audio, ""), forced];
+        let options = track_options(&streams);
+        let indexes = |list: &[TrackOption]| list.iter().map(|t| t.index).collect::<Vec<_>>();
+        assert_eq!((indexes(&options.audio), indexes(&options.subtitles)), (vec![1, 2], vec![1000]));
+        let expected = TrackOption {
+            index: 1,
+            language: Some("eng".into()),
+            title: None,
+            codec: Some("eac3".into()),
+            channels: Some(6),
+            default: true,
+            forced: false,
+        };
+        assert_eq!(options.audio[0], expected);
+        assert_eq!(options.audio[1].codec, None, "a codec not known");
+        let signs = &options.subtitles[0];
+        assert_eq!((signs.title.as_deref(), signs.forced, signs.channels), (Some("Signs"), true, None));
+        assert_eq!(
+            serde_json::to_value(TrackOptions::default()).unwrap(),
+            serde_json::json!({"audio": [], "subtitles": []})
+        );
+    }
+
+    #[test]
+    fn controls_are_only_those_known() {
+        let listed = serde_json::json!({"item_id": 1, "controls": ["skip", "fly", 3, "play", "skip"]});
+        let req: PlaybackRequest = serde_json::from_value(listed).unwrap();
+        assert_eq!(req.controls.into_iter().collect::<Vec<_>>(), [Control::Play, Control::Skip]);
+        let req: PlaybackRequest = serde_json::from_value(serde_json::json!({"item_id": 1, "controls": null})).unwrap();
+        assert!(req.controls.is_empty());
+    }
+
+    #[test]
+    fn a_device_kind_is_one_known_or_none() {
+        let kind = |value: serde_json::Value| {
+            let req: PlaybackRequest = serde_json::from_value(serde_json::json!({"item_id": 1, "device_kind": value}))
+                .unwrap_or_else(|e| panic!("{value}: {e}"));
+            req.device_kind
+        };
+        assert_eq!(kind(serde_json::json!("tv")), Some(DeviceKind::Tv));
+        assert_eq!(kind(serde_json::json!("browser")), Some(DeviceKind::Browser));
+        assert_eq!(kind(serde_json::json!("fridge")), None, "a kind this server doesn't know");
+        assert_eq!(kind(serde_json::json!("TV")), None, "names are lower case");
+        assert_eq!(kind(serde_json::json!(3)), None);
+        assert_eq!(kind(serde_json::Value::Null), None);
+        let req: PlaybackRequest = serde_json::from_value(serde_json::json!({"item_id": 1})).unwrap();
+        assert_eq!(req.device_kind, None);
+        assert_eq!(DeviceKind::from_name("tablet"), Some(DeviceKind::Tablet));
+        assert_eq!(DeviceKind::from_name("Tablet"), None);
+        assert_eq!(serde_json::to_string(&DeviceKind::Computer).unwrap(), "\"computer\"");
+    }
+
+    #[test]
     fn background_work_waits_for_quiet() {
         let sessions = Sessions::default();
         assert_eq!(sessions.quiet_for(), i64::MAX, "nothing played since the start");
@@ -3241,5 +4008,150 @@ mod tests {
         let tracks = subtitle_tracks(7, &streams);
         assert_eq!(tracks[0].url.as_deref(), Some("/api/files/7/subtitles/3.vtt"));
         assert_eq!(tracks[1].url, None);
+    }
+
+    /// An Apple player: no Matroska, H.264, HEVC Main 10 and VP9 decoders,
+    /// an HDR10 screen, master playlists, and fMP4 segments before TS.
+    fn apple(segments: &[&str]) -> Caps {
+        serde_json::from_value(serde_json::json!({
+            "containers": ["mp4", "m4v", "mov"], "video_codecs": ["h264", "hevc", "vp9"],
+            "audio_codecs": ["aac", "ac3", "eac3"], "hdr": true, "caps_version": 2,
+            "video": [
+                {"codec": "h264", "hardware": true, "profiles": ["Main", "High"], "max_width": 3840, "max_height": 2160,
+                 "max_bit_depth": 8},
+                {"codec": "hevc", "hardware": true, "profiles": ["Main", "Main 10"], "max_width": 3840, "max_height": 2160,
+                 "max_bit_depth": 10},
+                {"codec": "vp9", "hardware": true, "max_width": 3840, "max_height": 2160, "max_bit_depth": 10}
+            ],
+            "hdr_types": ["hdr10", "hlg"],
+            "audio_decode": ["aac", "ac3", "eac3"],
+            "hls": {"master_playlist": true, "variants": true, "segments": segments}
+        }))
+        .unwrap()
+    }
+
+    fn apple_request(segments: &[&str], fmp4_segments: bool) -> PlaybackRequest {
+        PlaybackRequest { caps: apple(segments), fmp4_segments, hdr_transcodes: true, ..request() }
+    }
+
+    fn hevc_main_10(range: DynamicRange) -> MediaInfo {
+        let mut i = info("hevc", &["eac3"], range);
+        i.streams[0].bit_depth = Some(10);
+        i.streams[0].profile = Some("Main 10".into());
+        i
+    }
+
+    #[test]
+    fn fmp4_segments_go_to_version_2_players_that_put_them_first() {
+        let fmp4 = SegmentFormat::Fmp4;
+        let ts = SegmentFormat::Ts;
+        assert_eq!(apple(&["fmp4", "ts"]).segment_format(true), fmp4);
+        assert_eq!(apple(&["fmp4"]).segment_format(true), fmp4);
+        assert_eq!(apple(&["FMP4"]).segment_format(true), fmp4);
+        // The Android app lists "ts" first: it plays MPEG-TS, as before.
+        assert_eq!(apple(&["ts", "fmp4"]).segment_format(true), ts);
+        assert_eq!(apple(&["ts"]).segment_format(true), ts);
+        assert_eq!(apple(&[]).segment_format(true), ts);
+        // A transcoder that makes no fMP4.
+        assert_eq!(apple(&["fmp4", "ts"]).segment_format(false), ts);
+        // Version 1 reports are never read for it.
+        let mut v1 = apple(&["fmp4"]);
+        v1.caps_version = None;
+        assert_eq!(v1.segment_format(true), ts);
+        assert!(v1.plays_ts_fully());
+        assert!(apple(&["fmp4", "ts"]).plays_ts_fully() && apple(&[]).plays_ts_fully());
+        assert!(!apple(&["fmp4"]).plays_ts_fully());
+
+        // An HEVC Main 10 HDR10 Matroska file: repackaged in fMP4, the
+        // video copied, HDR kept.
+        let hdr10 = hevc_main_10(DynamicRange::Hdr10);
+        let req = apple_request(&["fmp4", "ts"], true);
+        let d = decide(&file("mkv", 20_000_000), Some(&hdr10), &hdr10.streams, &req);
+        assert_eq!((d.method, d.segment_format), (Method::Remux, fmp4));
+        assert_eq!(d.video.as_ref().unwrap().mode, VideoMode::Copy);
+        assert_eq!(d.reasons, ["MKV not supported."]);
+        // A conversion of it is HEVC Main 10 in HDR10, in fMP4.
+        let d = decide(
+            &file("mkv", 20_000_000),
+            Some(&hdr10),
+            &hdr10.streams,
+            &PlaybackRequest { mode: PlaybackMode::Transcode, ..req.clone() },
+        );
+        let v = d.video.unwrap();
+        assert_eq!((d.segment_format, v.codec, v.dynamic_range), (fmp4, VideoCodec::Hevc, OutputRange::Hdr10));
+
+        // A download is one file: no segments.
+        let d =
+            decide(&file("mkv", 20_000_000), Some(&hdr10), &hdr10.streams, &PlaybackRequest { download: true, ..req });
+        assert_eq!((d.segment_format, d.video.unwrap().mode), (ts, VideoMode::Copy));
+
+        // Players listing "ts" first, and version 1 players, get MPEG-TS,
+        // their HEVC copied as before.
+        for caps in [apple(&["ts", "fmp4"]), sideloading_v2(), chrome()] {
+            let req = PlaybackRequest { caps, fmp4_segments: true, ..request() };
+            let d = decide(&file("mkv", 20_000_000), Some(&hdr10), &hdr10.streams, &req);
+            let dts = info("hevc", &["dts"], DynamicRange::Sdr);
+            let remux = decide(&file("mkv", 20_000_000), Some(&dts), &dts.streams, &req);
+            assert_eq!(d.segment_format, ts);
+            assert_eq!((remux.segment_format, remux.video.unwrap().mode), (ts, VideoMode::Copy));
+        }
+    }
+
+    #[test]
+    fn vp9_and_av1_are_copied_into_fmp4_for_players_that_decode_them() {
+        let req = apple_request(&["fmp4", "ts"], true);
+        let vp9 = info("vp9", &["aac"], DynamicRange::Sdr);
+        let d = decide(&file("mkv", 5_000_000), Some(&vp9), &vp9.streams, &req);
+        assert_eq!((d.method, d.segment_format), (Method::Remux, SegmentFormat::Fmp4));
+        assert_eq!(d.video.unwrap().mode, VideoMode::Copy);
+
+        // AV1 isn't among this player's decoders: converted.
+        let av1 = info("av1", &["aac"], DynamicRange::Sdr);
+        let d = decide(&file("mkv", 5_000_000), Some(&av1), &av1.streams, &req);
+        assert_eq!((d.method, d.video.unwrap().mode), (Method::Transcode, VideoMode::Transcode));
+        assert!(d.reasons.iter().any(|r| r == "AV1 video not supported."), "{:?}", d.reasons);
+        // An A17 Pro's or an M3's: copied.
+        let mut a17 = req.clone();
+        a17.caps.video.as_mut().unwrap().push(VideoDecoder {
+            codec: "av1".into(),
+            hardware: true,
+            max_bit_depth: Some(10),
+            ..Default::default()
+        });
+        let d = decide(&file("mkv", 5_000_000), Some(&av1), &av1.streams, &a17);
+        assert_eq!((d.method, d.video.unwrap().mode), (Method::Remux, VideoMode::Copy));
+
+        // Without fMP4 from the transcoder, MPEG-TS can't carry either.
+        for i in [&vp9, &av1] {
+            let mut old = a17.clone();
+            old.fmp4_segments = false;
+            let d = decide(&file("mkv", 5_000_000), Some(i), &i.streams, &old);
+            assert_eq!((d.segment_format, d.video.unwrap().mode), (SegmentFormat::Ts, VideoMode::Transcode));
+        }
+    }
+
+    #[test]
+    fn players_that_take_only_fmp4_get_h264_in_mpeg_ts_from_older_transcoders() {
+        let req = apple_request(&["fmp4"], false);
+        // HEVC is converted, not copied into MPEG-TS.
+        let sdr = hevc_main_10(DynamicRange::Sdr);
+        let d = decide(&file("mkv", 20_000_000), Some(&sdr), &sdr.streams, &req);
+        assert_eq!((d.method, d.segment_format), (Method::Transcode, SegmentFormat::Ts));
+        let v = d.video.unwrap();
+        assert_eq!((v.mode, v.codec), (VideoMode::Transcode, VideoCodec::H264));
+        assert_eq!(d.reasons, ["MKV not supported.", "HEVC not supported in MPEG-TS."]);
+        // HDR too: converted HDR is HEVC, so it becomes H.264 SDR.
+        let hdr10 = hevc_main_10(DynamicRange::Hdr10);
+        let d = decide(&file("mkv", 20_000_000), Some(&hdr10), &hdr10.streams, &req);
+        let v = d.video.unwrap();
+        assert_eq!((v.mode, v.codec, v.dynamic_range), (VideoMode::Transcode, VideoCodec::H264, OutputRange::Sdr));
+        // H.264 is still copied.
+        let h264 = info("h264", &["eac3"], DynamicRange::Sdr);
+        let d = decide(&file("mkv", 5_000_000), Some(&h264), &h264.streams, &req);
+        assert_eq!((d.method, d.video.unwrap().mode), (Method::Remux, VideoMode::Copy));
+        // A download keeps HEVC and HDR: it is a file, not MPEG-TS.
+        let d =
+            decide(&file("mkv", 20_000_000), Some(&hdr10), &hdr10.streams, &PlaybackRequest { download: true, ..req });
+        assert_eq!(d.video.unwrap().mode, VideoMode::Copy);
     }
 }

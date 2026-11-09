@@ -4,6 +4,7 @@ use serde::Serialize;
 use tokio::sync::broadcast;
 
 use crate::discover::TitleKind;
+use crate::playback::Control;
 use crate::requests::{RequestStatus, RequestUser};
 
 /// Whom a request's event is for: the accounts it names (its maker, its
@@ -20,6 +21,9 @@ pub struct Audience {
     /// Left out: the streams of this token (its hash), the session that
     /// caused the event.
     pub except_token: Option<String>,
+    /// Only the streams whose account sees this language: an event with
+    /// Pley's own words in it goes once for each language, worded in it.
+    pub language: Option<&'static str>,
 }
 
 impl Audience {
@@ -34,9 +38,13 @@ impl Audience {
     }
 
     /// Whether a stream of account `user_id`, opened with the token hashed
-    /// `token`, gets the event: `manager` while it manages requests.
-    pub fn reaches(&self, user_id: i64, manager: bool, token: &str) -> bool {
-        if self.except_token.as_deref() == Some(token) || self.except_user == Some(user_id) {
+    /// `token` and seeing `language`, gets the event: `manager` while it
+    /// manages requests.
+    pub fn reaches(&self, user_id: i64, manager: bool, token: &str, language: &str) -> bool {
+        if self.except_token.as_deref() == Some(token)
+            || self.except_user == Some(user_id)
+            || self.language.is_some_and(|l| l != language)
+        {
             return false;
         }
         self.users.contains(&user_id) || (self.managers && manager)
@@ -85,7 +93,14 @@ pub enum ServerEvent {
         #[serde(skip)]
         user_id: i64,
     },
-    SessionsChanged,
+    /// One of the user's playback or Live TV sessions started, stopped,
+    /// went quiet or changed (paused, played, moved): to their streams, whose
+    /// remotes list their sessions again, and to administrators', whose
+    /// dashboard lists everyone's ([`ServerEvent::to_administrators`]).
+    SessionsChanged {
+        #[serde(skip)]
+        user_id: i64,
+    },
     /// The user's My List changed (added, removed, or a movie in it was
     /// watched): their other devices fetch Home again.
     WatchlistChanged {
@@ -104,10 +119,11 @@ pub enum ServerEvent {
         item_ids: Vec<i64>,
         children: bool,
     },
-    /// A playback session was stopped by someone else than its player (an
-    /// administrator, or its owner on another device): the player stops.
-    /// `by_admin` is true when an administrator stopped another user's
-    /// session.
+    /// A playback session was stopped by someone else than its player (who
+    /// oversees playback: an administrator, or one of Pley's own apps
+    /// allowed `activity` on an administrator's account; or its owner on
+    /// another device): the player stops. `by_admin` is true when one who
+    /// oversees playback stopped another user's session.
     SessionStopped {
         #[serde(skip)]
         user_id: i64,
@@ -115,12 +131,71 @@ pub enum ServerEvent {
         message: Option<String>,
         by_admin: bool,
     },
+    /// The user's remote (another of their devices) sent the player of
+    /// `session_id` a command it said it obeys: to that user's streams,
+    /// whose player of that session acts on it and reports at once.
+    /// `position_ms` is where `seek` goes, `offset_ms` how far `skip` goes
+    /// (back when negative), `stream_index` the track `audio` and
+    /// `subtitles` change to (`-1`: subtitles off), `quality` the id of the
+    /// Quality menu's entry `quality` picks; each is `null` for the other
+    /// commands.
+    PlayerCommand {
+        #[serde(skip)]
+        user_id: i64,
+        session_id: String,
+        command: Control,
+        position_ms: Option<i64>,
+        offset_ms: Option<i64>,
+        stream_index: Option<i64>,
+        quality: Option<&'static str>,
+    },
+    /// The user's remote cast a title, a playlist or a Live TV channel to
+    /// one of their devices: to that user's streams, whose app holding
+    /// `receiver_id` plays it as its own Play would. One of `item_id`,
+    /// `playlist_id` and `channel_id` is set; `audio_index` and
+    /// `subtitle_index` (`-1`: none), when set, are the tracks the remote
+    /// had picked for the title, which it plays with; `from` is the
+    /// remote's device. Cast from another profile of the household, it goes
+    /// to the streams of the profile the receiver is on, with the remote's
+    /// profile (`profile_id`) and a ticket (`switch_ticket`) the receiver
+    /// switches to it with first; both are left out otherwise. `device_id`
+    /// is the receiver's device, which such a cast goes to alone.
+    Cast {
+        #[serde(skip)]
+        user_id: i64,
+        receiver_id: String,
+        #[serde(skip)]
+        device_id: String,
+        item_id: Option<i64>,
+        playlist_id: Option<i64>,
+        channel_id: Option<i64>,
+        start_ms: Option<i64>,
+        shuffle: bool,
+        audio_index: Option<i64>,
+        subtitle_index: Option<i64>,
+        from: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        profile_id: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        switch_ticket: Option<SwitchTicket>,
+    },
     /// Live TV's sources, channels or guide changed: apps fetch the
     /// channels and the guide again.
     LiveChannelsChanged,
     /// A live channel started or stopped being pulled, or someone started
     /// or stopped watching one: the connections in use changed.
     LiveTunersChanged,
+    /// Someone took the connection a Live TV session's channel used, to
+    /// watch another channel: to its viewer's streams, whose player of
+    /// `session_id` stops at once and shows `message` (why, and who only
+    /// when both are in the home).
+    LiveTakenOver {
+        #[serde(skip)]
+        user_id: i64,
+        session_id: String,
+        channel_id: i64,
+        message: String,
+    },
     /// A request changed (made, followed, decided, sent, failed, ready,
     /// withdrawn, deleted, or its stage), to its maker, its followers and
     /// managers; or many did (`request_id`, `kind` and `tmdb_id` all
@@ -184,6 +259,7 @@ pub enum ServerEvent {
         request_id: i64,
         title: String,
         kind: TitleKind,
+        /// In the language of the streams it goes to (`to.language`).
         reason: String,
         retry_at: Option<i64>,
     },
@@ -198,6 +274,18 @@ pub enum ServerEvent {
     },
 }
 
+/// A cast's switch ticket (see `ServerEvent::Cast`): sent as it is, never
+/// shown in Debug output, which logs may carry.
+#[derive(Clone, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct SwitchTicket(pub String);
+
+impl std::fmt::Debug for SwitchTicket {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SwitchTicket(..)")
+    }
+}
+
 impl ServerEvent {
     /// The library the event is about, if it is about one.
     pub fn library_id(&self) -> Option<i64> {
@@ -208,12 +296,15 @@ impl ServerEvent {
             | ServerEvent::LibraryChanged { library_id } => Some(*library_id),
             ServerEvent::LibrariesChanged
             | ServerEvent::OwnLibrariesChanged { .. }
-            | ServerEvent::SessionsChanged
+            | ServerEvent::SessionsChanged { .. }
             | ServerEvent::WatchlistChanged { .. }
             | ServerEvent::UserStateChanged { .. }
             | ServerEvent::SessionStopped { .. }
+            | ServerEvent::PlayerCommand { .. }
+            | ServerEvent::Cast { .. }
             | ServerEvent::LiveChannelsChanged
             | ServerEvent::LiveTunersChanged
+            | ServerEvent::LiveTakenOver { .. }
             | ServerEvent::RequestsChanged { .. }
             | ServerEvent::RequestAvailable { .. }
             | ServerEvent::RequestDecided { .. }
@@ -229,11 +320,32 @@ impl ServerEvent {
         match self {
             ServerEvent::WatchlistChanged { user_id }
             | ServerEvent::OwnLibrariesChanged { user_id }
+            | ServerEvent::SessionsChanged { user_id }
             | ServerEvent::UserStateChanged { user_id, .. }
-            | ServerEvent::SessionStopped { user_id, .. } => Some(*user_id),
+            | ServerEvent::SessionStopped { user_id, .. }
+            | ServerEvent::PlayerCommand { user_id, .. }
+            | ServerEvent::Cast { user_id, .. }
+            | ServerEvent::LiveTakenOver { user_id, .. } => Some(*user_id),
             ServerEvent::RequestsSettingsChanged { user_id } => *user_id,
             _ => None,
         }
+    }
+
+    /// The one receiver whose streams alone get the event, by its id and
+    /// its device: a cast from another profile of the household, whose
+    /// title and switch ticket are the receiver's to see, not every device
+    /// of the profile it is on, nor another that names the same id.
+    pub fn receiver_only(&self) -> Option<(&str, &str)> {
+        match self {
+            ServerEvent::Cast { receiver_id, device_id, switch_ticket: Some(_), .. } => Some((receiver_id, device_id)),
+            _ => None,
+        }
+    }
+
+    /// Whether administrators' streams get the event too, whoever's it is:
+    /// their dashboard lists everyone's sessions.
+    pub fn to_administrators(&self) -> bool {
+        matches!(self, ServerEvent::SessionsChanged { .. })
     }
 
     /// Whom a request's event is for.
@@ -270,6 +382,14 @@ impl EventBus {
         let _ = self.tx.send(event);
     }
 
+    /// `sessions_changed` to each of these users once, however many of
+    /// their sessions changed together (a sweep, a take-over).
+    pub fn sessions_changed(&self, users: impl IntoIterator<Item = i64>) {
+        for user_id in users.into_iter().collect::<std::collections::BTreeSet<_>>() {
+            self.send(ServerEvent::SessionsChanged { user_id });
+        }
+    }
+
     pub fn subscribe(&self) -> broadcast::Receiver<ServerEvent> {
         self.tx.subscribe()
     }
@@ -298,6 +418,18 @@ mod tests {
         assert_eq!(event.user_id(), Some(4));
         let json = serde_json::to_string(&event).unwrap();
         assert_eq!(json, r#"{"type":"user_state_changed","item_ids":[12,11,10],"children":false}"#);
+        let event = ServerEvent::LiveTakenOver {
+            user_id: 4,
+            session_id: "abc".into(),
+            channel_id: 7,
+            message: "Someone else needed the connection.".into(),
+        };
+        assert_eq!(event.user_id(), Some(4));
+        let json = serde_json::to_string(&event).unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"live_taken_over","session_id":"abc","channel_id":7,"message":"Someone else needed the connection."}"#
+        );
         let json = serde_json::to_string(&ServerEvent::SessionStopped {
             user_id: 4,
             session_id: "s1".into(),
@@ -306,6 +438,67 @@ mod tests {
         })
         .unwrap();
         assert_eq!(json, r#"{"type":"session_stopped","session_id":"s1","message":null,"by_admin":true}"#);
+        // Sessions' changes go to their user, and administrators.
+        let event = ServerEvent::SessionsChanged { user_id: 4 };
+        assert_eq!((event.user_id(), event.to_administrators()), (Some(4), true));
+        assert_eq!(serde_json::to_string(&event).unwrap(), r#"{"type":"sessions_changed"}"#);
+        assert!(!ServerEvent::WatchlistChanged { user_id: 4 }.to_administrators());
+        let event = ServerEvent::PlayerCommand {
+            user_id: 4,
+            session_id: "s1".into(),
+            command: Control::Seek,
+            position_ms: Some(90_000),
+            offset_ms: None,
+            stream_index: None,
+            quality: None,
+        };
+        assert_eq!(event.user_id(), Some(4), "to the session's user only");
+        assert_eq!(
+            serde_json::to_string(&event).unwrap(),
+            r#"{"type":"player_command","session_id":"s1","command":"seek","position_ms":90000,"offset_ms":null,"stream_index":null,"quality":null}"#
+        );
+        let event = ServerEvent::Cast {
+            user_id: 4,
+            receiver_id: "tv-1".into(),
+            device_id: "app-7".into(),
+            item_id: Some(12),
+            playlist_id: None,
+            channel_id: None,
+            start_ms: None,
+            shuffle: false,
+            audio_index: Some(2),
+            subtitle_index: Some(-1),
+            from: Some("Chrome on Windows".into()),
+            profile_id: None,
+            switch_ticket: None,
+        };
+        assert_eq!((event.user_id(), event.to_administrators()), (Some(4), false), "to the receiver's user only");
+        assert_eq!(event.receiver_only(), None, "a cast of their own reaches all their streams");
+        assert_eq!(
+            serde_json::to_string(&event).unwrap(),
+            r#"{"type":"cast","receiver_id":"tv-1","item_id":12,"playlist_id":null,"channel_id":null,"start_ms":null,"shuffle":false,"audio_index":2,"subtitle_index":-1,"from":"Chrome on Windows"}"#
+        );
+        let event = ServerEvent::Cast {
+            user_id: 5,
+            receiver_id: "tv-1".into(),
+            device_id: "app-7".into(),
+            item_id: Some(12),
+            playlist_id: None,
+            channel_id: None,
+            start_ms: None,
+            shuffle: false,
+            audio_index: None,
+            subtitle_index: None,
+            from: None,
+            profile_id: Some(4),
+            switch_ticket: Some(SwitchTicket("t1".into())),
+        };
+        assert_eq!(event.user_id(), Some(5), "to the profile the receiver is on");
+        assert_eq!(event.receiver_only(), Some(("tv-1", "app-7")), "and only to that receiver's streams");
+        assert!(!format!("{event:?}").contains("t1"), "a ticket is never in Debug output");
+        assert!(
+            serde_json::to_string(&event).unwrap().ends_with(r#""from":null,"profile_id":4,"switch_ticket":"t1"}"#)
+        );
         // Request events say whom they are for, and stay off the
         // per-user path.
         let event = ServerEvent::RequestsChanged {
@@ -357,16 +550,30 @@ mod tests {
     }
 
     #[test]
+    fn sessions_changed_goes_once_to_each_user() {
+        let bus = EventBus::new();
+        let mut events = bus.subscribe();
+        bus.sessions_changed([7, 4, 7]);
+        let mut users = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            users.push(event.user_id());
+        }
+        assert_eq!(users, vec![Some(4), Some(7)]);
+    }
+
+    #[test]
     fn an_audience_names_accounts_and_managers() {
         let to = Audience::of(vec![4]);
-        assert!(to.reaches(4, false, "a"), "named");
-        assert!(to.reaches(7, true, "b"), "a manager");
-        assert!(!to.reaches(7, false, "b"), "neither");
+        assert!(to.reaches(4, false, "a", "en"), "named");
+        assert!(to.reaches(7, true, "b", "fr"), "a manager");
+        assert!(!to.reaches(7, false, "b", "en"), "neither");
         let only = Audience::only(vec![4]);
-        assert!(!only.reaches(7, true, "b"), "not for managers");
+        assert!(!only.reaches(7, true, "b", "en"), "not for managers");
         let created = Audience { except_user: Some(4), ..Audience::of(Vec::new()) };
-        assert!(!created.reaches(4, true, "a") && created.reaches(7, true, "b"), "its maker is left out");
+        assert!(!created.reaches(4, true, "a", "en") && created.reaches(7, true, "b", "en"), "its maker is left out");
         let seen = Audience { except_token: Some("a".into()), ..Audience::only(vec![4]) };
-        assert!(!seen.reaches(4, false, "a") && seen.reaches(4, false, "c"), "the account's other streams");
+        assert!(!seen.reaches(4, false, "a", "en") && seen.reaches(4, false, "c", "en"), "the account's other streams");
+        let french = Audience { language: Some("fr"), ..Audience::of(Vec::new()) };
+        assert!(french.reaches(7, true, "b", "fr") && !french.reaches(7, true, "b", "es"), "worded in its language");
     }
 }

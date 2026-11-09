@@ -110,17 +110,19 @@
     <string name="settings_about">About</string>
     <string name="settings_version">Version</string>
     <string name="settings_licences">Open-source licences</string>
-    <string name="settings_licences_value">AndroidX, Media3, OkHttp, Coil, kotlinx, Lucide, QR Code generator</string>
+    <string name="settings_licences_value" translatable="false">AndroidX, Media3, OkHttp, Coil, kotlinx, Lucide, QR Code generator</string>
 
     <!-- Diagnostics. -->
     <string name="diagnostics_device">This device</string>
     <string name="diagnostics_app">App</string>
-    <string name="diagnostics_app_value">Pley %1$s</string>
+    <string name="diagnostics_app_value" translatable="false">Pley %1$s</string>
     <string name="diagnostics_plays">What it plays</string>
     <string name="diagnostics_probing">Checking what this device plays…</string>
     <string name="diagnostics_probe_failed">The check of this device failed.</string>
     <string name="diagnostics_probe_again">Check again</string>
     <string name="diagnostics_report">What Pley tells the server</string>
+    <string name="diagnostics_show_frame_rate">Show frame rate</string>
+    <string name="diagnostics_show_frame_rate_hint">At the top while something moves: frames a second, the longest frame, and late frames</string>
     <string name="diagnostics_copy">Copy</string>
     <string name="diagnostics_copied">Copied</string>
 </resources>

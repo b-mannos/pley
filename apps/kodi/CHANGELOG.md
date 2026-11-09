@@ -8,6 +8,137 @@ describes how they are made.
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-11-06
+
+### Added
+
+- The add-on is in French and Spanish too: in your profile's language,
+  else the one chosen in the add-on's settings (Screens → Language), else
+  Kodi's, else the server's. Profile language, in the profile's menu and
+  the add-on's settings, sets it for your profile on all your devices; on
+  a server from before languages it is kept on this device. Dates,
+  numbers and counts are written in the language shown, and what the
+  server writes itself, such as Home's rows, comes in it.
+- Sent from a device on another profile of your household, Kodi switches
+  to that profile first, and plays it as that profile. Needs a server from
+  the same release.
+
+### Changed
+
+- Pley's window opens straight on Home as the profile Kodi was left on
+  when it has no PIN, where a household of several profiles was asked
+  "Who's watching?" each time Kodi started. A profile with a PIN still
+  asks first, and Switch profile still shows every profile.
+- What your phone, the web or another device does to a film or episode
+  playing on Kodi shows for a moment as a quiet Kodi notification:
+  "Paused", "Playing", "+30 s", "Jumped to 12:34", or the audio,
+  subtitles or quality picked.
+
+## [0.1.6] - 2026-11-05
+
+### Added
+
+- Your phone, the web and your other devices control what Kodi plays:
+  play, pause, seek and skip, the next title in Kodi's queue or the next
+  episode, the next or previous track, and channel up and down on Live TV.
+  Remotes list Kodi with your TVs, by the device name it was given in
+  Kodi's settings. Needs a server from the same release.
+- Your phone, the web and your other devices change the audio and subtitles
+  of what Kodi plays, and see which ones play. A pick is saved for the show
+  or movie, as one made in Kodi's player is.
+- Your phone, the web and your other devices play things on Kodi: a film,
+  an episode, a show's next episode, music, a playlist or a Live TV
+  channel, in place of what plays. Kodi says which device sent it.
+- Your phone, the web and your other devices change the quality of a film
+  or episode playing on Kodi: the Quality setting changes, as picking it
+  there does, and the title plays again where it was. They see which
+  quality is picked. A film or episode they send plays with the audio and
+  subtitles picked on its page.
+- Live TV stopped from another device, or by the server's administrator,
+  says so, with their message.
+- Stopping a Live TV channel, or Kodi, frees its connection at once, so
+  another channel or device can use it straight away.
+
+### Changed
+
+- Requests: a sign-in from before the app could ask says "Sign in again to ask for movies
+  and shows" without a second line, and its button reads Sign in.
+
+## [0.1.5] - 2026-11-04
+
+### Changed
+
+- The add-on's fanart shows Pley's mark and name centred, the name closer
+  to the mark.
+
+## [0.1.4] - 2026-11-03
+
+### Added
+
+- Libraries filter by resolution and dynamic range, in the Filter menu
+  after Year, where their titles differ in them. The Filter chip says
+  what is chosen, and Save as… keeps them. Needs a server from the same
+  release.
+- Library posters show "4K" and their dynamic range ("DV", "HDR+",
+  "HDR", "HLG") while the library is sorted by bitrate or filtered by
+  resolution or dynamic range.
+- Libraries sort by your rating and by bitrate, as on the other apps;
+  sorted by bitrate, the line under each poster is its bitrate and size.
+
+### Changed
+
+- Search shows movies, shows and episodes first, then music, then Live
+  TV, then people, the closest matches first in each.
+- A Live TV channel whose connection someone else takes over stops at
+  once and says who or why under "Live TV stopped", with Watch again,
+  where it said only "The server stopped this stream."
+- Search finds up to 200 titles, people and Live TV channels each, where
+  it stopped at 100 titles, 12 people and 12 channels. People and
+  channels past 12 need a server from the same release.
+- The rail's entries are smaller, as on the other TV apps, and it lists
+  five libraries (four beside Live TV) instead of three before Libraries
+  takes Collections' place.
+- A library's sorts are the other apps' for its kind: shows no longer
+  sort by duration, and music sorts by title, date added, your rating and
+  last played.
+
+## [0.1.3] - 2026-11-02
+
+### Changed
+
+- Starting a stream with VobSub or DVB subtitles no longer has the server
+  copy them out of the film for nothing: Kodi has them drawn onto the
+  video, and on a network share the copy could read the whole film.
+  Needs a server from the same release.
+
+### Fixed
+
+- Stopping a show or movie no longer turns its subtitles off for the next
+  time: Kodi turns them off as it stops, and that could be saved as the
+  choice. A track changed in Kodi's player is saved once it has held 2
+  seconds, so one changed just before stopping isn't.
+- Changing the audio no longer turns a show's or movie's subtitles off for
+  the next time when Kodi couldn't show them (PGS whose file didn't load):
+  the add-on turns them off then, and that was saved with the audio.
+
+### Security
+
+- Before the token goes to the server's address, the server proves it is
+  the one Kodi signed in to, at that address: the access token waits for a
+  proof made on this network within the half hour, the refresh token, a
+  profile's PIN and signing out for one made then. Another device at the
+  address on another network gets nothing, nor does one passing the
+  challenge on to the server from elsewhere; Pley says another device
+  answers at the server's address. One that takes the address on Kodi's own
+  network may get an access token (an hour's) within the half hour, never
+  the refresh token. A sign-in from before starts checking within the hour,
+  as its token is renewed.
+- After Change server, a request still waiting on the server left behind
+  is never sent there again with the new server's token: when that server
+  refuses its token, it gets nothing more and the request ends signed out.
+- The server left behind can't sign the add-on out of the new one either,
+  by refusing late a token renewal it held.
+
 ## [0.1.2] - 2026-11-02
 
 ### Fixed
@@ -115,7 +246,12 @@ describes how they are made.
 - First release with a version of its own (builds before it carried 0.2.0,
   the version every app shared).
 
-[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-02...HEAD
+[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-06...HEAD
+[0.1.7]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-06
+[0.1.6]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-05
+[0.1.5]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-04
+[0.1.4]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-03
+[0.1.3]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-02.2
 [0.1.2]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-02
 [0.1.1]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-01
 [0.1.0]: https://github.com/pley-media-server/pley/tree/94985f768f39f4a230060cb47af9498ee8779ddf

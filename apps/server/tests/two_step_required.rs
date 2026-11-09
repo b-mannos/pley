@@ -177,6 +177,8 @@ async fn requiring_it_signs_out_whatever_signed_in_with_a_password_alone() {
     // The kid's profile on two TVs, one allowed by each of them.
     let kid_by_bob = app_allowed_by(&app, kid, bob_id).await;
     let kid_by_carol = app_allowed_by(&app, kid, carol_id).await;
+    let (bob_tool, carol_tool) =
+        (app.compatibility_token(&bob, "play").await, app.compatibility_token(&carol, "play").await);
     assert_eq!(signed_in(&app, bob_id).await, (1, 2));
 
     assert_eq!(require(&app, &admin, true).await.status, StatusCode::OK);
@@ -187,11 +189,19 @@ async fn requiring_it_signs_out_whatever_signed_in_with_a_password_alone() {
     }
     assert_eq!(refresh(&app, &bob_refresh).await.body["error"], "invalid_grant");
     assert_eq!(signed_in(&app, bob_id).await, (0, 0));
+    assert_eq!(app.jf(Method::GET, "/UserViews", &bob_tool, None).await.status, StatusCode::UNAUTHORIZED);
+    let tokens: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM compatibility_tokens WHERE user_id = ?")
+        .bind(bob_id)
+        .fetch_one(&app.state.db.read)
+        .await
+        .unwrap();
+    assert_eq!(tokens, 0, "his tokens for other apps ended");
     // Whoever uses it carries on, with the managed profiles they allowed.
     for token in [&admin, &carol, &carol_app, &kid_by_carol] {
         assert_eq!(app.get("/api/auth/me", token).await.status, StatusCode::OK);
     }
     assert_eq!(refresh(&app, &carol_refresh).await.status, StatusCode::OK);
+    assert_eq!(app.jf(Method::GET, "/UserViews", &carol_tool, None).await.status, StatusCode::OK);
 
     // Required no more: a password alone signs in again.
     assert_eq!(require(&app, &admin, false).await.status, StatusCode::OK);
@@ -233,7 +243,8 @@ async fn signing_in_sets_it_up_right_after_the_password() {
     assert_eq!(secret_of(&letters), secret);
     assert!(letters.text().contains("6-digit code"), "{}", letters.text());
 
-    let done = sign_in_with(&app, "bob", "test-pass-1", &id, Some(&code_at(&secret, now()))).await;
+    let first = code_at(&secret, now());
+    let done = sign_in_with(&app, "bob", "test-pass-1", &id, Some(&first)).await;
     assert_eq!(done.status, StatusCode::OK, "{}", done.text());
     assert!(done.headers.get(header::SET_COOKIE).is_some());
     assert_eq!(done.body["user"]["two_step"], true);
@@ -247,8 +258,11 @@ async fn signing_in_sets_it_up_right_after_the_password() {
     let asked = sign_in(&app, "bob", "test-pass-1", None).await;
     assert_eq!(asked.body["code"], "two_step", "{}", asked.text());
     assert!(asked.body.get("setup").is_none());
-    let again = sign_in(&app, "bob", "test-pass-1", Some(&code_at(&secret, now()))).await;
+    // That code itself: the app's code now is a new one once its 30 seconds
+    // are up.
+    let again = sign_in(&app, "bob", "test-pass-1", Some(&first)).await;
     assert_eq!(again.body["code"], "two_step", "the code that set it up was used");
+    assert!(again.text().contains("used already"), "{}", again.text());
     let next = sign_in(&app, "bob", "test-pass-1", Some(&next_code(&secret))).await;
     assert_eq!(next.status, StatusCode::OK, "{}", next.text());
     assert!(next.body.get("recovery_codes").is_none());
@@ -457,10 +471,12 @@ async fn a_session_or_app_that_slips_past_the_sign_out_doesnt_work() {
     let admin = app.setup_admin().await;
     let (bob, bob_id) = app.user(&admin, "bob", json!({})).await;
     let (bob_app, bob_refresh) = app.app_token(bob_id, "library").await;
+    let bob_tool = app.compatibility_token(&bob, "play").await;
     // As if bob had signed in just as it became required.
     app.state.auth.require_two_step(true);
     assert_eq!(app.get("/api/auth/me", &bob).await.status, StatusCode::UNAUTHORIZED);
     assert_eq!(app.get("/api/auth/me", &bob_app).await.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(app.jf(Method::GET, "/UserViews", &bob_tool, None).await.status, StatusCode::UNAUTHORIZED);
     let refused = refresh(&app, &bob_refresh).await;
     assert_eq!(refused.body["error"], "invalid_grant");
     assert!(refused.text().contains("two-step"), "{}", refused.text());
@@ -468,6 +484,7 @@ async fn a_session_or_app_that_slips_past_the_sign_out_doesnt_work() {
     app.state.auth.require_two_step(false);
     assert_eq!(app.get("/api/auth/me", &bob).await.status, StatusCode::OK);
     assert_eq!(app.get("/api/auth/me", &bob_app).await.status, StatusCode::OK);
+    assert_eq!(app.jf(Method::GET, "/UserViews", &bob_tool, None).await.status, StatusCode::OK);
     assert_eq!(refresh(&app, &bob_refresh).await.status, StatusCode::OK);
 }
 
@@ -477,37 +494,44 @@ async fn compatibility_stream_addresses_stop_with_the_sign_out() {
 
     let (app, admin, _) = with_admin().await;
     let admin_id = app.get("/api/auth/me", &admin).await.body["id"].as_i64().unwrap();
-    let (_, bob_id) = app.user(&admin, "bob", json!({})).await;
+    let (bob, bob_id) = app.user(&admin, "bob", json!({})).await;
     app.media_file("movies/Film (2020).mkv", 2048);
     let movies = app.library(&admin, "Movies", "movies", "movies").await;
     let film = app.ids(movies, &admin).await["Film"];
     let file = app.file_of(film).await;
-    // Streams a compatibility client started, as the transcoder would have.
+    app.compatibility_token(&bob, "play").await;
+    app.compatibility_token(&admin, "play").await;
+    let tokens: Vec<(i64, i64)> =
+        sqlx::query_as("SELECT user_id, id FROM compatibility_tokens").fetch_all(&app.state.db.read).await.unwrap();
+    // Streams compatibility clients started, as the transcoder would have.
     let stream = |user: i64| {
         let spec = TranscodeSpec { request: Default::default(), segment_count: 1, duration_ms: 1000 };
-        let session =
+        let mut session =
             Session::new(user, "u".into(), None, film, file, Play::Transcode, 1000, Some(spec), Some("job".into()), 0);
+        session.compatibility_token = tokens.iter().find(|(owner, _)| *owner == user).map(|(_, id)| *id);
         app.state.sessions.insert(session).id.clone()
     };
+    let item = app.jf_item(film);
     let playlist = |session: &str| {
         let req = axum::http::Request::builder()
-            .uri(format!("/video/:/transcode/universal/session/{session}/base/index.m3u8"))
+            .uri(format!("/Videos/{item}/hls1/{session}/index.m3u8"))
             .body(axum::body::Body::empty())
             .unwrap();
-        let plex = app.plex.clone();
-        async move { tower::ServiceExt::oneshot(plex, req).await.unwrap().status() }
+        let jellyfin = app.jellyfin.clone();
+        async move { tower::ServiceExt::oneshot(jellyfin, req).await.unwrap().status() }
     };
     let (bobs, admins) = (stream(bob_id), stream(admin_id));
     // No transcoder runs here: they get as far as asking it.
     assert_ne!(playlist(&bobs).await, StatusCode::NOT_FOUND);
 
     assert_eq!(require(&app, &admin, true).await.status, StatusCode::OK);
-    // bob signed in with his password alone: his stream stops with the rest.
+    // bob signed in with his password alone: his token ends, and his stream
+    // with it.
     assert_eq!(playlist(&bobs).await, StatusCode::NOT_FOUND);
     assert_ne!(playlist(&admins).await, StatusCode::NOT_FOUND, "whoever uses it goes on");
-    // Not required any more: it goes on too.
+    // Not required any more: the token is gone, and so is the stream.
     require(&app, &admin, false).await;
-    assert_ne!(playlist(&bobs).await, StatusCode::NOT_FOUND);
+    assert_eq!(playlist(&bobs).await, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

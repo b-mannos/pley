@@ -32,11 +32,13 @@ struct UserRow {
     avatar_color: Option<String>,
     all_libraries: bool,
     max_age: Option<i64>,
+    max_age_system: Option<String>,
     disabled: bool,
     created_at: i64,
     audio_language: Option<String>,
     subtitle_language: Option<String>,
     subtitle_mode: String,
+    language: Option<String>,
     has_password: bool,
     two_step: bool,
     request_access: String,
@@ -61,12 +63,31 @@ pub struct UserDto {
     pub all_libraries: bool,
     pub library_ids: Vec<i64>,
     pub max_age: Option<i64>,
+    /// The rating system `max_age` was chosen in and is shown in (see
+    /// `GET /api/ratings/systems`): a country, or "age"; `None`: the
+    /// metadata region's.
+    pub max_age_system: Option<String>,
+    /// For administrators only (see [`for_administrators`]): the month and
+    /// year the profile was born ("2015-03") when its age limit is its age.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub birth_month: Option<String>,
+    /// For administrators only (see [`for_administrators`]): labels whose
+    /// titles the profile sees even above its age limit, and labels whose
+    /// titles it never sees (see `catalog::VISIBLE`). A profile isn't told
+    /// its own: a child shouldn't read "Override: Adult".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_labels: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hide_labels: Option<Vec<String>>,
     pub disabled: bool,
     pub created_at: i64,
     /// Default tracks for titles without a choice (see `crate::streams`).
     pub audio_language: Option<String>,
     pub subtitle_language: Option<String>,
     pub subtitle_mode: SubtitleMode,
+    /// The language the account sees Pley in (see `crate::i18n`); `None`:
+    /// the server's.
+    pub language: Option<String>,
     /// Signs in with a password: false for a managed profile (reached by
     /// switching), and for an account without one until an administrator
     /// gives it one.
@@ -79,8 +100,8 @@ pub struct UserDto {
 }
 
 const USER_COLUMNS: &str = "id, username, display_name, is_admin, managed, home, pin_hash IS NOT NULL AS has_pin,
-    avatar, avatar_color, all_libraries, max_age, disabled, created_at, audio_language, subtitle_language,
-    subtitle_mode, password_hash NOT LIKE '!%' AS has_password,
+    avatar, avatar_color, all_libraries, max_age, max_age_system, disabled, created_at, audio_language, subtitle_language,
+    subtitle_mode, language, password_hash NOT LIKE '!%' AS has_password,
     EXISTS (SELECT 1 FROM two_step t WHERE t.user_id = users.id) AS two_step, request_access";
 
 impl UserRow {
@@ -99,11 +120,16 @@ impl UserRow {
             all_libraries: self.all_libraries || self.is_admin,
             library_ids,
             max_age: if self.is_admin { None } else { self.max_age },
+            max_age_system: if self.is_admin { None } else { self.max_age_system },
+            birth_month: None,
+            show_labels: None,
+            hide_labels: None,
             disabled: self.disabled,
             created_at: self.created_at,
             audio_language: self.audio_language,
             subtitle_language: self.subtitle_language,
             subtitle_mode: SubtitleMode::parse(&self.subtitle_mode),
+            language: self.language,
             has_password: self.has_password,
             two_step: self.two_step,
             request_access: if self.is_admin {
@@ -159,6 +185,166 @@ pub async fn users(db: &Db) -> sqlx::Result<Vec<UserDto>> {
             r.into_dto(libraries)
         })
         .collect())
+}
+
+/// The oldest age any rating is for: a limit that follows a birthday ends
+/// there.
+pub const BIRTHDAY_LIMIT_ENDS: i64 = 21;
+
+/// `users` as administrators see them, with their birthdays and label
+/// rules: no other answer carries them.
+pub async fn for_administrators(db: &Db, mut users: Vec<UserDto>) -> sqlx::Result<Vec<UserDto>> {
+    let months: HashMap<i64, String> =
+        sqlx::query_as("SELECT id, birth_month FROM users WHERE birth_month IS NOT NULL")
+            .fetch_all(&db.read)
+            .await?
+            .into_iter()
+            .collect();
+    let rules: Vec<(i64, String, String)> =
+        sqlx::query_as("SELECT user_id, label, kind FROM user_label_rules ORDER BY label COLLATE NOCASE")
+            .fetch_all(&db.read)
+            .await?;
+    for user in &mut users {
+        let (mut show, mut hide) = (Vec::new(), Vec::new());
+        if !user.is_admin {
+            for (_, label, kind) in rules.iter().filter(|(id, ..)| *id == user.id) {
+                if kind == "show" { &mut show } else { &mut hide }.push(label.clone());
+            }
+        }
+        user.birth_month = if user.is_admin { None } else { months.get(&user.id).cloned() };
+        user.show_labels = Some(show);
+        user.hide_labels = Some(hide);
+    }
+    Ok(users)
+}
+
+/// Most labels in each of a profile's lists of rules.
+pub const MAX_LABEL_RULES: usize = 50;
+
+/// `labels` as a profile's rules keep them (see `labels::check`), at most
+/// [`MAX_LABEL_RULES`] of them.
+pub fn check_label_rules(labels: &[String]) -> Result<Vec<String>, AppError> {
+    let kept = crate::labels::check(labels)?;
+    if kept.len() > MAX_LABEL_RULES {
+        return Err(AppError::bad_request(format!("at most {MAX_LABEL_RULES} labels in each list")));
+    }
+    Ok(kept)
+}
+
+/// Refuses a label both always and never shown: which one was meant isn't
+/// known.
+pub fn check_rules_apart(show: &[String], hide: &[String]) -> Result<(), AppError> {
+    match show.iter().find(|s| hide.iter().any(|h| h.eq_ignore_ascii_case(s))) {
+        Some(label) => Err(AppError::bad_request(format!("\"{label}\" is both always and never shown"))),
+        None => Ok(()),
+    }
+}
+
+/// Replaces a profile's rules of `kind` ("show" or "hide") with `labels`
+/// (checked by [`check_label_rules`]).
+pub async fn set_label_rules(db: &Db, user_id: i64, kind: &str, labels: &[String]) -> sqlx::Result<()> {
+    let mut tx = db.write.begin().await?;
+    sqlx::query("DELETE FROM user_label_rules WHERE user_id = ? AND kind = ?")
+        .bind(user_id)
+        .bind(kind)
+        .execute(&mut *tx)
+        .await?;
+    add_label_rules(&mut tx, user_id, kind, labels).await?;
+    tx.commit().await
+}
+
+/// Adds `labels` to a profile's rules of `kind`, within `conn`'s
+/// transaction: a profile made with rules never exists without them.
+pub async fn add_label_rules(
+    conn: &mut sqlx::SqliteConnection,
+    user_id: i64,
+    kind: &str,
+    labels: &[String],
+) -> sqlx::Result<()> {
+    for label in labels {
+        sqlx::query("INSERT OR REPLACE INTO user_label_rules (user_id, label, kind) VALUES (?, ?, ?)")
+            .bind(user_id)
+            .bind(label)
+            .bind(kind)
+            .execute(&mut *conn)
+            .await?;
+    }
+    Ok(())
+}
+
+/// A profile's rules of `kind` ("show" or "hide").
+pub async fn label_rules(db: &Db, user_id: i64, kind: &str) -> sqlx::Result<Vec<String>> {
+    sqlx::query_scalar(
+        "SELECT label FROM user_label_rules WHERE user_id = ? AND kind = ? ORDER BY label COLLATE NOCASE",
+    )
+    .bind(user_id)
+    .bind(kind)
+    .fetch_all(&db.read)
+    .await
+}
+
+/// The server's local month, "2026-11".
+pub async fn local_month(db: &Db) -> sqlx::Result<String> {
+    sqlx::query_scalar("SELECT strftime('%Y-%m', 'now', 'localtime')").fetch_one(&db.read).await
+}
+
+fn year_month(text: &str) -> Option<(i64, i64)> {
+    let (year, month) = text.split_once('-')?;
+    if year.len() != 4 || month.len() != 2 {
+        return None;
+    }
+    let (year, month) = (year.parse().ok()?, month.parse().ok()?);
+    (1..=12).contains(&month).then_some((year, month))
+}
+
+/// The age limit of someone born in `birth_month` during `month`: their age,
+/// which goes up on the first of the month they were born in; `None` from
+/// [`BIRTHDAY_LIMIT_ENDS`].
+pub fn birthday_limit(birth_month: &str, month: &str) -> Option<i64> {
+    let ((born, born_in), (year, now_in)) = (year_month(birth_month)?, year_month(month)?);
+    let age = (year - born - i64::from(now_in < born_in)).max(0);
+    (age < BIRTHDAY_LIMIT_ENDS).then_some(age)
+}
+
+/// A birth month as given, checked: "2015-03", not after `month` and not
+/// more than 120 years before it.
+pub fn check_birth_month(text: &str, month: &str) -> Result<String, AppError> {
+    let invalid = || AppError::bad_request("the birthday must be a month and year (YYYY-MM), not in the future");
+    let text = text.trim();
+    let (born, born_in) = year_month(text).ok_or_else(invalid)?;
+    let (year, now_in) = year_month(month).ok_or_else(invalid)?;
+    if (born, born_in) > (year, now_in) || year - born > 120 {
+        return Err(invalid());
+    }
+    Ok(text.to_owned())
+}
+
+/// Keep the age limits that follow birthdays equal to the profiles' ages,
+/// in the server's local month. Returns the profiles whose limit changed.
+pub async fn birthday_ages(db: &Db) -> sqlx::Result<Vec<i64>> {
+    let month = local_month(db).await?;
+    let rows: Vec<(i64, String, Option<i64>)> =
+        sqlx::query_as("SELECT id, birth_month, max_age FROM users WHERE birth_month IS NOT NULL")
+            .fetch_all(&db.read)
+            .await?;
+    let mut changed = Vec::new();
+    for (id, born, max_age) in rows {
+        let limit = birthday_limit(&born, &month);
+        // Only while it still follows that birthday: a limit an
+        // administrator set meanwhile stays.
+        if limit != max_age {
+            let updated = sqlx::query("UPDATE users SET max_age = ? WHERE id = ? AND birth_month = ?")
+                .bind(limit)
+                .bind(id)
+                .bind(&born)
+                .execute(&db.write)
+                .await?;
+            if updated.rows_affected() > 0 {
+                changed.push(id);
+            }
+        }
+    }
+    Ok(changed)
 }
 
 /// Replace a user's library list.
@@ -381,14 +567,37 @@ pub fn device_name(user_agent: Option<&str>) -> String {
     if ua.contains("pleyAndroid/") {
         return "Pley for Android".into();
     }
+    // The Apple apps say "pleyApple/0.1.0 (iPadOS 16.7; iPad)": one app
+    // for iPhone, iPad and Mac and one for Apple TV, told apart by the
+    // system they give first.
+    if ua.contains("pleyApple/") {
+        let system = bracketed(ua).and_then(|inside| inside.split([';', ' ']).next());
+        return match system {
+            Some("iOS") => "Pley for iPhone",
+            Some("iPadOS") => "Pley for iPad",
+            Some("tvOS") => "Pley for Apple TV",
+            Some("macOS") => "Pley for Mac",
+            _ => "Pley for Apple",
+        }
+        .into();
+    }
     if ua.contains("pleyKodi/") {
         return "Pley for Kodi".into();
     }
     if ua.contains("pleyRoku/") {
         return "Pley for Roku".into();
     }
-    // Samsung's and LG's TV apps are web apps, which can't set their own
-    // agent: the TV's web engine names the TV.
+    if ua.contains("pleyLG/") {
+        return "Pley for LG TV".into();
+    }
+    // Pley for Home Assistant says "pleyHomeAssistant/0.1.0 (Home Assistant
+    // 2026.11.0)". It is named as people know it, so a TV it plays something
+    // on says "Playing from Home Assistant".
+    if ua.contains("pleyHomeAssistant/") {
+        return "Home Assistant".into();
+    }
+    // Samsung's TV app, and LG's before it was a native app, are web apps,
+    // which can't set their own agent: the TV's web engine names the TV.
     if ua.contains("Tizen") && ua.contains("TV") {
         return "Samsung TV".into();
     }
@@ -430,6 +639,16 @@ pub fn device_name(user_agent: Option<&str>) -> String {
         (Some(b), None) => b.to_owned(),
         _ => ua.split_whitespace().next().unwrap_or(ua).chars().take(60).collect(),
     }
+}
+
+/// What a User-Agent gives in its first brackets, trimmed: Pley's apps put
+/// their platform there, "pleyKodi/0.1.0 (Kodi 21.2; Windows)".
+pub(crate) fn bracketed(user_agent: &str) -> Option<&str> {
+    user_agent
+        .split_once('(')
+        .and_then(|(_, rest)| rest.split_once(')'))
+        .map(|(inside, _)| inside.trim())
+        .filter(|inside| !inside.is_empty())
 }
 
 // ------------------------------------------------------------------ avatars
@@ -484,6 +703,18 @@ mod tests {
         assert_eq!(device_name(Some("pleyAndroid/0.1.0 (Android 16)")), "Pley for Android");
         assert_eq!(device_name(Some("pleyKodi/0.1.0 (Kodi 21.2; Windows)")), "Pley for Kodi");
         assert_eq!(device_name(Some("pleyRoku/0.1.0 (Roku OS 14.5; Roku Ultra)")), "Pley for Roku");
+        assert_eq!(device_name(Some("pleyApple/0.1.0 (iOS 18.1; iPhone)")), "Pley for iPhone");
+        assert_eq!(device_name(Some("pleyApple/0.1.0 (iPadOS 16.7; iPad)")), "Pley for iPad");
+        assert_eq!(device_name(Some("pleyApple/0.1.0 (tvOS 18.2; Apple TV)")), "Pley for Apple TV");
+        assert_eq!(device_name(Some("pleyApple/0.1.0 (macOS 15.2; Mac)")), "Pley for Mac");
+        assert_eq!(device_name(Some("pleyApple/0.1.0")), "Pley for Apple");
+        assert_eq!(device_name(Some("pleyApple/0.1.0 (visionOS 2.0; Apple Vision Pro)")), "Pley for Apple");
+        // AVPlayer's own requests are not the app's.
+        let core_media = "AppleCoreMedia/1.0.0.22A (iPhone; U; CPU OS 18_0 like Mac OS X; en_us)";
+        assert_eq!(device_name(Some(core_media)), "AppleCoreMedia/1.0.0.22A");
+        assert_eq!(device_name(Some("pleyLG/0.1.0 (webOS 23; OLED65C3PUA)")), "Pley for LG TV");
+        let home_assistant = "pleyHomeAssistant/0.1.0 (Home Assistant 2026.11.0)";
+        assert_eq!(device_name(Some(home_assistant)), "Home Assistant");
         let tizen = "Mozilla/5.0 (SMART-TV; LINUX; Tizen 6.0) AppleWebKit/537.36 (KHTML, like Gecko) 76.0.3809.146/6.0 TV Safari/537.36";
         assert_eq!(device_name(Some(tizen)), "Samsung TV");
         let webos = "Mozilla/5.0 (Web0S; Linux/SmartTV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.128 Safari/537.36 WebAppManager";
@@ -687,11 +918,13 @@ mod tests {
             avatar_color: None,
             all_libraries: false,
             max_age: Some(12),
+            max_age_system: Some("GB".into()),
             disabled: false,
             created_at: 0,
             audio_language: None,
             subtitle_language: Some("fre".into()),
             subtitle_mode: "foreign".into(),
+            language: None,
             has_password: true,
             two_step: false,
             request_access: "off".into(),
@@ -708,8 +941,31 @@ mod tests {
         assert_eq!(dto.request_access, RequestAccess::Off);
         // Administrators are never restricted, whatever is stored.
         let admin = user_row(true, None).into_dto(vec![]);
-        assert_eq!((admin.all_libraries, admin.max_age), (true, None));
+        assert_eq!((admin.all_libraries, admin.max_age, admin.max_age_system), (true, None, None));
         assert_eq!(admin.request_access, RequestAccess::Auto, "administrators' requests are approved as made");
         assert_eq!(avatar_url(1, None), None);
+    }
+
+    /// An age goes up on the first of the month someone was born in, and a
+    /// limit that follows it ends at 21.
+    #[test]
+    fn birthday_limits() {
+        assert_eq!(birthday_limit("2015-03", "2026-02"), Some(10));
+        assert_eq!(birthday_limit("2015-03", "2026-03"), Some(11));
+        assert_eq!(birthday_limit("2015-03", "2026-12"), Some(11));
+        assert_eq!(birthday_limit("2026-11", "2026-11"), Some(0));
+        assert_eq!(birthday_limit("2005-12", "2026-11"), Some(20));
+        assert_eq!(birthday_limit("2005-11", "2026-11"), None, "21: no limit");
+        assert_eq!(birthday_limit("1980-01", "2026-11"), None);
+        assert_eq!(birthday_limit("2015-13", "2026-11"), None, "not a month");
+    }
+
+    #[test]
+    fn birth_months_are_checked() {
+        assert_eq!(check_birth_month(" 2015-03 ", "2026-11").unwrap(), "2015-03");
+        assert!(check_birth_month("2026-11", "2026-11").is_ok());
+        for bad in ["2026-12", "2015-3", "2015-00", "2015-13", "15-03", "2015-03-01", "1900-01", "March 2015", ""] {
+            assert!(check_birth_month(bad, "2026-11").is_err(), "{bad}");
+        }
     }
 }

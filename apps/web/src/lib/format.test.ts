@@ -22,7 +22,6 @@ import {
   isPlayableVideo,
   mediaBadges,
   mediaLine,
-  pluralize,
   progressFraction,
   resolutionLabel,
   seasonTitle,
@@ -117,7 +116,7 @@ describe("formatBitrate", () => {
 
 describe("formatRelative", () => {
   const now = 1_700_000_000;
-  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+  const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
 
   afterEach(() => {
     vi.useRealTimers();
@@ -152,7 +151,7 @@ describe("formatRelative", () => {
 
 describe("formatDate", () => {
   it("formats a calendar date in the local time zone", () => {
-    const expected = new Date(2023, 3, 1).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    const expected = new Date(2023, 3, 1).toLocaleDateString("en", { year: "numeric", month: "short", day: "numeric" });
     expect(formatDate("2023-04-01")).toBe(expected);
   });
 
@@ -168,19 +167,6 @@ describe("formatUptime", () => {
     expect(formatUptime(3_700)).toBe("1h 1m");
     expect(formatUptime(120)).toBe("2m");
     expect(formatUptime(59)).toBe("0m");
-  });
-});
-
-describe("pluralize", () => {
-  it("uses the singular for exactly one", () => {
-    expect(pluralize(1, "movie")).toBe("1 movie");
-    expect(pluralize(0, "movie")).toBe("0 movies");
-    expect(pluralize(2, "movie")).toBe("2 movies");
-    expect(pluralize(3, "child", "children")).toBe("3 children");
-  });
-
-  it("formats the count for the locale", () => {
-    expect(pluralize(12_345, "movie")).toBe(`${(12_345).toLocaleString()} movies`);
   });
 });
 
@@ -479,7 +465,8 @@ describe("media summaries", () => {
     expect(mediaBadges(media)).toEqual(["4K", "DV"]);
     expect(mediaLine(media)).toBe("42 Mbps · 23.4 GB");
     expect(mediaBadges({ ...media, width: 1920, height: 1080, dynamic_range: "sdr", video_codec: "h264" })).toEqual([]);
-    expect(mediaBadges({ ...media, width: 1920, height: 1080, dynamic_range: "hdr10" })).toEqual(["HDR10"]);
+    expect(mediaBadges({ ...media, width: 1920, height: 1080, dynamic_range: "hdr10" })).toEqual(["HDR"]);
+    expect(mediaBadges({ ...media, dynamic_range: "hdr10plus" })).toEqual(["4K", "HDR+"]);
   });
 
   it("make do with what is known", () => {

@@ -1,0 +1,308 @@
+{
+  "accessFields": {
+    "libraries": "Libraries",
+    "allLibraries": "All libraries",
+    "onlySome": "Only some",
+    "includesLater": "Includes libraries you add later.",
+    "noLibraries": "No libraries yet.",
+    "ageLimit": "Age limit",
+    "mode": {
+      "none": "No limit",
+      "rating": "By rating",
+      "age": "By age",
+      "birthday": "By birthday"
+    },
+    "age": "Age",
+    "ratingSystem": "Rating system",
+    "rating": "Rating",
+    "ratingOption": "{{rating}} (age {{age}})",
+    "noLimitHint": "Every movie and show, rated or not.",
+    "ratingHint": "Titles suitable for age {{age}}: {{rating}} and gentler ratings, from any country.",
+    "ageHint": "Titles suitable for age {{age}}, from any country's ratings.",
+    "ratingHintAllAges": "Titles for all ages only, such as {{rating}}, from any country.",
+    "ageHintAllAges": "Titles for all ages only, from any country's ratings.",
+    "birthMonth": "Birthday month",
+    "birthYear": "Year",
+    "birthdayHint": "The limit goes up each year on the first of {{month}}, and ends in {{end}}.",
+    "grownUpHint": "No limit: they're {{age}} or older.",
+    "exceptions": "Exceptions",
+    "exceptionsHint": "By the labels on titles, which you set in a title's Edit details.",
+    "exceptionsNone": "None",
+    "exceptionsShown_one": "Always show {{count, number}} label",
+    "exceptionsShown_other": "Always show {{count, number}} labels",
+    "exceptionsHidden_one": "Never show {{count, number}} label",
+    "exceptionsHidden_other": "Never show {{count, number}} labels",
+    "exceptionsAdd": "Add",
+    "exceptionsChange": "Change",
+    "showLabels": "Always show",
+    "showLabelsHint": "Titles with one of these labels show even above the age limit.",
+    "hideLabels": "Never show",
+    "hideLabelsHint": "Titles with one of these labels never show, whatever their rating.",
+    "removeLabel": "Remove {{label}}",
+    "inBoth": "A label can't be both always and never shown: {{labels}}.",
+    "unrated": {
+      "title": "Unrated movies are hidden",
+      "text": "Without a TMDB key, only NFO files give movies a rating. <settings>Add a TMDB key</settings>"
+    }
+  },
+  "labelPicker": {
+    "placeholder": "Add a label",
+    "titles_one": "{{count, number}} title",
+    "titles_other": "{{count, number}} titles",
+    "inRules": "In exceptions",
+    "create": "Add “{{label}}”",
+    "suggestions": "Suggestions"
+  },
+  "addToCollection": {
+    "title": "Add to collection",
+    "placeholder": "New collection",
+    "nameLabel": "New collection name",
+    "empty": "This library has no collections yet: name one above.",
+    "alreadyIn": "Already in it"
+  },
+  "addToPlaylist": {
+    "title": "Add to playlist",
+    "nothingToAdd": "Nothing to add",
+    "addedItems_one": "Added {{count}} item to {{title}}",
+    "addedItems_other": "Added {{count}} items to {{title}}",
+    "newMusic": "New music playlist",
+    "newVideo": "New video playlist",
+    "nameLabel": "New playlist name",
+    "emptyMusic": "No music playlists yet: name one above.",
+    "emptyVideo": "No video playlists yet: name one above."
+  },
+  "appDownloads": {
+    "place": "Servers and downloads",
+    "preparing": "Preparing on the server",
+    "preparingPercent": "Preparing on the server · {{percent}}%",
+    "waiting": "Waiting for the server to answer",
+    "queued": "Waiting its turn",
+    "progress": "{{received}} of {{size}}",
+    "percent": "{{percent}}%",
+    "saved": "Saved {{name}} in your Downloads folder",
+    "failed": "Couldn't download {{name}}. {{error}}",
+    "already": "{{name}} is downloaded already",
+    "done": "Downloaded {{name}}",
+    "downloading": "Downloading {{name}}",
+    "downloadingFiles_one": "Downloading {{count}} file",
+    "downloadingFiles_other": "Downloading {{count}} files",
+    "panel": "Downloads",
+    "hint": "Downloads play from {{place}} in the account menu, even with the server away.",
+    "why": {
+      "notMedia": "Pley keeps audio and video files only.",
+      "notSaved": "The file couldn't be saved.",
+      "invalidAddress": "This server's address isn't valid.",
+      "noAnswer": "The server didn't answer.",
+      "namedOtherwise": "The server names itself otherwise here: check the proxy in front of it.",
+      "anotherDevice": "Another device answers at this server's address.",
+      "notOnServer": "This file is no longer on the server.",
+      "signedOut": "Sign in to the server again, then download it again.",
+      "diskFull": "The disk is full.",
+      "notWritten": "The file couldn't be written: {{detail}}",
+      "cantMake": "The server can't make files for this computer's player: update it.",
+      "notMade": "The server couldn't make it for this computer.",
+      "notMadeBecause": "The server couldn't make it for this computer: {{detail}}",
+      "unreadable": "The server's answer can't be read.",
+      "busy": "The server can't make it right now.",
+      "noReply": "The server couldn't answer.",
+      "unreachable": "The server can't be reached.",
+      "dropped": "The connection to the server dropped.",
+      "notSent": "The server couldn't send the file.",
+      "stoppedSending": "The server stopped sending.",
+      "downloadGone": "This download is gone.",
+      "notWhole": "This download isn't whole."
+    }
+  },
+  "cards": {
+    "playTitle": "Play {{title}}"
+  },
+  "castReceiver": {
+    "playingFrom": "Playing from {{device}}",
+    "anotherDevice": "another device",
+    "switchFailed": "Couldn't switch to the remote's profile"
+  },
+  "collectionCard": {
+    "collections": "Collections",
+    "movies_one": "{{count, number}} movie",
+    "movies_other": "{{count, number}} movies",
+    "shows_one": "{{count, number}} show",
+    "shows_other": "{{count, number}} shows"
+  },
+  "connectionBanner": {
+    "offline": "Pley is offline",
+    "downloads": "Downloads"
+  },
+  "folderPicker": {
+    "title": "Choose a folder",
+    "select": "Select this folder",
+    "up": "Up one level",
+    "placeholder": "Type a path, e.g. D:\\Media\\Movies or /mnt/media",
+    "pathLabel": "Folder path",
+    "go": "Go",
+    "backToTop": "Back to top",
+    "empty": "No sub-folders here.",
+    "hint": "Click to open a folder, double-click to select it directly."
+  },
+  "historyList": {
+    "remove": "Remove from history"
+  },
+  "hubRow": {
+    "seeAll": "See all"
+  },
+  "listMenu": {
+    "shuffle": "Shuffle",
+    "addToPlaylist": "Add to playlist…",
+    "addToCollection": "Add to collection…",
+    "addToMyList": "Add to My List",
+    "removeFromMyList": "Remove from My List",
+    "markWatched": "Mark as watched",
+    "markUnwatched": "Mark as unwatched",
+    "removeFromContinueWatching": "Remove from Continue Watching"
+  },
+  "lists": {
+    "addedTo": "Added to {{title}}",
+    "items_one": "{{count, number}} item",
+    "items_other": "{{count, number}} items"
+  },
+  "metadataNotice": {
+    "dismiss": "Dismiss",
+    "tmdbKey": "Movie posters, summaries and cast come from TMDB, which needs an API key. <settings>Add a free key in Settings</settings> to fill them in.",
+    "missingKey": "No details yet: movie details come from TMDB, which needs an API key. <settings>Add a free key in Settings</settings>."
+  },
+  "partOfCollections": {
+    "partOf": "Part of"
+  },
+  "passwordInput": {
+    "show": "Show password",
+    "hide": "Hide password"
+  },
+  "playOn": {
+    "label": "Play on…",
+    "playingOn": "Playing on {{device}}",
+    "otherProfile": "{{device}} is on {{profile}}'s profile: it switches to yours first.",
+    "enterPin": "Enter your PIN"
+  },
+  "remote": {
+    "readyToPlay": "Ready to play",
+    "onProfile": "On {{name}}'s profile",
+    "liveTv": "Live TV",
+    "buttonPlaying_one": "Remote, {{count, number}} device playing",
+    "buttonPlaying_other": "Remote, {{count, number}} devices playing",
+    "buttonReady_one": "Remote, {{count, number}} device ready to play",
+    "buttonReady_other": "Remote, {{count, number}} devices ready to play",
+    "yourDevices": "Your devices",
+    "nothingPlaying": "Nothing playing",
+    "sendHint": "Send something here with Play on…",
+    "noAnswer": "{{device}} didn't answer.",
+    "audioOn": "Audio on {{device}}",
+    "subtitlesOn": "Subtitles on {{device}}",
+    "qualityOn": "Quality on {{device}}",
+    "subtitlesOff": "Off",
+    "seekOn": "Seek on {{device}}",
+    "timeOf": "{{position}} of {{duration}}",
+    "progressOn": "Progress on {{device}}",
+    "playOnDevice": "Play on {{device}}",
+    "pauseOnDevice": "Pause on {{device}}",
+    "pause": "Pause",
+    "previousChannelOn": "Previous channel on {{device}}",
+    "nextChannelOn": "Next channel on {{device}}",
+    "channel": "Channel",
+    "previousOn": "Previous on {{device}}",
+    "backOn": "Back 30 seconds on {{device}}",
+    "forwardOn": "Forward 30 seconds on {{device}}",
+    "skip": {
+      "intro": "Skip Intro",
+      "credits": "Skip Credits"
+    },
+    "skipOn": {
+      "intro": "Skip intro on {{device}}",
+      "credits": "Skip credits on {{device}}"
+    },
+    "nextOn": "Next on {{device}}",
+    "waitingFor": "Waiting for {{device}}",
+    "stopOn": "Stop on {{device}}",
+    "stop": "Stop",
+    "stopConfirm": "Stop playing on {{device}}?",
+    "programme": "{{title}}, {{start}} to {{end}}",
+    "next": "Next: {{title}}"
+  },
+  "requestNotices": {
+    "open": "Open"
+  },
+  "sidebar": {
+    "main": "Main",
+    "pleyHome": "Pley home",
+    "menu": "Menu",
+    "closeMenu": "Close menu",
+    "home": "Home",
+    "liveTv": "Live TV",
+    "libraries": "Libraries",
+    "sortLibraries": "Sort libraries",
+    "scanning": "Scanning",
+    "addLibrary": "Add library",
+    "noLibraries": "No libraries yet.",
+    "settings": "Settings",
+    "discover": "Discover",
+    "requests": "Requests",
+    "yourRequests": "Your requests",
+    "waiting": "waiting",
+    "playlists": "Playlists",
+    "allPlaylists": "All playlists",
+    "yourPlaylists": "Your playlists"
+  },
+  "sortLibraries": {
+    "title": "Sort libraries",
+    "hint": "Your order, on every device you use Pley on.",
+    "list": "Your libraries",
+    "useServerOrder": "Use the server's order",
+    "backInServerOrder": "Libraries back in the server's order",
+    "moved": "{{name}} moved to position {{position}} of {{total}}",
+    "movedBack": "{{name}} moved back to position {{position}} of {{total}}",
+    "notMoved": "{{name}} wasn't moved",
+    "drag": "Drag to reorder",
+    "moveUp": "Move {{name}} up",
+    "moveDown": "Move {{name}} down"
+  },
+  "starRating": {
+    "label": "Your rating",
+    "stars_one": "{{count, number}} star",
+    "stars_other": "{{count, number}} stars",
+    "notRated": "Not rated",
+    "yourRating": "Your rating: {{stars}}",
+    "rateIt": "Rate it"
+  },
+  "toast": {
+    "dismiss": "Dismiss"
+  },
+  "topBar": {
+    "searchLabel": "Search your libraries",
+    "clearSearch": "Clear search",
+    "phases": {
+      "queued": "Queued",
+      "walking": "Finding files",
+      "probing": "Analyzing",
+      "metadata": "Fetching metadata",
+      "done": "Done"
+    },
+    "scanLine": "{{library}}: {{phase}}",
+    "scanLinePercent": "{{library}}: {{phase}} {{percent}}%",
+    "scanningLine": "{{library}}: scanning",
+    "scanning": "Scanning {{library}}",
+    "scanningLibraries_one": "Scanning {{count}} library",
+    "scanningLibraries_other": "Scanning {{count}} libraries",
+    "accountMenu": "Account menu",
+    "administrator": "Administrator",
+    "managedProfile": "Managed profile",
+    "user": "User",
+    "switchProfile": "Switch profile",
+    "account": "Account",
+    "settings": "Settings",
+    "switchServer": "Switch server",
+    "openMenu": "Open menu",
+    "openMenuWaiting_one": "Open menu, {{count, number}} request waiting",
+    "openMenuWaiting_other": "Open menu, {{count, number}} requests waiting"
+  },
+  "ui": {
+    "loading": "Loading"
+  }
+}

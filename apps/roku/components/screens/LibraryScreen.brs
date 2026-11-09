@@ -15,6 +15,7 @@ sub init()
     m.jumpTimer = m.top.findNode("jumpTimer")
     m.rows = m.top.findNode("rows")
     m.message = m.top.findNode("message")
+    m.message.text = t("common.states.loading")
     m.panel = m.top.findNode("panel")
     m.panelTitle = m.top.findNode("panelTitle")
     m.choices = m.top.findNode("choices")
@@ -43,12 +44,18 @@ sub init()
     m.collections = invalid
     m.recommended = invalid
     m.recommendedKeys = []
-    ' Genres and years to filter by, once the server said.
+    ' What the titles can be filtered by, once the server said
+    ' (lib/Library.brs's libFilters); whether it's being asked, and the
+    ' filter whose choices wait for it.
     m.filters = invalid
+    m.filtersAsked = false
+    m.filterWanted = ""
     ' What the panel shows: "sort", "filters", or a filter's choices
-    ' ("watched", "genre", "year"), and the values of its choices.
+    ' ("watched", "genre", "year", "resolution", "dynamic_range"), and the
+    ' values of its choices; the Filter panel's rows' actions.
     m.panelKind = ""
     m.values = []
+    m.menuActions = []
     ' Where the focus goes once the first answer comes: into the titles.
     m.focusContent = true
     m.lastFocus = m.grid
@@ -175,12 +182,12 @@ sub showTab(wanted as string)
         else
             ' Its first page asked for, or on its way: the other tab's
             ' message goes.
-            showMessage("Loading…")
+            showMessage(t("common.states.loading"))
             loadPage(0)
         end if
     else if wanted = "collections"
         if m.collections = invalid
-            showMessage("Loading…")
+            showMessage(t("common.states.loading"))
             uiRequest({ method: "GET", path: "/api/libraries/" + urlValue(m.library.id) + "/collections", build: "collections" }, "onCollections")
         else
             m.grid.content = m.collections
@@ -188,7 +195,7 @@ sub showTab(wanted as string)
         end if
     else
         if m.recommended = invalid
-            showMessage("Loading…")
+            showMessage(t("common.states.loading"))
             uiRequest({ method: "GET", path: "/api/libraries/" + urlValue(m.library.id) + "/hubs", build: "rows" }, "onRecommended")
         else
             showContent()
@@ -203,12 +210,12 @@ sub showContent()
     shownTab = m.view.tab
     empty = ""
     if shownTab = "recommended"
-        if m.recommended.getChildCount() = 0 then empty = "Nothing to recommend here yet."
+        if m.recommended.getChildCount() = 0 then empty = t("browse.library.noRecommendations")
     else if shownTab = "collections"
-        if m.collections.getChildCount() = 0 then empty = "This library has no collections."
+        if m.collections.getChildCount() = 0 then empty = t("browse.library.noCollections")
     else if m.content.getChildCount() = 0
-        empty = "This library is empty."
-        if libFiltered(m.view) then empty = "No titles match these filters."
+        empty = t("browse.library.empty")
+        if libFiltered(m.view) then empty = t("browse.library.noMatches")
     end if
     if empty <> ""
         showMessage(empty)
@@ -245,9 +252,7 @@ sub showCount()
     if m.view.tab = "library" and m.total >= 0
         m.countLabel.text = fmtCount(m.total, m.library.kind)
     else if m.view.tab = "collections" and m.collections <> invalid
-        n = m.collections.getChildCount()
-        m.countLabel.text = urlValue(n) + " collections"
-        if n = 1 then m.countLabel.text = "1 collection"
+        m.countLabel.text = t("browse.counts.collections", { count: m.collections.getChildCount() })
     else
         m.countLabel.text = fmtCount(m.library.itemCount, m.library.kind)
     end if
@@ -300,9 +305,10 @@ sub loadPage(page as integer)
     at = page * pageSize()
     if page < 0 or m.pages.DoesExist(page.ToStr()) or (m.total >= 0 and at >= m.total) then return
     m.pages[page.ToStr()] = true
-    if m.content.getChildCount() = 0 then showMessage("Loading…")
+    if m.content.getChildCount() = 0 then showMessage(t("common.states.loading"))
     query = libQuery(m.view, at, pageSize())
-    uiRequest({ method: "GET", path: urlWithQuery("/api/libraries/" + urlValue(m.library.id) + "/items", query), build: "tiles", listing: m.listing, page: page }, "onPage")
+    path = urlWithQuery("/api/libraries/" + urlValue(m.library.id) + "/items", query)
+    uiRequest({ method: "GET", path: path, build: "tiles", badges: libShowsBadges(m.view), bitrate: m.view.sort = "bitrate", listing: m.listing, page: page }, "onPage")
 end sub
 
 sub onPage(event as object)
@@ -525,66 +531,65 @@ sub openSort()
         labels.Push(sort.label)
         values.Push(sort.id)
     end for
-    showChoices("sort", "Sort by", labels, values, current, "OK on the one checked turns the order around.")
+    showChoices("sort", t("browse.library.sortBy"), labels, values, current, t("browse.library.sortHint"))
 end sub
 
 ' The filters, each with what it keeps; OK opens its choices. Once some
-' are set, Clear filters and Save as….
+' are set, Clear filters and Save as…. What the titles can be filtered by
+' is asked the first time: Resolution and Dynamic range join the rows when
+' it comes, the focus staying on its row.
 sub openFilters()
     m.panelKind = "filters"
-    m.panelTitle.text = "Filter"
-    items = [{ title: "Show: " + watchedLabel(m.view.watched) }]
-    genre = "Any"
-    if m.view.genre <> "" then genre = m.view.genre
-    items.Push({ title: "Genre: " + genre })
-    year = "Any"
-    if m.view.year > 0 then year = urlValue(m.view.year)
-    items.Push({ title: "Year: " + year })
-    if libFiltered(m.view)
-        items.Push({ title: "Clear filters" })
-        items.Push({ title: "Save as…" })
-    end if
+    m.panelTitle.text = t("browse.library.filter")
+    rows = libFilterRows(m.view, m.library.kind, m.filters)
     at = m.menu.itemFocused
-    m.menu.content = nodesContent(items)
-    if at > 0 and at < items.Count() then m.menu.jumpToItem = at
+    focused = ""
+    if at >= 0 and at < m.menuActions.Count() then focused = m.menuActions[at]
+    m.menuActions = []
+    for i = 0 to rows.Count() - 1
+        m.menuActions.Push(rows[i].action)
+        if rows[i].action = focused then at = i
+    end for
+    m.menu.content = nodesContent(rows)
+    if at > 0 and at < rows.Count() then m.menu.jumpToItem = at
     m.panelHint.text = ""
     m.choices.visible = false
     m.menu.visible = true
     m.panel.visible = true
     m.menu.setFocus(true)
+    if m.filters = invalid then askFilters()
 end sub
-
-function watchedLabel(watched as string) as string
-    if watched = "false" then return "Unwatched"
-    if watched = "true" then return "Watched"
-    return "All titles"
-end function
 
 sub onMenu(event as object)
     at = event.getData()
-    if at = 0
+    if at < 0 or at >= m.menuActions.Count() then return
+    action = m.menuActions[at]
+    if action = "watched"
         current = 0
         if m.view.watched = "false" then current = 1
         if m.view.watched = "true" then current = 2
-        showChoices("watched", "Show", ["All titles", "Unwatched", "Watched"], ["", "false", "true"], current, "")
-    else if at = 1 or at = 2
-        kind = "genre"
-        if at = 2 then kind = "year"
-        if m.filters = invalid
-            m.panelHint.text = "Loading…"
-            uiRequest({ method: "GET", path: "/api/libraries/" + urlValue(m.library.id) + "/filters", filter: kind }, "onFilters")
-            return
-        end if
-        openFilter(kind)
-    else if at = 3
-        m.view.watched = ""
-        m.view.genre = ""
-        m.view.year = 0
+        labels = [libWatchedLabel(""), libWatchedLabel("false"), libWatchedLabel("true")]
+        showChoices("watched", t("browse.library.show"), labels, ["", "false", "true"], current, "")
+    else if action = "clear"
+        libClearFilters(m.view)
         applyView()
         openFilters()
-    else
+    else if action = "save"
         saveAs()
+    else if m.filters = invalid
+        ' Its choices once the server says what they are.
+        m.filterWanted = action
+        m.panelHint.text = t("common.states.loading")
+        askFilters()
+    else
+        openFilter(action)
     end if
+end sub
+
+sub askFilters()
+    if m.filtersAsked then return
+    m.filtersAsked = true
+    uiRequest({ method: "GET", path: "/api/libraries/" + urlValue(m.library.id) + "/filters" }, "onFilters")
 end sub
 
 ' --- Save as… ---
@@ -596,9 +601,9 @@ sub saveAs()
     closePanel()
     m.smartFilter = libSmartFilter(m.view)
     dialog = CreateObject("roSGNode", "StandardKeyboardDialog")
-    dialog.title = "Save these filters"
-    dialog.message = [libSmartFilterWords(m.view).Join(" · ") + ". It keeps up with the library by itself."]
-    dialog.buttons = ["Save", "Cancel"]
+    dialog.title = t("browse.library.saveFilters")
+    dialog.message = [t("browse.library.saveFiltersHint", { filters: libSmartFilterWords(m.view).Join(" · ") })]
+    dialog.buttons = [t("common.actions.save"), t("common.actions.cancel")]
     dialog.observeField("buttonSelected", "onSaveNamed")
     m.top.getScene().dialog = dialog
 end sub
@@ -618,47 +623,59 @@ sub onSaved(event as object)
     if answer.ok and httpObject(answer.data) <> invalid
         uiNavigate({ to: "playlist", params: { id: answer.data.id, title: httpSentence(answer.data.title) } })
     else if not uiFailed(answer)
-        uiMessage("That didn't work", [pagePlaylistRefusal(answer)])
+        uiMessage(t("common.states.failed"), [pagePlaylistRefusal(answer)])
     end if
 end sub
 
+' Asked again the next time the panel opens when it didn't come. Once it
+' does, the filter chosen meanwhile opens; else the Filter panel, showing,
+' takes the rows it adds.
 sub onFilters(event as object)
+    m.filtersAsked = false
+    wanted = m.filterWanted
+    m.filterWanted = ""
     answer = event.getData()
     if not answer.ok or answer.data = invalid
-        if not uiFailed(answer) then m.panelHint.text = answer.message
+        ' Only the Filter panel waits for it: another panel's hint stays its own.
+        if not uiFailed(answer) and m.panel.visible and m.panelKind = "filters" then m.panelHint.text = answer.message
         return
     end if
-    m.filters = { genres: [], years: [] }
-    for each genre in httpArray(answer.data.genres)
-        name = httpSentence(genre)
-        if name <> "" then m.filters.genres.Push(name)
-    end for
-    for each year in httpArray(answer.data.years)
-        if httpNumber(year, 0) > 0 then m.filters.years.Push(Int(year))
-    end for
-    if m.panel.visible and m.panelKind = "filters" then openFilter(event.getRoSGNode().spec.filter)
+    m.filters = libFilters(answer.data)
+    if not m.panel.visible or m.panelKind <> "filters" then return
+    if wanted <> ""
+        openFilter(wanted)
+    else if libFilterRows(m.view, m.library.kind, m.filters).Count() <> m.menuActions.Count()
+        openFilters()
+    end if
 end sub
 
-' A genre or a year to keep, or Any.
+' A genre, a year, a resolution or a dynamic range to keep, or Any.
 sub openFilter(kind as string)
-    labels = ["Any"]
-    values = [""]
     current = 0
     if kind = "genre"
+        labels = [t("browse.library.allGenres")]
+        values = [""]
         for each genre in m.filters.genres
             if genre = m.view.genre then current = values.Count()
             labels.Push(genre)
             values.Push(genre)
         end for
-        showChoices("genre", "Genre", labels, values, current, "")
+        showChoices("genre", t("browse.library.genre"), labels, values, current, "")
+    else if kind = "resolution"
+        choices = libQualityChoices(fmtResolutions(), m.filters.resolutions, m.view.resolution, t("browse.library.allResolutions"))
+        showChoices("resolution", t("browse.library.resolution"), choices.labels, choices.values, choices.current, "")
+    else if kind = "dynamic_range"
+        choices = libQualityChoices(fmtDynamicRanges(), m.filters.dynamicRanges, m.view.dynamic_range, t("browse.library.allDynamicRanges"))
+        showChoices("dynamic_range", t("browse.library.dynamicRange"), choices.labels, choices.values, choices.current, "")
     else
+        labels = [t("browse.library.allYears")]
         values = [0]
         for each year in m.filters.years
             if year = m.view.year then current = values.Count()
             labels.Push(urlValue(year))
             values.Push(year)
         end for
-        showChoices("year", "Year", labels, values, current, "")
+        showChoices("year", t("browse.library.year"), labels, values, current, "")
     end if
 end sub
 
@@ -703,6 +720,8 @@ sub onChoice(event as object)
     if kind = "watched" then m.view.watched = value
     if kind = "genre" then m.view.genre = value
     if kind = "year" then m.view.year = value
+    if kind = "resolution" then m.view.resolution = value
+    if kind = "dynamic_range" then m.view.dynamic_range = value
     applyView()
     openFilters()
 end sub
@@ -710,6 +729,8 @@ end sub
 sub closePanel()
     m.panel.visible = false
     m.panelKind = ""
+    ' A filter picked while its choices were loading is forgotten with the panel.
+    m.filterWanted = ""
     m.viewChips.setFocus(true)
 end sub
 
@@ -723,7 +744,7 @@ function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
     if m.panel.visible
         if key = "back" or key = "left"
-            if m.panelKind = "watched" or m.panelKind = "genre" or m.panelKind = "year"
+            if m.panelKind <> "sort" and m.panelKind <> "filters"
                 openFilters()
             else
                 closePanel()

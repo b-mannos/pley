@@ -1,7 +1,8 @@
 //! Where pley listens, which an administrator can change while it runs
 //! (Settings → Network): the web app and its API on each address chosen, the
-//! Plex-compatible API on its own, and discovery (UDP, on the web port) on
-//! the web addresses other devices can reach. An address no longer chosen
+//! Plex- and Jellyfin-compatible APIs on their own, and discovery (UDP, on the web port) on
+//! the web addresses other devices can reach, and the Bonjour announcement
+//! (see [`crate::bonjour`]). An address no longer chosen
 //! closes and a new one opens; one pley can't listen on yet (an adapter that
 //! comes later: Wi-Fi, a VPN) is tried again until it can. The choice is
 //! saved in the config file, but what the command line or the environment
@@ -28,21 +29,45 @@ const FIRST_RETRY: Duration = Duration::from_millis(50);
 /// How long a change waits, at most, for its new listeners to listen.
 const CHANGE_WAIT: Duration = Duration::from_secs(3);
 /// The most addresses of each kind.
-const MAX_ADDRESSES: usize = 32;
+pub(crate) const MAX_ADDRESSES: usize = 32;
 
 /// Where pley listens.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Listen {
     /// The web app and its API.
     pub web: Vec<SocketAddr>,
-    /// The Plex-compatible API: off when empty, unless on pley's own port.
+    /// The Plex-compatible API on addresses of its own: off when empty,
+    /// unless on pley's own port.
+    #[serde(default)]
     pub plex: Vec<SocketAddr>,
     /// The Plex-compatible API answers on pley's own port, its clients'
     /// requests told apart from the web app's (see [`crate::plex::on_web_port`]).
     #[serde(default)]
     pub plex_on_web: bool,
-    /// Answer the pley apps looking for servers on the local network.
+    /// The Jellyfin-compatible API on addresses of its own: off when empty,
+    /// unless on pley's own port.
+    #[serde(default)]
+    pub jellyfin: Vec<SocketAddr>,
+    /// The Jellyfin-compatible API answers on pley's own port, its clients'
+    /// requests told apart from the web app's (see [`crate::jellyfin::on_web_port`]).
+    #[serde(default)]
+    pub jellyfin_on_web: bool,
+    /// Answer the pley apps looking for servers on the local network (UDP).
     pub discovery: bool,
+    /// Announce pley on the local network by Bonjour (see [`crate::bonjour`]).
+    /// Off when a change leaves it out.
+    #[serde(default)]
+    pub bonjour: bool,
+    /// The network adapters Bonjour announces from, by name ("Ethernet",
+    /// "en0"): every adapter on the local network that the web app listens
+    /// on when empty. With several networks (a VPN, a container bridge, a
+    /// guest Wi-Fi), the ones chosen only.
+    #[serde(default)]
+    pub bonjour_adapters: Vec<String>,
+    /// The host name Bonjour gives Pley's addresses, a DNS label before
+    /// `.local`: the generated `pley-` and the id's start when empty.
+    #[serde(default)]
+    pub bonjour_host_name: String,
 }
 
 impl Listen {
@@ -51,7 +76,12 @@ impl Listen {
             web: std::iter::once(config.bind).chain(config.extra_binds.iter().copied()).collect(),
             plex: config.plex_bind.into_iter().chain(config.plex_extra_binds.iter().copied()).collect(),
             plex_on_web: config.plex_on_web,
+            jellyfin: config.jellyfin_bind.into_iter().chain(config.jellyfin_extra_binds.iter().copied()).collect(),
+            jellyfin_on_web: config.jellyfin_on_web,
             discovery: config.discovery,
+            bonjour: config.bonjour,
+            bonjour_adapters: config.bonjour_adapters.clone(),
+            bonjour_host_name: config.bonjour_host_name.clone(),
         }
     }
 
@@ -60,12 +90,13 @@ impl Listen {
     fn listeners(&self) -> Vec<(Kind, SocketAddr)> {
         let web = self.web.iter().map(|&addr| (Kind::Web, addr));
         let plex = self.plex.iter().map(|&addr| (Kind::Plex, addr));
+        let jellyfin = self.jellyfin.iter().map(|&addr| (Kind::Jellyfin, addr));
         let discovery = self
             .web
             .iter()
             .filter(|addr| self.discovery && !addr.ip().is_loopback())
             .map(|&addr| (Kind::Discovery, addr));
-        web.chain(plex).chain(discovery).collect()
+        web.chain(plex).chain(jellyfin).chain(discovery).collect()
     }
 
     /// Why pley can't listen as this says, if it can't.
@@ -76,10 +107,25 @@ impl Listen {
         if self.plex_on_web && !self.plex.is_empty() {
             return Err("the Plex-compatible API is on Pley's port or on addresses of its own, not both".into());
         }
-        if self.web.len() > MAX_ADDRESSES || self.plex.len() > MAX_ADDRESSES {
+        if self.jellyfin_on_web && !self.jellyfin.is_empty() {
+            return Err("the Jellyfin-compatible API is on Pley's port or on addresses of its own, not both".into());
+        }
+        if [&self.web, &self.plex, &self.jellyfin].iter().any(|list| list.len() > MAX_ADDRESSES) {
             return Err(format!("{MAX_ADDRESSES} addresses at most"));
         }
-        let all: Vec<SocketAddr> = self.web.iter().chain(&self.plex).copied().collect();
+        if self.bonjour_adapters.len() > MAX_ADDRESSES {
+            return Err(format!("{MAX_ADDRESSES} network adapters at most"));
+        }
+        if let Some(name) = self.bonjour_adapters.iter().find(|name| !crate::bonjour::adapter_name_ok(name)) {
+            return Err(format!("{name:?} isn't a network adapter's name"));
+        }
+        if !crate::bonjour::host_label_ok(&self.bonjour_host_name) {
+            return Err(format!(
+                "{:?} can't be Bonjour's host name: letters, digits and hyphens, 63 at most",
+                self.bonjour_host_name
+            ));
+        }
+        let all: Vec<SocketAddr> = self.web.iter().chain(&self.plex).chain(&self.jellyfin).copied().collect();
         for (i, addr) in all.iter().enumerate() {
             if addr.port() == 0 {
                 return Err(format!("{addr} has no port"));
@@ -108,8 +154,12 @@ pub struct Fixed {
     pub web: bool,
     /// `--plex-bind`, `PLEY_PLEX_BIND`.
     pub plex: bool,
+    /// `--jellyfin-bind`, `PLEY_JELLYFIN_BIND`.
+    pub jellyfin: bool,
     /// `--no-discovery`, `PLEY_NO_DISCOVERY`.
     pub discovery: bool,
+    /// `--no-bonjour`, `PLEY_NO_BONJOUR`, or `--no-discovery`.
+    pub bonjour: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
@@ -117,6 +167,7 @@ pub struct Fixed {
 pub enum Kind {
     Web,
     Plex,
+    Jellyfin,
     Discovery,
 }
 
@@ -125,6 +176,7 @@ impl Kind {
         match self {
             Kind::Web => "Pley",
             Kind::Plex => "the Plex-compatible API",
+            Kind::Jellyfin => "the Jellyfin-compatible API",
             Kind::Discovery => "discovery",
         }
     }
@@ -134,7 +186,7 @@ impl Kind {
 fn shown(kind: Kind, addr: SocketAddr) -> String {
     match kind {
         Kind::Discovery => format!("UDP {addr}"),
-        Kind::Web | Kind::Plex => format!("http://{addr}"),
+        Kind::Web | Kind::Plex | Kind::Jellyfin => format!("http://{addr}"),
     }
 }
 
@@ -176,9 +228,19 @@ impl Network {
         self.wanted.borrow().1.clone()
     }
 
+    /// Hears each change once [`run`] has made it (see [`crate::bonjour`]).
+    pub fn applied(&self) -> watch::Receiver<u64> {
+        self.applied.subscribe()
+    }
+
     /// Whether the Plex-compatible API answers on pley's own port now.
     pub fn plex_on_web(&self) -> bool {
         self.wanted.borrow().1.plex_on_web
+    }
+
+    /// Whether the Jellyfin-compatible API answers on pley's own port now.
+    pub fn jellyfin_on_web(&self) -> bool {
+        self.wanted.borrow().1.jellyfin_on_web
     }
 
     /// The listeners, and how each is.
@@ -276,7 +338,7 @@ enum Socket {
 
 async fn bind(kind: Kind, addr: SocketAddr) -> io::Result<Socket> {
     Ok(match kind {
-        Kind::Web | Kind::Plex => Socket::Tcp(TcpListener::bind(addr).await?),
+        Kind::Web | Kind::Plex | Kind::Jellyfin => Socket::Tcp(TcpListener::bind(addr).await?),
         Kind::Discovery => Socket::Udp(UdpSocket::bind(addr).await?),
     })
 }
@@ -313,17 +375,11 @@ async fn listen_on(
                 // giving the port up.
                 let for_now = wait > FIRST_RETRY * 8;
                 // A Plex server keeps its port, when it restarts too.
-                let plex_server = kind == Kind::Plex && err.kind() == io::ErrorKind::AddrInUse && for_now;
+                let plex_server = kind == Kind::Plex && err.kind() == io::ErrorKind::AddrInUse;
                 network.set(
                     (kind, addr),
                     Some(if plex_server { format!("{err} (by a Plex server?)") } else { err.to_string() }),
                 );
-                if plex_server {
-                    tracing::warn!(
-                        "the Plex-compatible API can't listen on {addr}, which a Plex server may have: {err}"
-                    );
-                    return;
-                }
                 if for_now {
                     tried.take().map(|tried| tried.send(()));
                     if !told {
@@ -357,7 +413,10 @@ async fn listen_on(
             }
             crate::http::serve(listener, app, stop.cancelled_owned()).await;
         }
-        Socket::Tcp(listener) => crate::plex::serve(state.clone(), listener, stop.cancelled_owned()).await,
+        Socket::Tcp(listener) if kind == Kind::Plex => {
+            crate::plex::serve(state.clone(), listener, stop.cancelled_owned()).await
+        }
+        Socket::Tcp(listener) => crate::jellyfin::serve(state.clone(), listener, stop.cancelled_owned()).await,
         Socket::Udp(socket) => crate::discovery::serve(state.clone(), socket, addr.port(), stop).await,
     }
 }
@@ -679,24 +738,31 @@ mod platform {
 mod tests {
     use super::*;
 
-    fn listen(web: &[&str], plex: &[&str], discovery: bool) -> Listen {
+    fn listen(web: &[&str], jellyfin: &[&str], discovery: bool) -> Listen {
         Listen {
             web: web.iter().map(|a| a.parse().unwrap()).collect(),
-            plex: plex.iter().map(|a| a.parse().unwrap()).collect(),
+            plex: Vec::new(),
             plex_on_web: false,
+            jellyfin: jellyfin.iter().map(|a| a.parse().unwrap()).collect(),
+            jellyfin_on_web: false,
             discovery,
+            bonjour: false,
+            bonjour_adapters: Vec::new(),
+            bonjour_host_name: String::new(),
         }
     }
 
     #[test]
     fn discovery_answers_on_networks_only() {
-        let both = listen(&["127.0.0.1:7539", "192.168.1.10:7539"], &["127.0.0.1:32400"], true);
+        let mut both = listen(&["127.0.0.1:7539", "192.168.1.10:7539"], &["127.0.0.1:8096"], true);
+        both.plex = vec!["127.0.0.1:32400".parse().unwrap()];
         assert_eq!(
             both.listeners(),
             [
                 (Kind::Web, "127.0.0.1:7539".parse().unwrap()),
                 (Kind::Web, "192.168.1.10:7539".parse().unwrap()),
                 (Kind::Plex, "127.0.0.1:32400".parse().unwrap()),
+                (Kind::Jellyfin, "127.0.0.1:8096".parse().unwrap()),
                 (Kind::Discovery, "192.168.1.10:7539".parse().unwrap()),
             ]
         );
@@ -706,9 +772,9 @@ mod tests {
 
     #[test]
     fn what_pley_can_listen_on() {
-        assert!(listen(&["127.0.0.1:7539", "192.168.1.10:7539"], &["127.0.0.1:32400"], true).check().is_ok());
-        assert!(listen(&["0.0.0.0:7539"], &["0.0.0.0:32400"], true).check().is_ok());
-        assert!(listen(&[], &["0.0.0.0:32400"], true).check().is_err(), "nowhere");
+        assert!(listen(&["127.0.0.1:7539", "192.168.1.10:7539"], &["127.0.0.1:8096"], true).check().is_ok());
+        assert!(listen(&["0.0.0.0:7539"], &["0.0.0.0:8096"], true).check().is_ok());
+        assert!(listen(&[], &["0.0.0.0:8096"], true).check().is_err(), "nowhere");
         assert!(listen(&["127.0.0.1:0"], &[], true).check().is_err(), "no port");
         let twice = listen(&["127.0.0.1:7539", "127.0.0.1:7539"], &[], true).check().unwrap_err();
         assert_eq!(twice, "127.0.0.1:7539 is there twice");
@@ -716,6 +782,28 @@ mod tests {
         assert_eq!(covered, "0.0.0.0:7539 and 192.168.1.10:7539 can't both have port 7539");
         assert!(listen(&["127.0.0.1:7539"], &["0.0.0.0:7539"], true).check().is_err(), "one port for both APIs");
         assert!(listen(&["127.0.0.1:7539"], &["192.168.1.10:7539"], true).check().is_ok(), "other addresses");
+        let mut both_apis = listen(&["127.0.0.1:7539"], &["0.0.0.0:8096"], true);
+        both_apis.plex = vec!["0.0.0.0:8096".parse().unwrap()];
+        assert!(both_apis.check().is_err(), "one port for the two APIs");
+        both_apis.plex = vec!["0.0.0.0:32400".parse().unwrap()];
+        assert!(both_apis.check().is_ok());
+    }
+
+    #[test]
+    fn bonjour_takes_adapters_it_can_announce_on() {
+        let ok = |adapters: &[&str]| {
+            let mut l = listen(&["0.0.0.0:7539"], &[], true);
+            l.bonjour = true;
+            l.bonjour_adapters = adapters.iter().map(|&a| a.to_owned()).collect();
+            l.check()
+        };
+        assert!(ok(&[]).is_ok());
+        assert!(ok(&["Ethernet", "Wi-Fi 2", "en0"]).is_ok());
+        assert!(ok(&[""]).is_err(), "an empty name");
+        assert!(ok(&["eth0\n"]).is_err(), "a control character");
+        assert!(ok(&["x".repeat(257).as_str()]).is_err(), "too long");
+        let many: Vec<String> = (0..=MAX_ADDRESSES).map(|i| format!("eth{i}")).collect();
+        assert!(ok(&many.iter().map(String::as_str).collect::<Vec<_>>()).is_err(), "too many");
     }
 
     #[test]

@@ -36,6 +36,37 @@ sub test_content_movie_tiles_show_poster_year_and_progress()
     tkEqual(tile.positionMs, 600000)
 end sub
 
+sub test_content_library_posters_show_their_files_only_when_asked()
+    movie = contentTestMovie()
+    movie.media = { bitrate: 42000000, size: 25125558681&, width: 3840, height: 1600, video_codec: "hevc", dynamic_range: "dolby_vision" }
+    plain = contentTiles([movie, "not an item"], contentTestServer())
+    tkEqual(plain.Count(), 1)
+    tkFalse(plain[0].DoesExist("qualityBadges"), "no badges unless asked")
+    tkEqual(plain[0].subtitle, "2016")
+    badged = contentTiles([movie], contentTestServer(), true)
+    tkEqual(badged[0].qualityBadges, ["4K", "DV"])
+    tkEqual(badged[0].subtitle, "2016", "the year, unless sorted by bitrate")
+    sorted = contentTiles([movie], contentTestServer(), true, true)
+    tkEqual(sorted[0].qualityBadges, ["4K", "DV"])
+    tkEqual(sorted[0].subtitle, "42 Mbps · 23.4 GB")
+    movie.Delete("media")
+    tkEqual(contentTiles([movie], contentTestServer(), true, true)[0].qualityBadges, [], "an older server's listing")
+    tkEqual(contentTiles([movie], contentTestServer(), true, true)[0].subtitle, "Bitrate unknown")
+end sub
+
+sub test_content_quality_badges_say_4k_and_the_dynamic_range()
+    tkEqual(contentQualityBadges({ width: 3840, height: 2160, dynamic_range: "hdr10" }), ["4K", "HDR"])
+    tkEqual(contentQualityBadges({ width: 3996, height: 1716, dynamic_range: "hlg" }), ["4K", "HLG"], "a wide 4K film")
+    tkEqual(contentQualityBadges({ width: 1920, height: 1080, dynamic_range: "hdr10plus" }), ["HDR+"], "no other resolution")
+    tkEqual(contentQualityBadges({ width: 1920, height: 1080, dynamic_range: "sdr", video_codec: "h264" }), [], "1080p, SDR and a codec say nothing worth the room")
+    tkEqual(contentQualityBadges({ width: invalid, height: invalid, dynamic_range: invalid }), [])
+    tkEqual(contentQualityBadges(invalid), [])
+    tkEqual(contentMediaLine({ bitrate: 8200000, size: 6979321856& }), "8.2 Mbps · 6.5 GB")
+    tkEqual(contentMediaLine({ bitrate: invalid, size: 1048576 }), "1.0 MB")
+    tkEqual(contentMediaLine({ bitrate: invalid, size: invalid }), "Bitrate unknown")
+    tkEqual(contentMediaLine(invalid), "Bitrate unknown")
+end sub
+
 sub test_content_episode_tiles_name_the_show()
     tile = contentTile(contentTestEpisode(), contentTestServer(), true)
     tkEqual(tile.title, "Severance")
@@ -199,7 +230,7 @@ sub test_content_episode_details_name_show_and_episode()
     episode.files = [{ id: 8, container: "mp4" }]
     detail = contentDetail(episode, contentTestServer())
     tkEqual(detail.buttons, ["Play", "Mark as unwatched", "More…"], "watched; no My List for an episode")
-    tkEqual(detail.more, [{ label: "Rate", action: "rate" }, { label: "Go to show", action: "show" }, { label: "Go to season", action: "season" }, { label: "Media info", action: "info" }, { label: "Add to playlist", action: "playlist" }])
+    tkEqual(detail.more, [{ label: "Rate", action: "rate" }, { label: "Go to show", action: "show" }, { label: "Go to season", action: "season" }, { label: "Media info", action: "info" }, { label: "Details", action: "about" }, { label: "Add to playlist", action: "playlist" }], "Details: played once")
     episode.parent_id = invalid
     tkEqual(contentDetail(episode, contentTestServer()).more[2].action, "info", "no season to go to")
     tkEqual(detail.showId, 99)
@@ -318,4 +349,80 @@ sub test_content_up_next_card()
     tkEqual(card.startMs, 0)
     nextEpisode.user_state.position_ms = 120000
     tkEqual(contentUpNext(nextEpisode, contentTestServer()).startMs, 120000, "its own place")
+end sub
+
+sub test_content_credits_name_the_makers_and_the_cast()
+    movie = { kind: "movie", title: "Dune", crew: [{ id: 9, name: "Grace Hopper", role: "director" }, { id: 9, name: "Grace Hopper", role: "director" }, { id: 10, name: "Ada", role: "writer" }], cast: [{ id: 1, name: "A" }, { id: 2, name: "B" }, { id: 3, name: "C" }, { id: 4, name: "D" }] }
+    tkEqual(contentCredits(movie), "Directed by Grace Hopper · Starring A, B, C")
+    show = { kind: "show", crew: [{ id: 5, name: "Vince", role: "creator" }], cast: [] }
+    tkEqual(contentCredits(show), "Created by Vince")
+    tkEqual(contentCredits({ kind: "movie" }), "")
+end sub
+
+sub test_content_about_has_the_whole_summary_and_the_facts()
+    now = 1767225600 ' 2026-01-01
+    movie = { kind: "movie", title: "Dune", original_title: "Dune: Part One", release_date: "2021-10-22", studio: "Legendary", summary: "Paul goes to Arrakis.", user_state: { play_count: 2 }, crew: [{ id: 1, name: "A", role: "writer" }, { id: 2, name: "B", role: "writer" }, { id: 3, name: "C", role: "writer" }, { id: 4, name: "D", role: "writer" }, { id: 5, name: "E", role: "writer" }, { id: 6, name: "F", role: "director" }] }
+    lines = contentAbout(movie, now, 0).Split(Chr(10))
+    tkEqual(lines[0], "Paul goes to Arrakis.")
+    tkEqual(lines[1], "")
+    tkEqual(lines[2], "Director: F")
+    tkEqual(lines[3], "Writers: A, B, C, D and 1 more")
+    tkEqual(lines[4], "Original title: Dune: Part One")
+    tkEqual(lines[5], "Released: Oct 22, 2021")
+    tkEqual(lines[6], "Studio: Legendary")
+    tkEqual(lines[7], "Plays: 2")
+    tkEqual(contentAbout({ kind: "show", studio: "HBO", summary: "" }, now, 0), "Network: HBO")
+    tkEqual(contentAbout({ kind: "movie", title: "Dune", original_title: "Dune", summary: "Short." }, now, 0), "", "nothing beyond the page")
+end sub
+
+sub test_content_titles_in_french()
+    i18nUse("fr")
+    nbsp = Chr(160)
+    tkEqual(contentDetail(contentTestDetail(), contentTestServer()).buttons, ["Reprendre à 10:00", "Lire depuis le début", "Marquer comme vu", "Ajouter à Ma liste", "Plus…"])
+    tkEqual(contentRatingLabel(4), "Votre note" + nbsp + ": 4 étoiles")
+    tkEqual(contentStarsLabel(1), "1 étoile")
+    tkEqual(contentMediaLine(invalid), "Débit inconnu")
+    tkEqual(contentTiles([contentTestMovie()], contentTestServer(), true, true)[0].subtitle, "Débit inconnu", "looked up once for the page")
+    tkEqual(contentEpisodes([contentTestEpisode()], contentTestServer())[0].subtitle, "55 min · Vu")
+    seasons = contentSeasons([{ id: 98, kind: "season", title: "", index: 0 }, { id: 99, kind: "season", title: "", index: 2 }])
+    tkEqual(seasons[0].title, "Épisodes spéciaux")
+    tkEqual(seasons[1].title, "Saison 2")
+    movie = { kind: "movie", title: "Dune", crew: [{ id: 9, name: "Grace Hopper", role: "director" }], cast: [{ id: 1, name: "A" }, { id: 2, name: "B" }] }
+    tkEqual(contentCredits(movie), "Réalisation" + nbsp + ": Grace Hopper · Avec A, B")
+    writers = []
+    for i = 1 to 5
+        writers.Push({ id: i, name: Chr(64 + i), role: "writer" })
+    end for
+    lines = contentAbout({ kind: "movie", summary: "", crew: writers, user_state: { play_count: 2 } }, 0, 0).Split(Chr(10))
+    tkEqual(lines, ["Scénario" + nbsp + ": A, B, C, D et 1 autre", "Lectures" + nbsp + ": 2"])
+    tkEqual(contentSubtitleName({ title: invalid, forced: true }, "eng"), "Anglais (forcés)")
+    tkEqual(contentSubtitleName({ title: "Français (forcés)", forced: true }, "fre"), "Français (forcés)", "said once, in French too")
+    tkEqual(contentSubtitleName({ title: "" }, "und"), "Inconnu")
+end sub
+
+sub test_content_titles_in_spanish()
+    i18nUse("es")
+    show = ParseJson("{""id"":99,""kind"":""show"",""title"":""Severance"",""year"":2022,""child_count"":2,""user_state"":{""position_ms"":0,""watched"":false},""files"":[]}")
+    onDeck = contentTestEpisode()
+    onDeck.user_state.position_ms = 600000
+    detail = contentDetail(show, contentTestServer(), onDeck)
+    tkEqual(detail.line, "2022 · 2 temporadas")
+    tkEqual(detail.buttons, ["Reanudar T1 E1", "Episodios", "Marcar como visto", "Añadir a Mi lista", "Más…"])
+    tkEqual(detail.more[0].label, "Valorar")
+    artist = contentTile({ id: 3, kind: "artist", title: "Someone", child_count: 1 }, contentTestServer(), false)
+    tkEqual(artist.subtitle, "1 álbum")
+    artist = contentTile({ id: 3, kind: "artist", title: "Someone", child_count: 12345 }, contentTestServer(), false)
+    tkEqual(artist.subtitle, "12.345 álbumes", "a count is written the language's way")
+    tkEqual(contentHomeRows([{ key: "top_rated:1", title: "Mejor valoradas", library_id: 1, items: [contentTestMovie()] }], contentTestServer())[0].tiles[1].title, "Ver todo")
+    tkEqual(contentSubtitleName({ title: "Español", forced: true }, "spa"), "Español (forzados)")
+    tkEqual(contentSubtitleName({ title: "Forzados", forced: true }, "spa"), "Forzados")
+end sub
+
+sub test_content_details_offers_details_in_more()
+    movie = { id: 5, kind: "movie", title: "Dune", studio: "Legendary", files: [{ id: 1 }], user_state: {} }
+    actions = []
+    for each entry in contentDetail(movie, contentTestServer()).more
+        actions.Push(entry.action)
+    end for
+    tkEqual(actions, ["rate", "info", "about", "playlist"])
 end sub

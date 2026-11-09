@@ -1,11 +1,13 @@
+import { useTranslation } from "react-i18next";
 import { Play } from "lucide-react";
 import { useChildren, useOnDeck } from "@/api/hooks";
 import type { ItemDetail } from "@/api/types";
 import { CardSkeleton, MediaCard } from "@/components/cards";
 import { PartOfCollections } from "@/components/lists/PartOfCollections";
+import { PlayOn } from "@/components/PlayOn";
 import { StarRating } from "@/components/StarRating";
 import { Button, SectionTitle } from "@/components/ui";
-import { episodeLabel, pluralize } from "@/lib/format";
+import { episodeLabel } from "@/lib/format";
 import { useElementWidth } from "@/lib/hooks";
 import { usePlayItem } from "@/lib/usePlayItem";
 import { playIntent } from "@/player/preload";
@@ -17,6 +19,7 @@ import { ItemRequestLine } from "./ItemRequest";
 import {
   ContentRating,
   Genres,
+  Labels,
   ItemArt,
   ItemPageShell,
   MetaLine,
@@ -28,6 +31,7 @@ import {
 } from "./shared";
 
 export function ShowView({ item }: { item: ItemDetail }) {
+  const { t } = useTranslation(["item", "common"]);
   const play = usePlayItem();
   const seasons = useChildren(item.id);
   const onDeck = useOnDeck(item.id);
@@ -37,7 +41,9 @@ export function ShowView({ item }: { item: ItemDetail }) {
 
   const ep = onDeck.data;
   const resuming = ep && ep.user_state.position_ms > 0 && !ep.user_state.watched;
-  const playLabel = ep ? `${resuming ? "Resume" : "Play"} ${episodeLabel(ep)}` : "Play";
+  const playLabel = ep
+    ? t(resuming ? "resumeEpisode" : "playEpisode", { episode: episodeLabel(ep) })
+    : t("common:actions.play");
 
   return (
     <ItemPageShell item={item}>
@@ -51,8 +57,8 @@ export function ShowView({ item }: { item: ItemDetail }) {
             <MetaLine
               parts={[
                 item.year,
-                item.child_count ? pluralize(item.child_count, "season") : null,
-                item.leaf_count ? pluralize(item.leaf_count, "episode") : null,
+                item.child_count ? t("counts.seasons", { count: item.child_count }) : null,
+                item.leaf_count ? t("counts.episodes", { count: item.leaf_count }) : null,
                 item.content_rating ? <ContentRating key="cr" value={item.content_rating} /> : null,
                 item.rating != null && item.rating > 0 ? <RatingBadge key="r" rating={item.rating} /> : null,
                 item.studio,
@@ -61,6 +67,7 @@ export function ShowView({ item }: { item: ItemDetail }) {
             <StarRating item={item} />
           </div>
           <Genres genres={item.genres} />
+          <Labels labels={item.labels} />
           <PartOfCollections item={item} />
           <div className="flex flex-wrap items-center gap-2.5 pt-1">
             <Button
@@ -73,6 +80,8 @@ export function ShowView({ item }: { item: ItemDetail }) {
             >
               {playLabel}
             </Button>
+            {/* The device plays the episode its own Play would. */}
+            {item.leaf_count || ep ? <PlayOn kind="item" cast={() => ({ item_id: item.id })} /> : null}
             <MyListButton item={item} />
             <WatchedButton item={item} />
             <MoreActions item={item} />
@@ -89,7 +98,7 @@ export function ShowView({ item }: { item: ItemDetail }) {
       </div>
 
       <section className="mt-12">
-        <SectionTitle>Seasons</SectionTitle>
+        <SectionTitle>{t("show.seasons")}</SectionTitle>
         <div
           ref={gridRef}
           className="grid gap-x-[18px] gap-y-6"
@@ -99,13 +108,13 @@ export function ShowView({ item }: { item: ItemDetail }) {
             ? Array.from({ length: Math.min(cols, 6) }, (_, i) => <CardSkeleton key={i} aspect="poster" />)
             : seasons.data?.map((s) => <MediaCard key={s.id} item={s} aspect="poster" width={colWidth} />)}
         </div>
-        {seasons.data && seasons.data.length === 0 ? <p className="text-sm text-muted">No seasons found.</p> : null}
+        {seasons.data && seasons.data.length === 0 ? <p className="text-sm text-muted">{t("show.noSeasons")}</p> : null}
         {seasons.isError && !seasons.data ? (
-          <SectionError what="the seasons" error={seasons.error} retry={() => void seasons.refetch()} />
+          <SectionError what="seasons" error={seasons.error} retry={() => void seasons.refetch()} />
         ) : null}
       </section>
       <ExtrasRow extras={item.extras} />
-      <CastRow title="Cast" credits={item.cast} />
+      <CastRow title={t("cast")} credits={item.cast} />
       <MoreLikeThis item={item} />
     </ItemPageShell>
   );

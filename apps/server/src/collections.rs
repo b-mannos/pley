@@ -139,7 +139,7 @@ pub async fn list(db: &Db, user: &AuthUser, library_id: i64) -> sqlx::Result<Vec
     {
         for row in &rows {
             if let Some(filter) = &row.smart_filter {
-                let count = crate::plex::smart_count(db, user.id, &lib, filter).await?;
+                let count = crate::listing::smart_count(db, user.id, &lib, filter).await?;
                 counts.insert(row.id, i64::try_from(count).unwrap_or(i64::MAX));
             }
         }
@@ -188,7 +188,7 @@ pub async fn get(db: &Db, user: &AuthUser, id: i64) -> sqlx::Result<Option<(Coll
     let items = match &row.smart_filter {
         // What the filter finds, in the filter's order.
         Some(filter) => match crate::library::get_library(db, row.library_id).await? {
-            Some(lib) => crate::plex::smart_items(db, user.id, &lib, filter).await?,
+            Some(lib) => crate::listing::smart_items(db, user.id, &lib, filter).await?,
             None => Vec::new(),
         },
         None => catalog::items_by_ids(db, user.id, &ordered_ids(db, id, &row.sort).await?).await?,
@@ -387,6 +387,26 @@ pub async fn reorder(db: &Db, id: i64, item_ids: &[i64]) -> sqlx::Result<()> {
         .execute(&mut *tx)
         .await?;
     tx.commit().await
+}
+
+/// Move an item right after another one, or first (`after: None`), in the
+/// order the collection shows now, which it keeps from then on (`custom`).
+/// False when either isn't in the collection.
+pub async fn move_item(db: &Db, id: i64, item_id: i64, after: Option<i64>) -> sqlx::Result<bool> {
+    let Some(row) = row(db, id).await? else { return Ok(false) };
+    let mut order = ordered_ids(db, id, &row.sort).await?;
+    let Some(from) = order.iter().position(|i| *i == item_id) else { return Ok(false) };
+    order.remove(from);
+    let to = match after {
+        Some(after) => match order.iter().position(|i| *i == after) {
+            Some(at) => at + 1,
+            None => return Ok(false),
+        },
+        None => 0,
+    };
+    order.insert(to, item_id);
+    reorder(db, id, &order).await?;
+    Ok(true)
 }
 
 /// Own artwork of the collection, or `Err(item)` to fall back to: the first

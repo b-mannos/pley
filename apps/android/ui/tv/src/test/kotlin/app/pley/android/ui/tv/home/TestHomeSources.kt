@@ -10,6 +10,7 @@ import app.pley.android.data.PlayTarget
 import app.pley.android.data.ScanState
 import app.pley.android.data.Session
 import app.pley.android.data.WatchStateRepository
+import app.pley.android.data.WatchlistRepository
 import app.pley.android.model.CollectionSummary
 import app.pley.android.model.Hubs
 import app.pley.android.model.ItemDetail
@@ -22,6 +23,7 @@ import java.util.Collections
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 
 /** Home's sources, every one a fake the test drives and reads. */
@@ -34,6 +36,8 @@ class TestHomeSources : HomeSources {
     val scanList = MutableStateFlow<List<ScanState>>(emptyList())
     val played: MutableList<PlayRequest> = Collections.synchronizedList(mutableListOf())
     val watched: MutableList<Pair<Long, Boolean>> = Collections.synchronizedList(mutableListOf())
+    /** My List as asked: the item, and whether it went on. */
+    val listed: MutableList<Pair<Long, Boolean>> = Collections.synchronizedList(mutableListOf())
     val hidden: MutableList<Long> = Collections.synchronizedList(mutableListOf())
     var hubRefreshes = 0
     var libraryRefreshes = 0
@@ -78,10 +82,11 @@ class TestHomeSources : HomeSources {
 
     override val items = object : ItemRepository {
         override fun detail(itemId: Long): Flow<Loadable<ItemDetail>> = this@TestHomeSources.detail(itemId)
-        override fun children(itemId: Long): Flow<Loadable<List<ItemSummary>>> = error("not on Home")
-        override fun onDeck(itemId: Long): Flow<Loadable<ItemSummary?>> = error("not on Home")
-        override fun related(itemId: Long): Flow<Loadable<List<ItemSummary>>> = error("not on Home")
-        override fun collectionsOf(itemId: Long): Flow<Loadable<List<CollectionSummary>>> = error("not on Home")
+        // An item's page opened in the frame: nothing more than its details.
+        override fun children(itemId: Long): Flow<Loadable<List<ItemSummary>>> = flowOf(Loadable.Ready(emptyList(), fresh = true))
+        override fun onDeck(itemId: Long): Flow<Loadable<ItemSummary?>> = flowOf(Loadable.Ready(null, fresh = true))
+        override fun related(itemId: Long): Flow<Loadable<List<ItemSummary>>> = flowOf(Loadable.Ready(emptyList(), fresh = true))
+        override fun collectionsOf(itemId: Long): Flow<Loadable<List<CollectionSummary>>> = flowOf(Loadable.Ready(emptyList(), fresh = true))
         override suspend fun next(itemId: Long): ItemSummary? = error("not on Home")
         override fun prefetch(itemId: Long) {
             prefetched += itemId
@@ -107,6 +112,20 @@ class TestHomeSources : HomeSources {
                 if (!hub.continueWatching) hub else hub.copy(items = hub.items.filterNot { it.id == itemId }).takeIf { it.items.isNotEmpty() }
             }
             home.value = Loadable.Ready(Hubs(hubs), fresh = true)
+        }
+    }
+
+    // As the data side does: the item's details say at once whether it is on My List.
+    override val watchlist = object : WatchlistRepository {
+        override fun watchlist(): Flow<Loadable<List<ItemSummary>>> = error("not on Home")
+        override suspend fun add(itemId: Long) = list(itemId, true)
+        override suspend fun remove(itemId: Long) = list(itemId, false)
+        override suspend fun refresh() = Unit
+
+        private fun list(itemId: Long, inList: Boolean) {
+            listed += itemId to inList
+            val flow = this@TestHomeSources.detail(itemId)
+            (flow.value as? Loadable.Ready)?.let { flow.value = Loadable.Ready(it.value.copy(inWatchlist = inList), fresh = true) }
         }
     }
 

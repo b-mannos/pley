@@ -1,7 +1,8 @@
 """Asking the server to play something, for the plugin's play route (which
 hands Kodi the answer) and pley's window (which plays it itself): what this
 Kodi plays, the address to play, Kodi's item for it, and what the service
-needs to report progress and offer Skip and Up Next."""
+needs to report progress and offer Skip and Up Next; and Kodi's queues of
+pley's titles, which the window and a cast from the user's remote play."""
 
 from __future__ import annotations
 
@@ -9,11 +10,12 @@ import json
 import os
 import threading
 import time
+from urllib.parse import urlencode
 
 import xbmc
 import xbmcgui
 
-from . import api, autoquality, kodi, listing, tracks
+from . import api, autoquality, kodi, listing, remote, tracks
 from .api import path_in
 
 # The quality setting (docs/QUALITY.md): a quality's id. Before Automatic
@@ -59,13 +61,19 @@ def beside(base: str, info: dict, file=None) -> list:
     ]
 
 
-def prepare(client: api.Client, base: str, item_id: int, start_ms: int, detail=None, restart=None) -> xbmcgui.ListItem:
+def prepare(
+    client: api.Client, base: str, item_id: int, start_ms: int, detail=None, restart=None, kind=None, given=None
+) -> xbmcgui.ListItem:
     """Kodi's item for playing `item_id` from `start_ms`, its address set,
     once the server said how. The item's details (for Kodi's info) are
     asked for while the server decides, unless given. Tells the service
     what plays (kodi.PLAYING). `restart` is Automatic's quality when the
-    service plays the title again at another one."""
+    service plays the title again at another one. `kind` is the title's,
+    when known without its details (from a listing). `given`: the tracks a
+    cast named that the first file has (tracks.given_tracks), played in
+    place of the account's choice."""
     started = time.perf_counter()
+    kind = (detail or {}).get("kind") or kind
     details = {"item": detail} if detail else {}
     loader = None
     if not detail:
@@ -80,19 +88,24 @@ def prepare(client: api.Client, base: str, item_id: int, start_ms: int, detail=N
         "max_bitrate": asked["max_bitrate"],
         "max_height": asked["max_height"],
         "mode": asked["mode"],
+        "controls": obeys(item_id, kind, tracks.file_of(detail)),
     }
-    # The account's subtitles, when they are pictures Kodi can't be given
-    # as a file (VobSub, DVB): drawn onto the video if the file is
-    # converted (the server draws nothing when Kodi shows them itself). PGS
-    # comes as a `.sup` file beside the stream (`beside`).
-    burn = tracks.burn_index(tracks.file_of(detail))
+    request.update(remote.device())
+    if (given or {}).get("audio") is not None:
+        # A cast's audio, of the first file, which plays when none is named.
+        request["audio_index"] = given["audio"]
+    # The account's subtitles (or a cast's), when they are pictures Kodi
+    # can't be given as a file (VobSub, DVB): drawn onto the video if the
+    # file is converted (the server draws nothing when Kodi shows them
+    # itself). PGS comes as a `.sup` file beside the stream (`beside`).
+    burn = tracks.burn_index(tracks.with_given(tracks.file_of(detail), given))
     if burn is not None:
         request.update(file_id=tracks.file_of(detail)["id"], subtitle_index=burn)
     info = client.post("/api/playback", request)
     if loader:
         loader.join(10)
     detail = details.get("item")
-    file = tracks.file_of(detail, info.get("file_id")) if detail else None
+    file = tracks.with_given(tracks.file_of(detail, info.get("file_id")), given) if detail else None
     if file is not None and "subtitle_index" not in request and tracks.needs_burn(info, file):
         # The details came with the answer: asked again, with them drawn on.
         request.update(file_id=file["id"], subtitle_index=tracks.chosen_subtitle(file)["index"])
@@ -129,12 +142,19 @@ def prepare(client: api.Client, base: str, item_id: int, start_ms: int, detail=N
         "duration_ms": duration_ms,
         "path": url,
         # What the service needs for Skip and Up Next, so it asks for none of it again.
-        "kind": (detail or {}).get("kind"),
+        "kind": (detail or {}).get("kind") or kind,
         "markers": markers,
     }
     if (detail or {}).get("kind") not in listing.MUSIC:
         # The account's audio and subtitles, which the service shows in Kodi.
         playing["tracks"] = tracks.layout(info, file)
+        # The Quality menu (Kodi's setting) as the file offers it, and its
+        # pick, which reports say and the user's remote changes.
+        playing["qualities"] = qualities(file)
+        playing["quality"] = autoquality.picked(chosen_quality(), playing["qualities"])
+        if given:
+            # Played again (another quality, Automatic) with them too.
+            playing["given"] = given
         if asked["automatic"]:
             # What the service's Automatic watches the playback with.
             playing["auto"] = automatic(asked, info, file)
@@ -143,6 +163,39 @@ def prepare(client: api.Client, base: str, item_id: int, start_ms: int, detail=N
     elapsed = (time.perf_counter() - started) * 1000
     kodi.log("playing %d by %s, ready in %d ms%s" % (item_id, info.get("method"), elapsed, ": " + reason if reason else ""))
     return li
+
+
+def obeys(item_id: int, kind=None, file=None) -> list:
+    """What the user's remote may do with this playback (remote.controls):
+    a track's, one in Kodi's music queue or known to be music; a video's
+    otherwise, with next for an episode (the one after it, as Up Next
+    plays) or when Kodi's queue has something after it, audio and
+    subtitles when `file` (its details) has tracks of them, and the
+    quality. Without the details, which come with the server's answer,
+    both tracks: most files have them, and a remote offers only the tracks
+    the session lists."""
+    place = remote.queue_place(item_id)
+    music = (place is not None and place[0] == "music") or kind in listing.MUSIC
+    if music:
+        return remote.controls("music")
+    has_next = (place is not None and place[1] + 1 < place[2]) or kind == "episode"
+    audio = subtitles = 1
+    if file is not None:
+        streams = file.get("streams") or []
+        audio = sum(1 for s in streams if s.get("kind") == "audio")
+        subtitles = sum(1 for s in streams if s.get("kind") == "subtitle")
+    # The quality setting is Kodi's Quality menu: the remote changes it.
+    return remote.controls("video", has_next=has_next, audio=audio, subtitles=subtitles, quality=True)
+
+
+def qualities(file) -> list:
+    """The ids of the Quality menu as the file offers it (`file`, its
+    details; the whole menu when they couldn't be had), as the server lists
+    them to the user's remotes."""
+    file = file or {}
+    video = next((s for s in file.get("streams") or [] if s.get("kind") == "video"), None) or {}
+    width, height = file.get("width") or video.get("width"), file.get("height") or video.get("height")
+    return autoquality.menu_for(width, height, file.get("bitrate"))
 
 
 def file_mime(detail, file_id):
@@ -159,6 +212,50 @@ def load_details(client: api.Client, item_id: int, into: dict) -> None:
         into["item"] = client.get("/api/items/%d" % item_id)
     except api.ApiError as e:
         kodi.log("details of %d: %s" % (item_id, e.message), xbmc.LOGWARNING)
+
+
+# ------------------------------------------------------------ Kodi's queues
+
+
+def play_url(item_id: int, **more) -> str:
+    """The plugin's play route for `item_id`, which Kodi asks as it comes
+    to it; `more`: its kind, and `start`, where it starts whatever Kodi was
+    told (route_play)."""
+    return "plugin://%s/?%s" % (kodi.ADDON_ID, urlencode(dict(route="play", id=item_id, **more)))
+
+
+def queue(base: str, items: list, at: int = 0, shuffle: bool = False, music: bool = True, start_ms: int = 0) -> tuple:
+    """Kodi's music queue (its video queue, `music` false) holding `items`,
+    each through the plugin's play route, which Kodi asks as it comes to
+    it, so each is reported as it plays; and where to start in it: at
+    `at`, `start_ms` into it, or, shuffled, wherever the shuffle put first
+    (the web's audio queue)."""
+    playlist = xbmc.PlayList(xbmc.PLAYLIST_MUSIC if music else xbmc.PLAYLIST_VIDEO)
+    playlist.clear()
+    for place, item in enumerate(items):
+        more = {"start": int(start_ms)} if place == at and start_ms > 0 and not shuffle else {}
+        playlist.add(play_url(item["id"], **more), listing.list_item(base, item))
+    if shuffle:
+        playlist.shuffle()
+        at = 0
+    else:
+        playlist.unshuffle()
+    return playlist, at
+
+
+def newest_first(albums: list) -> list:
+    """An artist's albums as the web lists them: newest first, then by title."""
+    return sorted(albums, key=lambda a: (-(a.get("year") or 0), (a.get("sort_title") or a.get("title") or "").lower()))
+
+
+def music_tracks(client, item: dict) -> list:
+    """An album's tracks, or an artist's, album by album (newest first)."""
+    children = lambda id_: client.get("/api/items/%d/children" % id_).get("items", [])  # noqa: E731
+    if item.get("kind") == "album":
+        return children(item["id"])
+    albums = newest_first(children(item["id"]))
+    lists = api.together(*[lambda a=a: children(a["id"]) for a in albums]) if albums else []
+    return [track for found in lists for track in found or []]
 
 
 def chosen_quality() -> str:

@@ -12,7 +12,6 @@ public sealed class AppMusicServer : IMusicServer
 
     readonly AppState app;
     readonly Func<TizenFacts> facts;
-    readonly SessionReporter reporter = new SessionReporter();
 
     /// <param name="facts">What this TV is, for the report of what it plays.</param>
     public AppMusicServer(AppState app, Func<TizenFacts> facts)
@@ -28,19 +27,20 @@ public sealed class AppMusicServer : IMusicServer
     public async Task<IPlaybackSession> Start(long itemId, long startMs, bool transcode)
     {
         var api = Api;
-        // The session before goes first (stopped, then DELETE): the server's limit on conversions.
-        await Task.WhenAny(reporter.Flush(), Task.Delay(FlushWaitMs)).ConfigureAwait(false);
+        // The session before goes first (stopped, then DELETE): the server's limit on conversions. The
+        // reports go with the player's, the app's, which a cast's switch waits for.
+        await Task.WhenAny(app.Reporter.Flush(), Task.Delay(FlushWaitMs)).ConfigureAwait(false);
         var caps = TizenCaps.Of(facts(), app.Settings.Value.Passthrough);
         var body = PlayRequests.MusicBody(itemId, startMs, transcode, app.InstallId(), caps);
-        return await PlaybackSession.Start(api, itemId, body, reporter).ConfigureAwait(false);
+        return await PlaybackSession.Start(api, itemId, body, app.Reporter).ConfigureAwait(false);
     }
 
     public Task Status(string session) => Api.PlaybackStatus(session);
 
     /// <summary>
     /// The app's music player: it plays behind every page, ends with the profile, the sign-in, the
-    /// server or the app (<see cref="AppState.OnLeave"/>), and stops when the server stops its
-    /// session (<c>session_stopped</c>).
+    /// server or the app (<see cref="AppState.OnLeave"/>), stops when the server stops its
+    /// session (<c>session_stopped</c>), and obeys the profile's remote (<c>player_command</c>).
     /// </summary>
     public static MusicPlayer Player(AppState app, Func<IMediaEngine> engines, Func<TizenFacts> facts, IScheduler scheduler)
     {
@@ -49,6 +49,7 @@ public sealed class AppMusicServer : IMusicServer
         app.OnEvent(e =>
         {
             if (e.Type == "session_stopped" && e.SessionId != null) player.StoppedByServer(e.SessionId);
+            else if (e.Type == "player_command") player.Obey(e);
         });
         return player;
     }

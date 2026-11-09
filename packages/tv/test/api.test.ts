@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Api, unreachable, unreachableReason } from "../src/api/client";
 import type { Tokens } from "../src/auth/tokens";
 import { NetworkError, TIMED_OUT, type HttpRequest, type HttpResponse } from "../src/net/transport";
+import { Listing } from "../src/ui/screens/library-data";
 
-const tokens = { accessToken: () => Promise.resolve("token") } as unknown as Tokens;
+const tokens = { accessToken: () => Promise.resolve("token"), doubtServer: () => {} } as unknown as Tokens;
 
 /** A transport whose answers the test decides: `null` never answers, so the request times out (as XHR does) unless cancelled first. */
 function transport(answer: (req: HttpRequest) => Promise<HttpResponse> | null) {
@@ -30,6 +31,19 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("a request nothing answers", () => {
+  it("has the next token wait for the server to prove itself again, unless it was cancelled", async () => {
+    const doubtServer = vi.fn();
+    const watched = { accessToken: () => Promise.resolve("token"), doubtServer } as unknown as Tokens;
+    const unanswered = new Api("http://192.168.1.20:7539", watched, () => Promise.reject(new NetworkError("nothing answers")));
+    await expect(unanswered.send("/api/home")).rejects.toThrow("nothing answers");
+    expect(doubtServer).toHaveBeenCalledTimes(1);
+    const cancelled = new Api("http://192.168.1.20:7539", watched, () => Promise.reject(new NetworkError("cancelled", true)));
+    await expect(cancelled.send("/api/home")).rejects.toThrow("cancelled");
+    expect(doubtServer).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("a server on the home network", () => {
@@ -103,6 +117,77 @@ describe("the token", () => {
       ["https://evil.example.com/api/items/1", undefined],
       ["http://pley.example.com/api/items/1", undefined],
       ["https://pley.example.com:8443/x", undefined],
+    ]);
+  });
+});
+
+describe("a library's listing", () => {
+  it("asks for its filters in one order, the resolution and dynamic range after the year, as the listing's ETag hashes it", async () => {
+    const t = transport(() => ok({ total: 0, items: [] }));
+    const api = new Api("http://192.168.1.20:7539", tokens, t.http);
+    const params = { sort: "year", order: "desc", watched: false, genre: "Drama", year: 1999, resolution: "4k", dynamicRange: "hdr" } as const;
+    await new Listing(api, 3, params, 5000, () => undefined).start();
+    expect(t.asked).toEqual(["GET /api/libraries/3/items?sort=year&order=desc&watched=false&genre=Drama&year=1999&resolution=4k&dynamic_range=hdr&offset=0&limit=200"]);
+  });
+});
+
+describe("search", () => {
+  it("asks for the server's most, 200 of each, which its rows show whole", async () => {
+    const t = transport(() => ok({ items: [], people: [] }));
+    const api = new Api("http://192.168.1.20:7539", tokens, t.http);
+    await api.search("dune");
+    expect(t.asked).toEqual(["GET /api/search?q=dune&limit=200"]);
+  });
+});
+
+describe("a live session", () => {
+  it("says why it ended in the server's own words", async () => {
+    const answers: Record<string, HttpResponse> = {
+      "/api/live/sessions/s1/plan": { status: 410, header: () => "application/json", body: { code: "session_stopped", message: "Watching moved to Sky on another device." } },
+      "/api/live/sessions/s2/plan": { status: 410, header: () => "application/json", body: { code: "session_stopped", message: null } },
+      "/api/live/sessions/s3/plan": { status: 200, header: () => "application/json", body: { video: "copy", audio: "copy" } },
+    };
+    const t = transport((req) => Promise.resolve(answers[req.url.replace(/^https?:\/\/[^/]+/, "")]!));
+    const api = new Api("https://pley.example.com", tokens, t.http);
+    expect(await api.whyLiveEnded("s1")).toBe("Watching moved to Sky on another device.");
+    // None: "", not a video's "stopped by the administrator".
+    expect(await api.whyLiveEnded("s2")).toBe("");
+    expect(await api.whyLiveEnded("s3")).toBeNull();
+  });
+});
+
+describe("what plays here", () => {
+  it("plays on a TV, as the remote on the user's other devices is told, with what the player obeys", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const t = transport((req) => {
+      bodies.push(JSON.parse(req.body as string) as Record<string, unknown>);
+      return ok({ session_id: "s1", url: "/api/live/media/pley_mk_1/index.m3u8", kind: "hls", channel: {} });
+    });
+    const api = new Api("https://pley.example.com", tokens, t.http);
+    await api.play({ item_id: 70, client_id: "tizen-tv", controls: ["play", "pause"], caps: {} as never });
+    await api.watchChannel(4, "tizen-tv", undefined, undefined, ["next", "previous"]);
+    await api.watchChannel(4, "tizen-tv");
+    expect(bodies).toEqual([
+      { item_id: 70, client_id: "tizen-tv", controls: ["play", "pause"], caps: {}, device_kind: "tv" },
+      { client_id: "tizen-tv", keyed_urls: true, controls: ["next", "previous"], device_kind: "tv" },
+      { client_id: "tizen-tv", keyed_urls: true, controls: [], device_kind: "tv" },
+    ]);
+  });
+
+  it("reports a video's tracks and quality with its place, by stream index and id; music's without", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const t = transport((req) => {
+      bodies.push(JSON.parse(req.body as string) as Record<string, unknown>);
+      return Promise.resolve({ status: 204, header: () => null, body: null });
+    });
+    const api = new Api("https://pley.example.com", tokens, t.http);
+    await api.progress(70, 600_000, 7_200_000, "playing", "s1", { audio: 2, subtitle: -1, quality: "auto" });
+    await api.progress(70, 600_000, 7_200_000, "paused", "s1", { audio: null, subtitle: 4, quality: "8m" });
+    await api.progress(31, 60_000, 240_000, "playing", "t1");
+    expect(bodies).toEqual([
+      { position_ms: 600_000, duration_ms: 7_200_000, state: "playing", session_id: "s1", audio_index: 2, subtitle_index: -1, quality: "auto" },
+      { position_ms: 600_000, duration_ms: 7_200_000, state: "paused", session_id: "s1", subtitle_index: 4, quality: "8m" },
+      { position_ms: 60_000, duration_ms: 240_000, state: "playing", session_id: "t1" },
     ]);
   });
 });

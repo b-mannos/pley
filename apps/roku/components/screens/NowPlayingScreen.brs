@@ -1,12 +1,14 @@
 ' Now Playing: what the music player (m.global.music) plays, and Up next,
 ' the queue with the track playing marked (Music.brs lists a long one a
-' part at a time): OK on one plays it, and the queue goes on from there. Shuffle plays the other tracks after this one in a random order;
-' Stop shuffling puts the order back. The sleep timer's button steps
-' through its choices, and in the timer's last 30 s, while a line counts
-' down, it is Keep listening. The remote's play pauses or goes on, fast
-' forward and rewind go to the next track or back. Down goes from the
-' buttons to Up next, Up from its first track back. Its fields are
-' followed only while this screen shows.
+' part at a time): OK on one plays it, and the queue goes on from there.
+' Shuffle plays the other tracks after this one in a random order; Stop
+' shuffling puts the order back. The sleep timer's button steps through
+' its choices, and in the timer's last 30 s, while a line counts down, it
+' is Keep listening. The remote's play pauses or goes on, fast forward and
+' rewind go to the next track or back. Down goes from the buttons to Up
+' next, Up from its first track back; Up from the buttons goes to the
+' scrubber, where Left and Right move 10 s, as on Android TV. Its fields
+' are followed only while this screen shows.
 
 sub init()
     m.backdrop = m.top.findNode("backdrop")
@@ -16,6 +18,8 @@ sub init()
     m.album = m.top.findNode("album")
     m.track = m.top.findNode("track")
     m.fill = m.top.findNode("fill")
+    m.scrubber = m.top.findNode("scrubber")
+    m.scrubFocus = m.top.findNode("scrubFocus")
     m.elapsed = m.top.findNode("elapsed")
     m.left = m.top.findNode("left")
     m.buttons = m.top.findNode("buttons")
@@ -23,8 +27,30 @@ sub init()
     m.message = m.top.findNode("message")
     m.upNextTitle = m.top.findNode("upNextTitle")
     m.upNext = m.top.findNode("upNext")
+    m.top.findNode("heading").text = t("player.nowPlaying.title")
+    m.upNextTitle.text = t("player.upNext.title")
     m.watching = false
     m.labels = []
+    ' The buttons' words, and how wide each is: wide enough for either of
+    ' its words, as wide as English's at least, so the row stays still as
+    ' they change; the sleep timer's, as wide as what it says.
+    m.words = {
+        shuffle: t("player.nowPlaying.shuffle"),
+        unshuffle: t("player.nowPlaying.stopShuffling"),
+        previousTrack: t("player.nowPlaying.previous"),
+        pause: t("player.nowPlaying.pause"),
+        play: t("common.actions.play"),
+        nextTrack: t("player.nowPlaying.next"),
+        stopAll: t("player.nowPlaying.stop")
+    }
+    m.widths = [
+        chipWidth([m.words.shuffle, m.words.unshuffle], 300),
+        chipWidth([m.words.previousTrack], 220),
+        chipWidth([m.words.pause, m.words.play], 180),
+        chipWidth([m.words.nextTrack], 160),
+        chipWidth([m.words.stopAll], 160),
+        0
+    ]
     ' Up next: the queue it lists (its queueId) and its tracks, read once,
     ' the part of it listed ({ first, last }, invalid before any), its
     ' rows, and the track marked as playing (-1 for none).
@@ -94,7 +120,7 @@ end sub
 sub onAt()
     music = m.global.music
     at = music.at
-    m.queue.text = "Track " + urlValue(at + 1) + " of " + urlValue(music.queueSize)
+    m.queue.text = t("player.nowPlaying.position", { at: at + 1, total: music.queueSize })
     if music.queueId <> m.queueId
         m.queueId = music.queueId
         m.tracks = music.queue
@@ -133,10 +159,21 @@ sub markRow(at as integer, current as boolean)
     m.rows.replaceChild(fresh, index)
 end sub
 
-' Stopped (the queue played out, or Stop), the screen goes.
+' Stopped (the queue played out, or Stop), the screen goes; stopped from
+' another device or by the server's administrator, the scene says so over
+' the screen before, as after a video.
 sub onMusicState()
-    if m.global.music.state = "stopped"
-        if m.top.active then uiNavigate({ back: true })
+    music = m.global.music
+    if music.state = "stopped"
+        if not m.top.active then return
+        if music.stoppedBy = ""
+            uiNavigate({ back: true })
+            return
+        end if
+        lines = music.stoppedBy.Split(Chr(10))
+        message = []
+        if lines.Count() > 1 then message.Push(lines[1])
+        uiNavigate({ back: true, message: { title: lines[0], lines: message } })
         return
     end if
     showButtons()
@@ -147,22 +184,39 @@ end sub
 ' sleep timer's button, as wide as what it says.
 sub showButtons()
     music = m.global.music
-    shuffle = "Shuffle"
-    if music.shuffled then shuffle = "Stop shuffling"
-    toggle = "Pause"
-    if music.state = "paused" then toggle = "Play"
-    sleep = "Sleep timer"
+    words = m.words
+    shuffle = words.shuffle
+    if music.shuffled then shuffle = words.unshuffle
+    toggle = words.pause
+    if music.state = "paused" then toggle = words.play
+    sleep = t("player.sleep.title")
     if music.sleep <> invalid then sleep = music.sleep.button
-    labels = [shuffle, "Previous", toggle, "Next", "Stop", sleep]
+    labels = [shuffle, words.previousTrack, toggle, words.nextTrack, words.stopAll, sleep]
     if FormatJson(labels) = FormatJson(m.labels) then return
     m.labels = labels
-    widths = [300, 220, 180, 160, 160, 0]
     chips = []
     for i = 0 to labels.Count() - 1
-        chips.Push({ label: labels[i], width: widths[i] })
+        chips.Push({ label: labels[i], width: m.widths[i] })
     end for
     m.buttons.chips = chips
 end sub
+
+' A chip as wide as the longest of words needs (as ChipRow draws them, with
+' 20 pixels either side), least at least.
+function chipWidth(words as object, least as integer) as integer
+    if m.measure = invalid
+        m.measure = m.top.createChild("Label")
+        m.measure.font = "font:SmallSystemFont"
+        m.measure.opacity = 0
+    end if
+    width = least
+    for each text in words
+        m.measure.text = text
+        need = Int(m.measure.boundingRect().width) + 40
+        if need > width then width = need
+    end for
+    return width
+end function
 
 sub onPosition()
     music = m.global.music
@@ -190,7 +244,7 @@ end sub
 sub showStatus()
     music = m.global.music
     if m.noticing
-        m.message.text = "Pausing in " + urlValue(music.sleep.secondsLeft) + " s"
+        m.message.text = t("player.sleep.pausingIn", { seconds: music.sleep.secondsLeft })
         m.message.color = "0xA1A9B6FF"
     else
         m.message.text = music.message
@@ -222,6 +276,26 @@ function onKeyEvent(key as string, press as boolean) as boolean
     end if
     if key = "rewind" or key = "replay"
         m.global.music.control = "previous"
+        return true
+    end if
+    if m.scrubber.hasFocus()
+        if key = "left" or key = "right"
+            music = m.global.music
+            moveMs = 10000
+            if key = "left" then moveMs = -moveMs
+            music.seek = music.positionMs + moveMs
+            return true
+        end if
+        if key = "down" or key = "back"
+            m.scrubFocus.visible = false
+            m.buttons.setFocus(true)
+            return true
+        end if
+        return key = "up"
+    end if
+    if key = "up" and m.buttons.isInFocusChain() and m.global.music.durationMs > 0
+        m.scrubber.setFocus(true)
+        m.scrubFocus.visible = true
         return true
     end if
     if key = "down" and m.buttons.hasFocus() and m.upNext.visible

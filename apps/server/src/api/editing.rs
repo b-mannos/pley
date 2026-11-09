@@ -25,19 +25,33 @@ async fn detail(state: &AppState, user_id: i64, id: i64) -> ApiResult<ItemDetail
     let row = item_or_404(state, user_id, id).await?;
     let mut detail = catalog::item_detail(&state.db, row).await?;
     detail.locked_fields = overrides::locked_fields(&state.db, id).await?;
+    detail.nfo_fields = overrides::nfo_fields(&state.db, id).await?;
     detail.in_watchlist = catalog::in_watchlist(&state.db, user_id, id).await?;
+    detail.labels = Some(crate::labels::for_items(&state.db, &[id]).await?.remove(&id).unwrap_or_default());
     Ok(detail)
 }
 
 /// `{ "title": "Alien", "year": 1979, "summary": null, … }`: a value sets and
 /// locks the field, `null` unlocks it (the next refresh fills it again).
+/// `"match": null` undoes Fix Match, for the item's NFO file to decide it.
+/// `"labels": [...]` replaces the item's labels (they aren't metadata: a
+/// refresh never changes them).
 pub async fn edit(
     State(state): State<AppState>,
     AdminUser(user): AdminUser,
     Path(id): Path<i64>,
-    Json(body): Json<HashMap<String, Value>>,
+    Json(mut body): Json<HashMap<String, Value>>,
 ) -> ApiResult<Json<ItemDetail>> {
     let row = item_or_404(&state, user.id, id).await?;
+    let labels = match body.remove("labels") {
+        None => None,
+        Some(Value::Array(list)) if crate::labels::LABELLED.contains(&row.kind.as_str()) => {
+            let names: Vec<String> = list.iter().filter_map(|v| v.as_str()).map(str::to_owned).collect();
+            Some(crate::labels::check(&names)?)
+        }
+        Some(Value::Array(_)) => return Err(AppError::bad_request(format!("a {} has no labels", row.kind))),
+        Some(_) => return Err(AppError::bad_request("'labels' is a list of names")),
+    };
     let mut changes = Vec::new();
     for (field, value) in body {
         let value = match value {
@@ -62,6 +76,13 @@ pub async fn edit(
         changes.push((field, value));
     }
     overrides::set(&state.db, id, &changes).await?;
+    if let Some(labels) = labels {
+        crate::labels::replace(&state.db, id, &labels).await?;
+    }
+    // Fix Match undone: the item's NFO file decides its match again.
+    if changes.iter().any(|(field, value)| field == overrides::MATCH && value.is_none()) {
+        crate::library::scanner::nfo_match_dropped(&state.db, id).await?;
+    }
     if changes.iter().any(|(_, v)| v.is_none()) && state.metadata.can_refresh(&row.kind) {
         refresh_later(&state, id, row.library_id);
     }
@@ -69,7 +90,9 @@ pub async fn edit(
     Ok(Json(detail(&state, user.id, id).await?))
 }
 
-fn refresh_later(state: &AppState, id: i64, library_id: i64) {
+/// Fetches item `id`'s metadata again after the answer, as an unlocked field
+/// is filled again.
+pub(crate) fn refresh_later(state: &AppState, id: i64, library_id: i64) {
     let metadata = state.metadata.clone();
     let events = state.events.clone();
     tokio::spawn(async move {
@@ -163,7 +186,8 @@ pub async fn choose_artwork(
 ) -> ApiResult<Json<ItemDetail>> {
     let row = item_or_404(&state, user.id, id).await?;
     let kind = artwork_kind(&kind)?;
-    let blob = state.metadata.download_artwork(&body.url).await.map_err(|e| AppError::bad_request(e.to_string()))?;
+    let bytes = state.metadata.download_artwork(&body.url).await.map_err(|e| AppError::bad_request(e.to_string()))?;
+    let blob = store_picture(&state, bytes.into()).await?;
     overrides::set(&state.db, id, &[(kind.to_owned(), Some(blob))]).await?;
     state.events.send(ServerEvent::LibraryChanged { library_id: row.library_id });
     Ok(Json(detail(&state, user.id, id).await?))
@@ -187,13 +211,16 @@ pub async fn upload_artwork(
 }
 
 /// Stores an uploaded picture, re-encoded as JPEG: only real pictures get
-/// stored, and huge ones are scaled down. Returns its reference.
+/// stored, and huge ones are scaled down. None of the file's metadata is
+/// kept but Kometa's overlay mark, which tells it a poster already has its
+/// overlay. Returns its reference.
 pub(crate) async fn store_picture(state: &AppState, body: Bytes) -> ApiResult<String> {
     if body.is_empty() || body.len() > UPLOAD_MAX_BYTES {
         return Err(AppError::bad_request("pictures must be smaller than 25 MB"));
     }
     let _decoding = crate::images::UPLOAD_DECODES.acquire().await.map_err(|e| AppError::Internal(e.into()))?;
     let jpeg = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, AppError> {
+        use image::ImageEncoder;
         let img =
             crate::images::decode(&body).map_err(|_| AppError::bad_request("that file is not a supported picture"))?;
         let img = if img.width() > 3840 || img.height() > 3840 {
@@ -202,7 +229,13 @@ pub(crate) async fn store_picture(state: &AppState, body: Bytes) -> ApiResult<St
             img
         };
         let mut out = Vec::new();
-        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 92)
+        let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 92);
+        if crate::images::has_overlay_mark(&body) {
+            encoder
+                .set_exif_metadata(crate::images::overlay_exif())
+                .map_err(|e| AppError::Internal(anyhow::anyhow!("marking picture: {e}")))?;
+        }
+        encoder
             .encode_image(&img.to_rgb8())
             .map_err(|e| AppError::Internal(anyhow::anyhow!("encoding picture: {e}")))?;
         Ok(out)
@@ -220,6 +253,21 @@ pub async fn reset_artwork(
 ) -> ApiResult<StatusCode> {
     let row = item_or_404(&state, user.id, id).await?;
     let kind = artwork_kind(&kind)?;
+    reset_picture(&state, id, &row.kind, row.library_id, kind).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Picture `kind` (poster, backdrop or thumb) of item `id`, of `item_kind`
+/// in library `library_id`, goes back to the automatic one: the file's own
+/// or the metadata source's, found again after the answer.
+pub(crate) async fn reset_picture(
+    state: &AppState,
+    id: i64,
+    item_kind: &str,
+    library_id: i64,
+    kind: &str,
+) -> ApiResult<()> {
+    let kind = artwork_kind(kind)?;
     overrides::set(&state.db, id, &[(kind.to_owned(), None)]).await?;
     // `kind` is one of three column names.
     sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE items SET {kind} = NULL, updated_at = ? WHERE id = ?")))
@@ -227,10 +275,17 @@ pub async fn reset_artwork(
         .bind(id)
         .execute(&state.db.write)
         .await?;
-    if state.metadata.can_refresh(&row.kind) {
-        refresh_later(&state, id, row.library_id);
+    if state.metadata.can_refresh(item_kind) {
+        refresh_later(state, id, library_id);
     } else {
-        state.scanner.enqueue(row.library_id, false);
+        state.scanner.enqueue(library_id, false);
     }
-    Ok(StatusCode::NO_CONTENT)
+    Ok(())
+}
+
+/// `GET /api/labels`: every label titles carry or profiles' and invitations'
+/// rules name, with how many of each, for Edit details and the pickers of
+/// profiles' label rules.
+pub async fn labels(State(state): State<AppState>, _admin: AdminUser) -> ApiResult<Json<Vec<crate::labels::LabelUse>>> {
+    Ok(Json(crate::labels::all(&state.db).await?))
 }

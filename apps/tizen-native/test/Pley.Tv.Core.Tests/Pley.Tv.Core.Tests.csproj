@@ -20,9 +20,20 @@
     <None Include="..\..\..\..\packages\tv\test\fixtures\*.json" Link="fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- The Android app's request fixtures (the server's answers): the rules ported from it are tested on the same. -->
+  <ItemGroup>
+    <None Include="..\..\..\android\core\testing\src\main\resources\fixtures\discover\*.json" Link="android\discover\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\..\android\core\testing\src\main\resources\fixtures\requests\*.json" Link="android\requests\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <!-- The app's own sources, for DisposeRulesTests: a rule of NUI's the compiler can't hold them to. -->
   <ItemGroup>
     <None Include="..\..\src\Pley.Tv.Tizen\**\*.cs" Exclude="..\..\src\Pley.Tv.Tizen\bin\**;..\..\src\Pley.Tv.Tizen\obj\**" Link="app\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Core's sources too, for CatalogTests: every key the code names is in the catalogs. -->
+  <ItemGroup>
+    <None Include="..\..\src\Pley.Tv.Core\**\*.cs" Exclude="..\..\src\Pley.Tv.Core\bin\**;..\..\src\Pley.Tv.Core\obj\**" Link="core\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

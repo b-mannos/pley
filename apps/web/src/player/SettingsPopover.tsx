@@ -1,4 +1,5 @@
 import { useRef, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Check, ChevronLeft, ChevronRight, Minus, Plus, Search, Settings2, Trash2, Upload } from "lucide-react";
 import { SUBTITLE_FILE_MAX, SUBTITLE_FILE_TYPES } from "@/api/subtitles";
 import type { MediaStream } from "@/api/types";
@@ -6,7 +7,7 @@ import { cn } from "@/lib/cn";
 import { formatClock, streamLabel } from "@/lib/format";
 import { useDismiss } from "@/lib/hooks";
 import { AddSubtitleFile, FindSubtitles, subtitleSearchUnavailable, type SubtitleSources } from "./FindSubtitles";
-import type { QualityOption } from "./quality";
+import { AUTO, ORIGINAL, qualityLabel, type QualityOption } from "./quality";
 import { SLEEP_MINUTES, type SleepChoice } from "./sleepTimer";
 import { SPEEDS, speedLabel } from "./speed";
 import {
@@ -21,19 +22,8 @@ import {
   type SubtitleStyle,
 } from "./subtitles";
 
+/** The menu's panels; each but the first is titled `settings.panel.<panel>`. */
 type Panel = "root" | "quality" | "audio" | "subtitles" | "find" | "upload" | "style" | "speed" | "sleep" | "details";
-
-const PANEL_TITLE: Record<Exclude<Panel, "root">, string> = {
-  quality: "Quality",
-  audio: "Audio",
-  subtitles: "Subtitles",
-  find: "Find subtitles",
-  upload: "Add subtitle file",
-  style: "Subtitle style",
-  speed: "Speed",
-  sleep: "Sleep timer",
-  details: "Playback details",
-};
 
 function GroupLabel({ children }: { children: ReactNode }) {
   return <div className="px-4 pb-1 pt-2 text-xs font-medium text-white/50">{children}</div>;
@@ -120,19 +110,20 @@ function StepButton({ label, disabled, onClick, children }: { label: string; dis
 
 /** Moves subtitles (text, and pictures the player draws) earlier or later, 0.1 s at a time. */
 function SubtitleSync({ offset, onChange }: { offset: number; onChange: (offset: number) => void }) {
+  const { t } = useTranslation(["player", "common"]);
   const step = (by: number) => onChange(clampSubtitleOffset(offset + by));
   return (
     <>
       <div className="my-1 h-px bg-white/10" />
-      <GroupLabel>Timing</GroupLabel>
+      <GroupLabel>{t("settings.timing")}</GroupLabel>
       <div className="flex items-center gap-2 px-4 py-1.5">
-        <StepButton label="Show subtitles earlier" disabled={offset <= -SUBTITLE_OFFSET_MAX} onClick={() => step(-SUBTITLE_OFFSET_STEP)}>
+        <StepButton label={t("settings.earlier")} disabled={offset <= -SUBTITLE_OFFSET_MAX} onClick={() => step(-SUBTITLE_OFFSET_STEP)}>
           <Minus className="size-4" />
         </StepButton>
         <span className="min-w-16 flex-1 text-center text-sm tabular-nums" aria-live="polite" data-testid="subtitle-offset">
           {formatSubtitleOffset(offset)}
         </span>
-        <StepButton label="Show subtitles later" disabled={offset >= SUBTITLE_OFFSET_MAX} onClick={() => step(SUBTITLE_OFFSET_STEP)}>
+        <StepButton label={t("settings.later")} disabled={offset >= SUBTITLE_OFFSET_MAX} onClick={() => step(SUBTITLE_OFFSET_STEP)}>
           <Plus className="size-4" />
         </StepButton>
         <button
@@ -141,7 +132,7 @@ function SubtitleSync({ offset, onChange }: { offset: number; onChange: (offset:
           onClick={() => onChange(0)}
           className="ml-1 h-8 rounded-md px-2.5 text-xs font-semibold transition-colors hover:bg-white/10 disabled:opacity-40"
         >
-          Reset
+          {t("common:actions.reset")}
         </button>
       </div>
     </>
@@ -169,7 +160,7 @@ export interface SettingsPopoverProps {
   subtitleStreams: MediaStream[];
   subtitleIndex: number | null;
   onSubtitle: (index: number | null) => void;
-  /** How text subtitles look on this device. */
+  /** How text subtitles look on this device: offered while the subtitles chosen are text. */
   subtitleStyle: SubtitleStyle;
   onSubtitleStyle: (style: SubtitleStyle) => void;
   /** Seconds subtitles are moved by (positive: later), for this file. */
@@ -196,6 +187,7 @@ export interface SettingsPopoverProps {
 }
 
 export function SettingsPopover(props: SettingsPopoverProps) {
+  const { t } = useTranslation(["player", "common"]);
   const { open, setOpen, details, qualities, quality, originalHint, autoNow, autoWhy, onQuality } = props;
   const { audioStreams, audioIndex, onAudio, subtitleStreams, subtitleIndex, onSubtitle } = props;
   const { subtitleStyle, onSubtitleStyle, subtitleOffset, onSubtitleOffset, picturesMovable, speed, onSpeed } = props;
@@ -216,16 +208,28 @@ export function SettingsPopover(props: SettingsPopoverProps) {
   const currentSub = subtitleStreams.find((s) => s.index === subtitleIndex);
   // Picture subtitles burned into the video can't be moved; drawn by the player, they can.
   const movableSub = currentSub && (currentSub.text_based !== false || picturesMovable) ? currentSub : undefined;
+  // The style is for text: pictures keep their own look, and subtitles off have none.
+  const styled = !!currentSub && currentSub.text_based !== false;
+  // Subtitle style goes back to the menu while it doesn't apply (C turned the subtitles off).
+  const view = panel === "style" && !styled ? "root" : panel;
   const sleepValue =
-    sleep === null ? "Off" : sleep === "end" ? sleepEndLabel : sleepLeft !== null ? `${formatClock(sleepLeft)} left` : `${sleep} min`;
-  const qualityLabel =
-    quality === "auto" ? `Automatic · ${autoNow ?? "Original"}` : (qualities.find((q) => q.id === quality)?.label ?? "Original");
+    sleep === null
+      ? t("common:states.off")
+      : sleep === "end"
+        ? sleepEndLabel
+        : sleepLeft !== null
+          ? t("common:format.left", { time: formatClock(sleepLeft) })
+          : t("sleep.minutesShort", { minutes: sleep });
+  const original = qualityLabel(ORIGINAL);
+  const picked = qualities.find((q) => q.id === quality);
+  const qualityValue =
+    quality === "auto" ? `${qualityLabel(AUTO)} · ${autoNow ?? original}` : picked ? qualityLabel(picked) : original;
   const qualityHint = (id: string): string | undefined => {
     if (id === "original") return originalHint ?? undefined;
     if (id === "auto") {
       return quality === "auto" && autoNow
-        ? [`Now ${autoNow}`, autoWhy].filter(Boolean).join(" · ")
-        : "Dynamically adjust to conditions";
+        ? [t("settings.automaticNow", { quality: autoNow }), autoWhy].filter(Boolean).join(" · ")
+        : t("settings.automaticHint");
     }
     return undefined;
   };
@@ -241,7 +245,7 @@ export function SettingsPopover(props: SettingsPopoverProps) {
   const pickFile = (file: File | undefined) => {
     if (!file) return;
     if (file.size > SUBTITLE_FILE_MAX) {
-      onSubtitleFileRefused?.("Subtitle files can be up to 2 MB.");
+      onSubtitleFileRefused?.(t("settings.fileTooBig"));
       return;
     }
     setSubtitleFile(file);
@@ -252,7 +256,7 @@ export function SettingsPopover(props: SettingsPopoverProps) {
     <div ref={ref} className="relative">
       <button
         type="button"
-        aria-label="Playback settings"
+        aria-label={t("settings.label")}
         aria-expanded={open}
         onClick={() => {
           setOpen(!open);
@@ -270,31 +274,35 @@ export function SettingsPopover(props: SettingsPopoverProps) {
           role="menu"
           className="absolute bottom-full right-0 mb-3 max-h-[60vh] w-80 animate-pop-in overflow-y-auto rounded-xl border border-white/10 bg-black/90 py-2 text-white shadow-2xl"
         >
-          {panel === "root" ? (
+          {view === "root" ? (
             <>
-              <Nav label="Quality" value={qualityLabel} onClick={() => setPanel("quality")} />
+              <Nav label={t("settings.panel.quality")} value={qualityValue} onClick={() => setPanel("quality")} />
               {audioStreams.length > 1 ? (
-                <Nav label="Audio" value={currentAudio ? streamLabel(currentAudio) : "Default"} onClick={() => setPanel("audio")} />
+                <Nav
+                  label={t("settings.panel.audio")}
+                  value={currentAudio ? streamLabel(currentAudio) : t("settings.defaultAudio")}
+                  onClick={() => setPanel("audio")}
+                />
               ) : null}
               <Nav
-                label="Subtitles"
-                value={currentSub ? streamLabel(currentSub) : subtitleStreams.length ? "Off" : "None"}
+                label={t("settings.panel.subtitles")}
+                value={currentSub ? streamLabel(currentSub) : subtitleStreams.length ? t("settings.subtitlesOff") : t("common:states.none")}
                 extra={movableSub && subtitleOffset !== 0 ? formatSubtitleOffset(subtitleOffset) : undefined}
                 onClick={() => setPanel("subtitles")}
               />
-              {subtitleStreams.some((s) => s.text_based !== false) ? (
+              {styled ? (
                 <Nav
-                  label="Subtitle style"
-                  value={SUBTITLE_SIZES.find((s) => s.id === subtitleStyle.size)?.label ?? "Normal"}
+                  label={t("settings.panel.style")}
+                  value={t(`settings.sizes.${subtitleStyle.size}`)}
                   onClick={() => setPanel("style")}
                 />
               ) : null}
-              <Nav label="Speed" value={speedLabel(speed)} onClick={() => setPanel("speed")} />
-              <Nav label="Sleep timer" value={sleepValue} onClick={() => setPanel("sleep")} />
+              <Nav label={t("settings.panel.speed")} value={speedLabel(speed)} onClick={() => setPanel("speed")} />
+              <Nav label={t("settings.panel.sleep")} value={sleepValue} onClick={() => setPanel("sleep")} />
               {details ? (
                 <>
                   <div className="my-1 h-px bg-white/10" />
-                  <Nav label="Playback details" onClick={() => setPanel("details")} />
+                  <Nav label={t("settings.panel.details")} onClick={() => setPanel("details")} />
                 </>
               ) : null}
             </>
@@ -306,7 +314,7 @@ export function SettingsPopover(props: SettingsPopoverProps) {
                 className="flex w-full items-center gap-2 px-3 py-2 text-sm font-semibold transition-colors hover:bg-white/10"
               >
                 <ChevronLeft className="size-4" />
-                {PANEL_TITLE[panel]}
+                {t(`settings.panel.${view}`)}
               </button>
               <div className="my-1 h-px bg-white/10" />
               {panel === "quality"
@@ -320,7 +328,7 @@ export function SettingsPopover(props: SettingsPopoverProps) {
                         close();
                       }}
                     >
-                      {q.label}
+                      {qualityLabel(q)}
                     </Option>
                   ))
                 : null}
@@ -338,46 +346,46 @@ export function SettingsPopover(props: SettingsPopoverProps) {
                     </Option>
                   ))
                 : null}
-              {panel === "style" ? (
+              {view === "style" ? (
                 <>
-                  <GroupLabel>Size</GroupLabel>
+                  <GroupLabel>{t("settings.style.size")}</GroupLabel>
                   {SUBTITLE_SIZES.map((s) => (
                     <Option
                       key={s.id}
                       selected={s.id === subtitleStyle.size}
                       onClick={() => onSubtitleStyle({ ...subtitleStyle, size: s.id })}
                     >
-                      {s.label}
+                      {t(`settings.sizes.${s.id}`)}
                     </Option>
                   ))}
-                  <GroupLabel>Background</GroupLabel>
+                  <GroupLabel>{t("settings.style.background")}</GroupLabel>
                   {SUBTITLE_BACKGROUNDS.map((b) => (
                     <Option
                       key={b.id}
                       selected={b.id === subtitleStyle.background}
                       onClick={() => onSubtitleStyle({ ...subtitleStyle, background: b.id })}
                     >
-                      {b.label}
+                      {t(`settings.backgrounds.${b.id}`)}
                     </Option>
                   ))}
-                  <GroupLabel>Font</GroupLabel>
+                  <GroupLabel>{t("settings.style.font")}</GroupLabel>
                   {SUBTITLE_FONTS.map((f) => (
                     <Option
                       key={f.id}
                       selected={f.id === subtitleStyle.font}
                       onClick={() => onSubtitleStyle({ ...subtitleStyle, font: f.id })}
                     >
-                      <span style={{ fontFamily: f.family }}>{f.label}</span>
+                      <span style={{ fontFamily: f.family }}>{t(`settings.fonts.${f.id}`)}</span>
                     </Option>
                   ))}
-                  <GroupLabel>Position</GroupLabel>
+                  <GroupLabel>{t("settings.style.position")}</GroupLabel>
                   {SUBTITLE_POSITIONS.map((p) => (
                     <Option
                       key={p.id}
                       selected={p.id === subtitleStyle.position}
                       onClick={() => onSubtitleStyle({ ...subtitleStyle, position: p.id })}
                     >
-                      {p.label}
+                      {t(`settings.positions.${p.id}`)}
                     </Option>
                   ))}
                 </>
@@ -408,14 +416,14 @@ export function SettingsPopover(props: SettingsPopoverProps) {
                       close();
                     }}
                   >
-                    Off
+                    {t("settings.subtitlesOff")}
                   </Option>
                   {subtitleStreams.map((s) => {
                     const option = (
                       <Option
                         key={s.index}
                         selected={s.index === subtitleIndex}
-                        hint={s.added ? "Added" : undefined}
+                        hint={s.added ? t("settings.added") : undefined}
                         onClick={() => {
                           onSubtitle(s.index);
                           close();
@@ -427,8 +435,13 @@ export function SettingsPopover(props: SettingsPopoverProps) {
                     if (!s.added || !onDeleteSubtitle || !canDeleteSubtitle?.(s)) return option;
                     if (deleting === s.index) {
                       return (
-                        <div key={s.index} className="flex items-center gap-2 px-4 py-2 text-sm" role="group" aria-label={`Delete ${streamLabel(s)}`}>
-                          <span className="min-w-0 flex-1 truncate">Delete for everyone?</span>
+                        <div
+                          key={s.index}
+                          className="flex items-center gap-2 px-4 py-2 text-sm"
+                          role="group"
+                          aria-label={t("settings.deleteTrack", { track: streamLabel(s) })}
+                        >
+                          <span className="min-w-0 flex-1 truncate">{t("settings.deleteForEveryone")}</span>
                           <button
                             type="button"
                             onClick={() => {
@@ -437,10 +450,10 @@ export function SettingsPopover(props: SettingsPopoverProps) {
                             }}
                             className="h-7 rounded-md bg-danger px-2.5 text-xs font-semibold text-white transition-opacity hover:opacity-90"
                           >
-                            Delete
+                            {t("common:actions.delete")}
                           </button>
                           <button type="button" onClick={() => setDeleting(null)} className="h-7 rounded-md px-2.5 text-xs font-semibold hover:bg-white/10">
-                            Keep
+                            {t("settings.keep")}
                           </button>
                         </div>
                       );
@@ -450,8 +463,8 @@ export function SettingsPopover(props: SettingsPopoverProps) {
                         <div className="min-w-0 flex-1">{option}</div>
                         <button
                           type="button"
-                          aria-label={`Delete ${streamLabel(s)}`}
-                          title="Delete these subtitles"
+                          aria-label={t("settings.deleteTrack", { track: streamLabel(s) })}
+                          title={t("settings.deleteSubtitles")}
                           onClick={() => setDeleting(s.index)}
                           className="flex size-8 shrink-0 items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/10 hover:text-white"
                         >
@@ -466,14 +479,14 @@ export function SettingsPopover(props: SettingsPopoverProps) {
                       {showFind ? (
                         <Action
                           icon={<Search className="size-4" />}
-                          hint={searchUnavailable === "setup" ? "Subtitle search isn't set up" : undefined}
+                          hint={searchUnavailable === "setup" ? t("settings.searchNotSetUp") : undefined}
                           onClick={() => setPanel("find")}
                         >
-                          Find subtitles…
+                          {t("settings.findSubtitles")}
                         </Action>
                       ) : null}
                       <Action icon={<Upload className="size-4" />} onClick={() => fileInput.current?.click()}>
-                        Add subtitle file…
+                        {t("settings.addSubtitleFile")}
                       </Action>
                       <input
                         ref={fileInput}
@@ -502,7 +515,11 @@ export function SettingsPopover(props: SettingsPopoverProps) {
                         close();
                       }}
                     >
-                      {choice === null ? "Off" : choice === "end" ? sleepEndLabel : `${choice} minutes`}
+                      {choice === null
+                        ? t("common:states.off")
+                        : choice === "end"
+                          ? sleepEndLabel
+                          : t("sleep.minutes", { count: choice })}
                     </Option>
                   ))
                 : null}

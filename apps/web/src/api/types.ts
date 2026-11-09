@@ -24,6 +24,14 @@ export interface User {
   library_ids: Id[];
   /** Age limit for movies and shows; `null` = none. */
   max_age: number | null;
+  /** The rating system the limit is shown in (`GB`, or `age`); `null`: the metadata region's. Only in administrators' lists. */
+  max_age_system?: string | null;
+  /** "2015-03": the limit follows this birthday (only in administrators' lists). */
+  birth_month?: string | null;
+  /** Labels whose titles it sees even above its age limit (only in administrators' lists). */
+  show_labels?: string[];
+  /** Labels whose titles it never sees (only in administrators' lists). */
+  hide_labels?: string[];
   disabled: boolean;
   created_at: Timestamp;
   /** Default tracks for titles without a remembered choice. ISO 639 code; `null`: the file's default track. */
@@ -31,6 +39,8 @@ export interface User {
   /** `null`: the audio language. */
   subtitle_language: string | null;
   subtitle_mode: SubtitleMode;
+  /** The language Pley is in for this account (`en`, `fr`, `es`); `null`: automatic (the device's, else the server language). Absent from servers before it. */
+  language?: string | null;
   /** `false`: a managed profile, or an account without a password. */
   has_password: boolean;
   /** Signs in with a code from an authenticator app after the password. */
@@ -55,6 +65,8 @@ export interface ProfilePatch {
   audio_language?: string | null;
   subtitle_language?: string | null;
   subtitle_mode?: SubtitleMode;
+  /** `null`: automatic. */
+  language?: string | null;
 }
 
 /** A signed-in session (browser, app). */
@@ -77,7 +89,35 @@ export interface Invite {
   all_libraries: boolean;
   library_ids: Id[];
   max_age: number | null;
+  max_age_system: string | null;
+  show_labels?: string[];
+  hide_labels?: string[];
   note: string | null;
+}
+
+/** `GET /api/labels`: a label on titles, and how many carry it. */
+export interface LabelUse {
+  label: string;
+  /** Titles that carry it. */
+  items: number;
+  /** Profiles' and invitations' rules that name it. */
+  rules: number;
+}
+
+/** `GET /api/ratings/systems`: what an age limit is picked and shown in. */
+export interface RatingSystems {
+  /** The metadata region (`GB`): its system is offered first. */
+  region: string;
+  systems: RatingSystem[];
+}
+
+export interface RatingSystem {
+  /** ISO 3166-1 alpha-2. */
+  country: string;
+  /** In English; shown in the language shown through the country code instead. */
+  name: string;
+  /** Youngest first. */
+  ratings: { name: string; age: number; kind: "film" | "tv" | null }[];
 }
 
 export interface InviteCheck {
@@ -87,6 +127,8 @@ export interface InviteCheck {
 
 export interface ServerStatus {
   name: string;
+  /** The server language, for devices in a language Pley doesn't have. Absent from servers before it. */
+  language?: string | null;
   version: string;
   /** The server build's short commit hash; "unknown" without the repository. */
   commit?: string;
@@ -214,11 +256,17 @@ export interface ItemDetail extends ItemSummary {
   genres: string[];
   studio: string | null;
   content_rating: string | null;
+  /** The country `content_rating` is from ("GB"), when known: read with its ratings, else the metadata region's. */
+  content_rating_country?: string;
   tmdb_id: number | null;
   imdb_id: string | null;
   files: MediaFile[];
-  /** Fields edited by hand; metadata refreshes keep them. */
+  /** Fields edited by hand; metadata refreshes keep them. "match" after Fix Match. */
   locked_fields?: string[];
+  /** Fields the item's NFO file sets, named as `locked_fields` are, and "rating". Absent from servers before it. */
+  nfo_fields?: string[];
+  /** The item's labels: for administrators only, absent for others. */
+  labels?: string[];
   /** Intro and credits of the files (absent on servers without detection). */
   markers?: Marker[];
   /** Trailers and other bonus material (movies and shows). */
@@ -278,7 +326,7 @@ export interface HistoryUser {
 export interface HistoryEntry {
   id: Id;
   viewed_at: Timestamp;
-  /** "Chrome on Windows", a Plex client's name. */
+  /** "Chrome on Windows", a Jellyfin app's device. */
   device?: string;
   user: HistoryUser;
   item: ItemSummary;
@@ -336,7 +384,7 @@ export interface Marker {
   kind: MarkerKind;
   start_ms: number;
   end_ms: number;
-  source: "chapter" | "fingerprint";
+  source: "chapter" | "fingerprint" | "frames";
 }
 
 export interface MediaFile {
@@ -550,6 +598,12 @@ export interface PlaybackRequest {
   client_id?: string;
   /** Started while the last session plays on, to move to it once it is ready: that one is left to the player to end. */
   keep_previous?: boolean;
+  /** The remote's commands this player obeys; left out: none (Stop always works). */
+  controls?: Control[];
+  /** What remotes call this device; left out: the server names it from the User-Agent ("Firefox on macOS"). */
+  device_name?: string;
+  /** What kind of device it is; left out: the server tells from the app (a browser here). */
+  device_kind?: DeviceKind;
   caps: ClientCaps;
 }
 
@@ -560,6 +614,12 @@ export interface ProgressRequest {
   duration_ms?: number;
   state: PlaybackState;
   session_id?: string;
+  /** The audio track it plays, by stream index, for the user's remotes; left out: as known before. */
+  audio_index?: number;
+  /** The subtitles it shows, by stream index (-1: none). */
+  subtitle_index?: number;
+  /** Its Quality menu's pick, by id ("auto", "original", "8m"…). */
+  quality?: string;
 }
 
 export type ScanPhase = "queued" | "walking" | "probing" | "metadata" | "done";
@@ -610,8 +670,11 @@ export interface TranscodeInfo {
 
 export interface SessionInfo {
   session_id: string;
+  kind: "item";
   user_id: Id;
   username: string;
+  /** The device it plays on ("Living room TV", "Firefox on macOS"); null when it isn't known. */
+  device: string | null;
   item: ItemSummary;
   method: PlaybackMethod;
   position_ms: number;
@@ -619,6 +682,121 @@ export interface SessionInfo {
   started_at: Timestamp;
   updated_at: Timestamp;
   transcode: TranscodeInfo | null;
+}
+
+/** A command a remote sends one of the user's players (`POST /api/sessions/{id}/command`). */
+export type Control = "play" | "pause" | "seek" | "skip" | "next" | "previous" | "audio" | "subtitles" | "quality";
+
+/** What kind of device plays a session, or takes casts: remotes show each with its own icon. */
+export type DeviceKind = "tv" | "phone" | "tablet" | "computer" | "browser" | "other";
+
+/** One of a title's audio or subtitle tracks, which a remote picks from (`PlayingSession.tracks`). */
+export interface TrackOption {
+  /** The stream index commands and progress reports name. */
+  index: number;
+  language: string | null;
+  title: string | null;
+  codec: string | null;
+  /** Audio only. */
+  channels: number | null;
+  default: boolean;
+  forced: boolean;
+}
+
+/** One of the user's own sessions whose player is there (`GET /api/sessions`): what remotes control. */
+export interface PlayingSession {
+  session_id: string;
+  kind: "item" | "live";
+  device: string | null;
+  /** Which device plays it: everything one sign-in plays has the same, which receivers have too. */
+  device_id: string;
+  device_kind: DeviceKind;
+  /** What plays (kind "item"). */
+  item: ItemSummary | null;
+  /**
+   * The channel watched (kind "live"): `now`, the programme on, from
+   * `now_start` to `now_stop` (unix seconds), and `next`, the one after it.
+   * The times and `next` are absent from servers before them.
+   */
+  channel: {
+    id: Id;
+    name: string;
+    number: string | null;
+    logo: string | null;
+    now: string | null;
+    now_start?: Timestamp | null;
+    now_stop?: Timestamp | null;
+    next?: string | null;
+  } | null;
+  /** Live: always "playing". */
+  state: "playing" | "paused" | "buffering";
+  /** Live: 0. */
+  position_ms: number;
+  /** Null when the length isn't known, and on live. */
+  duration_ms: number | null;
+  /** Its player's last report, by the server's clock. */
+  updated_at: Timestamp;
+  /** How long ago that report was, by the server's clock: a remote moves the place on from it while it plays. */
+  age_ms: number;
+  /** What its player obeys; Stop always works. */
+  controls: Control[];
+  /** The audio track it plays, by stream index; null when not known, and on live. */
+  audio_index: number | null;
+  /** The subtitles it shows, by stream index (-1: none); null when not known, and on live. */
+  subtitle_index: number | null;
+  /** Its file's tracks, which `audio` and `subtitles` pick from; empty on live. */
+  tracks: { audio: TrackOption[]; subtitles: TrackOption[] };
+  /** Its Quality menu's pick, by id; null until its player says (absent from servers before it). */
+  quality?: string | null;
+  /** What its Quality menu offers for the file, which `quality` picks from; empty for music and on live. */
+  qualities?: { id: string; label: string }[];
+  /** Its file's intro and credits, which a remote offers to skip; empty on live (absent from servers before them). */
+  markers?: Marker[];
+}
+
+/** What a device plays when cast to: titles, music and playlists (`item`), Live TV channels (`live`). */
+export type CastKind = "item" | "live";
+
+/**
+ * A device that takes casts (`GET /api/remote/devices`): one of the user's,
+ * or one of their household's other profiles is on.
+ */
+export interface RemoteDevice {
+  /** The app's own id for the device: where casts go. */
+  receiver_id: string;
+  /** As its sessions say it: what it plays has the same. */
+  device_id: string;
+  name: string | null;
+  kind: DeviceKind;
+  casts: CastKind[];
+  /**
+   * The household profile it is on, when it isn't the user's own: a cast
+   * switches it to the user's first. What it plays isn't listed.
+   */
+  profile?: { id: Id; name: string };
+}
+
+/**
+ * What a remote sends a device to play (`POST /api/remote/devices/{id}/cast`):
+ * exactly one of a title, a playlist and a channel.
+ */
+export interface CastRequest {
+  item_id?: Id;
+  playlist_id?: Id;
+  channel_id?: Id;
+  /** Where a title starts (ms); left out, where the device's own Play would. */
+  start_ms?: number;
+  /** A playlist, an album or an artist, shuffled. */
+  shuffle?: boolean;
+  /** A movie or an episode: the audio track and subtitles (-1: off) picked on the page, by stream index. */
+  audio_index?: number;
+  subtitle_index?: number;
+  /** A device on another profile: that profile (its `profile.id`), which the device switches from. */
+  profile_id?: Id;
+  /** With `profile_id`: the device listed (its `device_id`), which the cast goes to or doesn't go at all. */
+  device_id?: string;
+  /** The user's PIN, when their profile has one and the device is on another profile. */
+  pin?: string;
 }
 
 export interface Activity {
@@ -688,10 +866,52 @@ export type ServerEvent =
   | { type: "user_state_changed"; item_ids: Id[]; children: boolean }
   /** A playback session was ended on the server (`DELETE /api/sessions/{id}`): the device playing it stops. */
   | { type: "session_stopped"; session_id: string; message: string | null; by_admin: boolean }
+  /**
+   * The user's remote sent their player of `session_id` a command: `seek`
+   * has `position_ms`, `skip` has `offset_ms` (back when negative), `audio`
+   * and `subtitles` the track's `stream_index` (subtitles -1: off),
+   * `quality` the Quality menu's entry by id (absent from servers before it).
+   */
+  | {
+      type: "player_command";
+      session_id: string;
+      command: Control;
+      position_ms: number | null;
+      offset_ms: number | null;
+      stream_index: number | null;
+      quality?: string | null;
+    }
+  /**
+   * The user's remote sent their device of `receiver_id` something to play
+   * (`from`: the remote's device name). The desktop app takes casts
+   * (components/CastReceiver.tsx); a browser tab is a remote only. Sent
+   * from another profile of the household, it names that profile
+   * (`profile_id`) and the ticket this device switches to it with first
+   * (`switch_ticket`).
+   */
+  | {
+      type: "cast";
+      receiver_id: string;
+      item_id: Id | null;
+      playlist_id: Id | null;
+      channel_id: Id | null;
+      start_ms: number | null;
+      shuffle: boolean;
+      audio_index?: number | null;
+      subtitle_index?: number | null;
+      from: string | null;
+      profile_id?: Id;
+      switch_ticket?: string;
+    }
   /** Live TV's sources, channels or guide changed. */
   | { type: "live_channels_changed" }
   /** A live channel started or stopped being watched: the connections in use changed. */
   | { type: "live_tuners_changed" }
+  /**
+   * Someone took the connection of a channel this account watched, to watch
+   * another: every player of `channel_id` stops and shows `message`.
+   */
+  | { type: "live_taken_over"; session_id: string; channel_id: Id; message: string }
   /**
    * A request changed (made, decided, followed, its stage, withdrawn,
    * deleted), to its maker, its followers and managers; all three `null`
@@ -751,6 +971,8 @@ export type LibraryWork = "auto" | "hours" | "idle";
 
 export interface Settings {
   server_name: string;
+  /** The server language; `""`: not chosen, which reads as English. */
+  language: string;
   tmdb_api_key: string;
   metadata_language: string;
   tv_metadata: TvMetadata;
@@ -759,6 +981,11 @@ export interface Settings {
   tvdb_pin: string;
   /** Artists and albums from MusicBrainz, covers from the Cover Art Archive. */
   music_metadata: boolean;
+  /**
+   * Ids and details from the NFO files next to movies, shows, seasons and
+   * episodes, over the online source's. Absent from servers before it.
+   */
+  read_nfo?: boolean;
   hwaccel: HwAccel;
   hardware_decoding: boolean;
   tonemapping: ToneMapping;
@@ -962,15 +1189,25 @@ export interface TranscoderStatus {
 export interface ListenChoice {
   /** The web app and its API. */
   web: string[];
+  /** The Jellyfin-compatible API on addresses of its own (port 8096): none when off or on pley's port. */
+  jellyfin: string[];
+  /** The Jellyfin-compatible API answers on pley's own port, to its apps. */
+  jellyfin_on_web: boolean;
   /** The Plex-compatible API on addresses of its own (port 32400): none when off or on pley's port. */
   plex: string[];
-  /** The Plex-compatible API answers on pley's own port, to its clients. */
+  /** The Plex-compatible API answers on pley's own port, to its apps and tools (the default). */
   plex_on_web: boolean;
-  /** Whether the pley apps on the networks find the server. */
+  /** Whether the pley apps on the networks find the server (UDP). */
   discovery: boolean;
+  /** Whether pley announces itself by Bonjour, for Apple's apps. */
+  bonjour: boolean;
+  /** The adapters Bonjour announces from, by name: every one the web app listens on when empty. */
+  bonjour_adapters: string[];
+  /** Bonjour's host name, the label before `.local`: the generated one when empty. */
+  bonjour_host_name: string;
 }
 
-export type ListenerKind = "web" | "plex" | "discovery";
+export type ListenerKind = "web" | "jellyfin" | "plex" | "discovery";
 
 export interface NetworkListener {
   kind: ListenerKind;
@@ -994,9 +1231,11 @@ export interface NetworkAdapter {
 
 export interface NetworkSettings extends ListenChoice {
   /** What the command line or the environment sets: it can't change here. */
-  fixed: { web: boolean; plex: boolean; discovery: boolean };
+  fixed: { web: boolean; jellyfin: boolean; plex: boolean; discovery: boolean; bonjour: boolean };
   listeners: NetworkListener[];
   adapters: NetworkAdapter[];
+  /** Bonjour's host name when none is chosen (`pley-` and the server id's start). */
+  bonjour_host_default: string;
   /** Where a change is saved. */
   config_file: string;
   /** Windows Firewall decides which kinds of network reach pley. */
@@ -1095,6 +1334,8 @@ export interface LibraryItemsQuery {
   watched?: boolean;
   genre?: string;
   year?: number;
+  resolution?: Resolution;
+  dynamic_range?: RangeFilter;
   offset?: number;
   limit?: number;
 }
@@ -1104,7 +1345,16 @@ export interface LibraryItemsResponse {
   items: ItemSummary[];
 }
 
+/** A title's best file's resolution, as libraries filter by it. */
+export type Resolution = "4k" | "1080" | "720" | "sd";
+
+/** A title's best dynamic range, as libraries filter by it; `hdr` is any but SDR. */
+export type RangeFilter = "hdr" | DynamicRange;
+
 export interface LibraryFilters {
   genres: string[];
   years: number[];
+  /** Best first; only those the titles have, and only two or more (older servers: none). */
+  resolutions?: Resolution[];
+  dynamic_ranges?: RangeFilter[];
 }

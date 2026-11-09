@@ -50,8 +50,8 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
@@ -74,6 +74,7 @@ import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcon
 import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.designsystem.image.ArtworkImage
+import app.pley.android.designsystem.image.rememberImagePrefetcher
 import app.pley.android.designsystem.tile.ArtworkTileModel
 import app.pley.android.designsystem.tile.SkeletonState
 import app.pley.android.designsystem.tile.SkeletonTile
@@ -97,6 +98,7 @@ import app.pley.android.ui.phone.R
 import app.pley.android.ui.phone.kit.DelayedSpinner
 import app.pley.android.ui.phone.kit.EmptyState
 import app.pley.android.ui.phone.kit.ErrorState
+import app.pley.android.ui.phone.kit.LocalPhoneDeviceTier
 import app.pley.android.ui.phone.kit.MediaCard
 import app.pley.android.ui.phone.kit.OfflineBanner
 import app.pley.android.ui.phone.kit.PleyIconButton
@@ -104,6 +106,7 @@ import app.pley.android.ui.phone.kit.PleyTextButton
 import app.pley.android.ui.phone.kit.rememberHubRowState
 import app.pley.android.ui.phone.kit.rowCardWidth
 import app.pley.android.ui.phone.library.PhoneTiles
+import app.pley.android.ui.phone.library.rememberPhoneTiles
 import app.pley.android.ui.phone.livetv.ChannelTile
 import app.pley.android.ui.phone.livetv.ProgramProgress
 import app.pley.android.ui.phone.shell.LocalPhoneNavigator
@@ -115,15 +118,15 @@ import kotlinx.coroutines.delay
  * bar docked at the top with the keyboard up when the tab opens empty.
  * Before typing, the way to Discover where requests are open, and the
  * profile's recent searches with Clear; while typing, the results as
- * rows, grouped and counted (People, Live TV, Movies, Shows…), the ones
+ * rows, grouped and counted (Movies, Shows… Live TV, People), the ones
  * shown staying while the next load, then what TMDB has that no library
  * has, or why TMDB can't be searched. A channel found plays at once.
  */
 @Composable
 internal fun PhoneSearchScreen(key: PleyKey.Search) {
-    val resources = LocalResources.current
+    val tiles = rememberPhoneTiles()
     val vm: SearchViewModel<ArtworkTileModel> = viewModel {
-        SearchViewModel(key.query, SearchDeps.of(screensGraph()), phoneSearchTiles(PhoneTiles(resources)))
+        SearchViewModel(key.query, SearchDeps.of(screensGraph()), phoneSearchTiles(tiles))
     }
     val entries: RequestsEntryViewModel = viewModel(factory = RequestsEntryViewModel.factory)
     val state by vm.state.collectAsStateWithLifecycle()
@@ -323,7 +326,7 @@ private fun Recent(recent: List<String>, onRecent: (String) -> Unit, onClear: ()
                 PleyTextButton(stringResource(R.string.search_recent_clear), onClick = onClear)
             }
         }
-        items(recent, key = { it }, contentType = { "recent" }) { query ->
+        items(recent, key = { "recent:$it" }, contentType = { "recent" }) { query ->
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -342,8 +345,8 @@ private fun Recent(recent: List<String>, onRecent: (String) -> Unit, onClear: ()
 
 /**
  * The results: a line saying what they are for (with a spinner while newer
- * ones load), then a row per group, Live TV's after People (the web's
- * order), then what TMDB has ([tmdb]).
+ * ones load), then a row per group, the titles', Live TV's, then People
+ * (the web's order), then what TMDB has ([tmdb]).
  */
 @Composable
 private fun Results(
@@ -378,18 +381,17 @@ private fun Results(
                 }
             }
         }
-        val people = results.groups.takeWhile { it.kind == SearchGroupKind.People }
-        val rest = results.groups.drop(people.size)
-        items(people, key = { it.kind.name }, contentType = { it.kind.tileKind }) { group ->
-            ResultRow(group, onOpen = { onOpen(group.kind, it) }, onActions = null)
+        val (people, titles) = results.groups.partition { it.kind == SearchGroupKind.People }
+        items(titles, key = { it.kind.name }, contentType = { it.kind.tileKind }) { group ->
+            ResultRow(group, onOpen = { onOpen(group.kind, it) }, onActions = onActions)
         }
         if (results.channels.isNotEmpty()) {
             item(key = "channels", contentType = "channels") {
                 ChannelRow(results.channels, results.origin, onWatch)
             }
         }
-        items(rest, key = { it.kind.name }, contentType = { it.kind.tileKind }) { group ->
-            ResultRow(group, onOpen = { onOpen(group.kind, it) }, onActions = onActions)
+        items(people, key = { it.kind.name }, contentType = { it.kind.tileKind }) { group ->
+            ResultRow(group, onOpen = { onOpen(group.kind, it) }, onActions = null)
         }
         if (tmdb != TmdbSection.Hidden) {
             item(key = "tmdb", contentType = "tmdb") { OnTmdb(results.query, tmdb, onRetryTmdb) }
@@ -494,11 +496,22 @@ private fun ResultRow(group: SearchGroup<ArtworkTileModel>, onOpen: (Long) -> Un
     val metrics = LocalPhoneMetrics.current
     val kind = group.kind.tileKind
     val width = rowCardWidth(kind, metrics.contentWidth - metrics.margin * 2)
+    // Its pictures 1.5 screens ahead of the scroll, at the cards' size, as Home's rows load theirs.
+    val row = rememberHubRowState()
+    val density = LocalDensity.current
+    val images = remember(group.tiles) { group.tiles.map { it.image } }
+    rememberImagePrefetcher(
+        state = row,
+        images = images,
+        widthPx = with(density) { width.roundToPx() },
+        heightPx = with(density) { (width / kind.aspectRatio).roundToPx() },
+        tier = LocalPhoneDeviceTier.current,
+    )
     Column(Modifier.fillMaxWidth()) {
         RowHeader(groupName(group.kind), group.count)
         Spacer(Modifier.height(PleyPhone.HeaderToContent - PRESS_ROOM))
         LazyRow(
-            state = rememberHubRowState(),
+            state = row,
             modifier = Modifier.fillMaxWidth().testTag(SEARCH_ROW + group.kind.name),
             contentPadding = PaddingValues(start = metrics.marginStart, end = metrics.marginEnd, top = PRESS_ROOM, bottom = PRESS_ROOM),
             horizontalArrangement = Arrangement.spacedBy(PleyPhone.TileGap),

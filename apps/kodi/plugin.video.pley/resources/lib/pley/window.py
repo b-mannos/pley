@@ -23,10 +23,11 @@ from urllib.parse import quote_plus, urlencode
 import xbmc
 import xbmcgui
 
-from . import api, kodi, livetv, playback, profiles, requests, tiles, tracks, words
+from . import api, kodi, language, livetv, playback, profiles, requests, tiles, tracks, words
 from . import layout as L
 from .asking import AWAY, FOUND_SHOWN
 from .listing import image, list_item
+from .playback import music_tracks, newest_first
 
 T = kodi.text
 
@@ -45,15 +46,30 @@ UI = kodi.WINDOW_OPEN
 # Room for a pill's icon before its label (pill-*.png keep it unstretched).
 ICON_ROOM = " " * 8
 
-SORTS = ("title", "added", "year", "release", "rating", "duration", "last_played")
+SORTS = ("title", "year", "added", "rating", "user_rating", "release", "duration", "last_played", "bitrate")
+# What each kind of library sorts by, in the web's order (LibraryPage.tsx):
+# a show has no one duration, and music sorts its artists by name, when
+# they came, your rating and when last played.
+KIND_SORTS = {
+    "shows": tuple(s for s in SORTS if s != "duration"),
+    "music": ("title", "added", "user_rating", "last_played"),
+}
 SORT_NAMES = {
     "title": "sort_title",
     "added": "sort_added",
     "year": "sort_year",
     "release": "sort_release",
     "rating": "sort_rating",
+    "user_rating": "sort_user_rating",
     "duration": "sort_duration",
     "last_played": "sort_last_played",
+    "bitrate": "sort_bitrate",
+}
+# A library's quality filters, as GET /api/libraries/{id}/items takes them:
+# the list of /filters that offers their choices, and their words.
+QUALITY_FILTERS = {
+    "resolution": ("resolutions", lambda: words.RESOLUTIONS),
+    "dynamic_range": ("dynamic_ranges", words.dynamic_ranges),
 }
 LIBRARY_ICONS = {"movies": "icon-clapperboard.png", "shows": "icon-tv.png", "music": "icon-music.png"}
 PAGE = 120
@@ -70,8 +86,10 @@ PLEX_SORTS = {
     "added": "addedAt",
     "rating": "rating",
     "release": "originallyAvailableAt",
+    "user_rating": "userRating",
     "duration": "duration",
     "last_played": "lastViewedAt",
+    "bitrate": "mediaBitrate",
 }
 HERO_BUTTONS = (
     L.ITEM_PLAY,
@@ -181,8 +199,11 @@ class Monitor(xbmc.Monitor):
             return
         if method.endswith(POSTED):
             self.window.run_posted()
+        elif method.endswith(kodi.LANGUAGE_CHANGED):
+            self.window.relanguage()
         elif method.endswith(SWITCHED):
-            # Switched from the add-on's settings, over the window.
+            # Switched from the add-on's settings, over the window, or by
+            # the service for a cast from another profile's remote.
             with self.window.lock:
                 if not self.window.closing:
                     self.window.switched()
@@ -234,6 +255,8 @@ class Window(xbmcgui.WindowXML):
         self.ready = False
         self.libraries = []
         self.me = {}
+        # The language the pages were drawn in.
+        self.language = None
         # The household's profiles (None: this sign-in can't switch).
         self.household = []
         # GET /api/live: whether the rail has Live TV.
@@ -333,10 +356,12 @@ class Window(xbmcgui.WindowXML):
             )
         except api.ApiError as e:
             return self.failed(e, Home(self))
+        self.heard(self.me)
         self.setup_rail()
-        if self.household and len(self.household) > 1 and not kodi.get_property(profiles.GATE):
-            # A household's Kodi asks who is watching as it starts, as the
-            # TV apps do: once each time Kodi starts.
+        if profiles.asks_at_start(self.household, self.me, bool(kodi.get_property(profiles.GATE))):
+            # A household's Kodi asks who is watching as it starts when the
+            # profile in use has a PIN, as the TV apps do: once each time
+            # Kodi starts.
             return self.go(Profiles(self, self.household, gate=True))
         self.go(Home(self))
 
@@ -352,8 +377,29 @@ class Window(xbmcgui.WindowXML):
             )
         except api.ApiError as e:
             return self.failed(e, Home(self))
+        self.heard(self.me)
         self.setup_rail()
         self.go(Home(self))
+
+    def heard(self, me: dict) -> None:
+        """The profile as the server says it now: its own language shows,
+        from the pages drawn next."""
+        kodi.heard_account(me)
+        kodi.follow_language()
+        self.language = kodi.language()
+
+    def relanguage(self) -> None:
+        """The language shown changed (the profile's, the add-on's setting):
+        the page is drawn again in it, and the server's rows are asked for
+        again, as it writes their titles."""
+        with self.lock:
+            if self.closing or self.screen is None:
+                return
+            kodi.forget_language()
+            if kodi.language() == self.language:
+                return
+            self.language = kodi.language()
+        self.changed()
 
     def close(self) -> None:
         self.closing = True
@@ -361,6 +407,7 @@ class Window(xbmcgui.WindowXML):
             if timer is not None:
                 timer.cancel()
         kodi.clear_property(UI)
+        kodi.clear_property(profiles.PICKING)
         super().close()
 
     def changed(self) -> None:
@@ -412,6 +459,10 @@ class Window(xbmcgui.WindowXML):
         self.show(screen)
 
     def show(self, screen, back: bool = False) -> None:
+        if isinstance(screen, Profiles) and screen.gate:
+            kodi.set_property(profiles.PICKING, "1")
+        else:
+            kodi.clear_property(profiles.PICKING)
         for name, group in L.SCREENS.items():
             if name != screen.name:
                 self.visible(group, False)
@@ -439,10 +490,12 @@ class Window(xbmcgui.WindowXML):
             self.focus_rail()
 
     def failed(self, error: api.ApiError, screen) -> None:
-        """What a page says when the server didn't answer it."""
-        if error.code == "unreachable":
+        """What a page says when the server didn't answer it (or another
+        device did)."""
+        if error.code in ("unreachable", "another_device"):
             name = kodi.setting("server_name") or kodi.setting("server_url")
-            notice = Notice(self, T("cant_reach") % name, T("cant_reach_hint"), retry=screen)
+            title = T("cant_reach" if error.code == "unreachable" else error.code) % name
+            notice = Notice(self, title, T("cant_reach_hint"), retry=screen)
         elif error.code == "signed_out":
             notice = Notice(self, T("signed_out"), "", retry=screen, sign_in=True)
         else:
@@ -465,16 +518,18 @@ class Window(xbmcgui.WindowXML):
         self.c(L.RAIL_INITIAL).setLabel(name[:1].upper(), textColor=L.ON_ACCENT if light else L.FG)
         # None: the initial shows (another profile's picture mustn't stay).
         self.prop("pley.avatar.picture", image(self.session.base, self.me.get("avatar_url"), 128))
+        live = livetv.available(self.live)
+        shown = rail_shown(len(self.libraries), live)
         for i, entry in enumerate(L.RAIL_LIBRARIES):
-            if i < len(self.libraries):
+            if i < shown:
                 library = self.libraries[i]
                 icon = LIBRARY_ICONS.get(library.get("kind"), "icon-folder.png")
                 for control in L.rail_icons(entry):
                     self.c(control).setImage(icon, False)
                 for control in L.rail_labels(entry):
                     self.put(control, library.get("name"))
-            self.visible(L.rail_group(entry), i < len(self.libraries))
-        entries = rail_entries(len(self.libraries), livetv.available(self.live))
+            self.visible(L.rail_group(entry), i < shown)
+        entries = rail_entries(len(self.libraries), live)
         self.visible(L.rail_group(L.RAIL_LIVE), L.RAIL_LIVE in entries)
         self.visible(L.rail_group(L.RAIL_ALL_LIBRARIES), L.RAIL_ALL_LIBRARIES in entries)
         self.visible(L.rail_group(L.RAIL_COLLECTIONS), L.RAIL_COLLECTIONS in entries)
@@ -555,6 +610,7 @@ class Window(xbmcgui.WindowXML):
             actions.append((T("switch_profile"), self.switch_profile))
         actions.append((T("choose_server"), lambda: self.leave_for("choose_server")))
         actions.append((T("tracks"), self.track_defaults))
+        actions.append((T("profile_language"), self.profile_language))
         if len(self.libraries) > 1:
             actions.append((T("sort_libraries"), self.sort_libraries))
         actions.append((T("sign_out"), self.sign_out))
@@ -600,6 +656,25 @@ class Window(xbmcgui.WindowXML):
 
         self.me = tracks.edit_defaults(self.session.client, me, select, say, T, api.ApiError)
 
+    def profile_language(self) -> None:
+        """The profile's own language, on all its devices (this device's on a
+        server from before languages): the pages show it once it is kept."""
+        try:
+            me = self.session.get("/api/auth/me")
+        except api.ApiError as e:
+            return self.toast(T("server_error") % e.message, 6)
+
+        def select(heading, labels, preselect):
+            return xbmcgui.Dialog().select(heading, labels, preselect=preselect)
+
+        def say(words, error):
+            self.toast(words, 6 if error else 3.5)
+
+        found = language.choose(self.session.client, me, select, say)
+        if found is not None:
+            self.me = found
+            self.relanguage()
+
     # ---------------------------------------------- the libraries' order
 
     def sort_libraries(self) -> None:
@@ -644,8 +719,9 @@ class Window(xbmcgui.WindowXML):
             return self.use_server_order()
         ids.insert(to, ids.pop(i))
         if self.save_order(ids):
-            # Moved past the rail's three, it is on the Libraries page.
-            self.setFocusId(L.RAIL_LIBRARIES[to] if to < len(L.RAIL_LIBRARIES) else L.RAIL_ALL_LIBRARIES)
+            # Moved past the libraries the rail lists, it is on the Libraries page.
+            shown = rail_shown(len(self.libraries), livetv.available(self.live))
+            self.setFocusId(L.RAIL_LIBRARIES[to] if to < shown else L.RAIL_ALL_LIBRARIES)
 
     def save_order(self, ids: list) -> bool:
         """The profile's own order (PUT /api/me/libraries/order): whether it
@@ -694,7 +770,7 @@ class Window(xbmcgui.WindowXML):
         self.setup_rail()
         for screen in self.stack + ([self.screen] if self.screen is not None else []):
             if isinstance(screen, Library) and (screen.rail or "").startswith("lib"):
-                screen.rail = library_rail(libraries, screen.library["id"])
+                screen.rail = library_rail(libraries, screen.library["id"], livetv.available(self.live))
         if self.screen is not None:
             self.prop("pley.rail", self.screen.rail or (self.stack[0].rail if self.stack else "home"))
 
@@ -852,7 +928,9 @@ class Window(xbmcgui.WindowXML):
                     return self.toast(T("nothing_found"))
                 item = found
             start = 0 if from_start else (words.state(item).get("position_ms") or 0) if words.in_progress(item) else 0
-            li = playback.prepare(self.session.client, self.session.base, item["id"], start, self.session.cached(item["id"]))
+            li = playback.prepare(
+                self.session.client, self.session.base, item["id"], start, self.session.cached(item["id"]), kind=item.get("kind")
+            )
         except api.ApiError as e:
             return self.toast(T("server_error") % e.message, 6)
         if start:
@@ -870,15 +948,7 @@ class Window(xbmcgui.WindowXML):
             return self.toast(T("server_error") % e.message, 6)
         if not tracks:
             return self.toast(T("no_tracks"))
-        queue = xbmc.PlayList(xbmc.PLAYLIST_MUSIC)
-        queue.clear()
-        for track in tracks:
-            queue.add(play_url(track["id"]), list_item(self.session.base, track))
-        if shuffle:
-            queue.shuffle()
-            at = 0
-        else:
-            queue.unshuffle()
+        queue, at = playback.queue(self.session.base, tracks, at, shuffle)
         xbmc.Player().play(queue, startpos=at)
 
     def set_watched(self, item: dict, watched: bool) -> None:
@@ -958,7 +1028,7 @@ class Window(xbmcgui.WindowXML):
         mine = [p for p in playlists if not p.get("smart_filter") and p.get("kind", kind) == kind]
         new = T("new_music_playlist" if kind == "audio" else "new_video_playlist")
         entries = [xbmcgui.ListItem(new, offscreen=True)]
-        entries += [xbmcgui.ListItem(p.get("title") or "", T("playlist_items") % p.get("item_count", 0), offscreen=True) for p in mine]
+        entries += [xbmcgui.ListItem(p.get("title") or "", kodi.count("items", p.get("item_count", 0)), offscreen=True) for p in mine]
         chosen = xbmcgui.Dialog().select(T("add_to_playlist"), entries)
         if chosen < 0:
             return
@@ -990,12 +1060,6 @@ class Window(xbmcgui.WindowXML):
         self.open(Item(self, item["id"], item))
 
 
-def play_url(item_id: int) -> str:
-    """The plugin's play route for `item_id`, which Kodi asks as it comes
-    to it in a playlist."""
-    return plugin_url(route="play", id=item_id)
-
-
 def plugin_url(**params) -> str:
     """One of the plugin's routes: a listing, or an action."""
     return "plugin://%s/?%s" % (kodi.ADDON_ID, urlencode(params))
@@ -1007,56 +1071,65 @@ def run_plugin(**params) -> None:
     xbmc.executebuiltin("RunPlugin(%s)" % plugin_url(**params))
 
 
-def newest_first(albums: list) -> list:
-    """An artist's albums as the web lists them: newest first, then by title."""
-    return sorted(albums, key=lambda a: (-(a.get("year") or 0), (a.get("sort_title") or a.get("title") or "").lower()))
-
-
-def music_tracks(session, item: dict) -> list:
-    """An album's tracks, or an artist's, album by album (newest first)."""
-    children = lambda id_: session.get("/api/items/%d/children" % id_).get("items", [])  # noqa: E731
-    if item.get("kind") == "album":
-        return children(item["id"])
-    albums = newest_first(children(item["id"]))
-    lists = api.together(*[lambda a=a: children(a["id"]) for a in albums]) if albums else []
-    return [track for found in lists for track in found or []]
-
-
 def rail_view(library: dict) -> tuple:
     """What the rail shows of a library."""
     return library.get("id"), library.get("name"), library.get("kind")
 
 
+def rail_shown(libraries: int, live: bool = False) -> int:
+    """How many of `libraries` the rail lists: every one while all its
+    entries fit over Settings at full height, else as many as fit with
+    Libraries and Playlists after them, and never fewer than four (the other
+    TV apps' rails scroll to theirs; Kodi's entries have fixed places)."""
+    top = 3 if live else 2
+    if libraries <= len(L.RAIL_LIBRARIES) and top + libraries + 2 <= L.RAIL_FIT:
+        return libraries
+    room = min(len(L.RAIL_LIBRARIES), L.RAIL_FIT - top - 2)
+    return min(libraries, max(L.RAIL_LEAST_LIBRARIES, room))
+
+
 def rail_entries(libraries: int, live: bool = False) -> list:
     """The rail's entries from Search down, Settings apart (RailItems.kt):
     Live TV after Home where the server has channels (the web's sidebar),
-    the first three libraries, and with more, Libraries in Collections'
-    place (collections stay on each library's Collections tab); without a
+    the libraries it lists, and with more, Libraries in Collections' place
+    (collections stay on each library's Collections tab); without a
     library, no Collections."""
-    shown = list(L.RAIL_LIBRARIES[:libraries])
+    shown = rail_shown(libraries, live)
     top = [L.RAIL_SEARCH, L.RAIL_HOME] + ([L.RAIL_LIVE] if live else [])
-    if libraries > len(L.RAIL_LIBRARIES):
-        return [*top, *shown, L.RAIL_ALL_LIBRARIES, L.RAIL_PLAYLISTS]
-    return [*top, *shown, L.RAIL_PLAYLISTS] + ([L.RAIL_COLLECTIONS] if libraries else [])
+    if libraries > shown:
+        return [*top, *L.RAIL_LIBRARIES[:shown], L.RAIL_ALL_LIBRARIES, L.RAIL_PLAYLISTS]
+    return [*top, *L.RAIL_LIBRARIES[:shown], L.RAIL_PLAYLISTS] + ([L.RAIL_COLLECTIONS] if libraries else [])
 
 
-def library_rail(libraries: list, library_id) -> str:
-    """The rail's entry a library's page marks: its own among the first
-    three, else Libraries (Home, once the library has gone)."""
+def library_rail(libraries: list, library_id, live: bool = False) -> str:
+    """The rail's entry a library's page marks: its own among those the
+    rail lists, else Libraries (Home, once the library has gone)."""
     at = next((i for i, lib in enumerate(libraries) if lib["id"] == library_id), None)
     if at is None:
         return "home"
-    return "lib%d" % at if at < len(L.RAIL_LIBRARIES) else "libraries"
+    return "lib%d" % at if at < rail_shown(len(libraries), live) else "libraries"
 
 
-LIBRARY_NOUNS = {"movies": ("movie", "movies"), "shows": ("show", "shows"), "music": ("artist", "artists")}
+def named_tokens(tokens, names: dict) -> list:
+    """The tokens of a /filters list there are words for, in the server's
+    order: a newer server's others are left out rather than shown as they
+    are."""
+    return [t for t in tokens if isinstance(t, str) and t in names] if isinstance(tokens, list) else []
+
+
+# What a library of each kind holds, as kodi.COUNTS names it.
+LIBRARY_NOUNS = {"movies": "movies", "shows": "shows", "music": "artists"}
+
+
+def library_noun(library: dict) -> str:
+    return LIBRARY_NOUNS.get(library.get("kind"), "items")
 
 
 def library_count(library: dict) -> str:
     """How much a library holds: "12 movies", "1 show", "40 artists"."""
     if library.get("item_count") is None:
         return ""
-    return words.plural(library["item_count"], *LIBRARY_NOUNS.get(library.get("kind"), ("item", "items")))
+    return kodi.count(library_noun(library), library["item_count"])
 
 
 def luminance(hex_rgb: str) -> float:
@@ -1987,7 +2060,7 @@ class Item(Screen):
 
 def cast_and_crew(detail: dict) -> list:
     """Cast, then the directors, creators and writers (as people with a job)."""
-    jobs = {"director": "Director", "creator": "Creator", "writer": "Writer"}
+    jobs = {"director": T("director"), "creator": T("creator"), "writer": T("writer")}
     found = [dict(c) for c in detail.get("cast") or []]
     for credit in detail.get("crew") or []:
         if credit.get("role") in jobs:
@@ -2021,7 +2094,7 @@ class Library(Screen):
     def __init__(self, win: Window, library: dict, rail_key):
         super().__init__(win)
         self.library = library
-        self.rail = rail_key or library_rail(win.libraries, library["id"])
+        self.rail = rail_key or library_rail(win.libraries, library["id"], livetv.available(win.live))
         # It opens on the tab it was last left on, on this Kodi, for this
         # server and profile (as on Android TV, Samsung and LG); on Library
         # the first time, and when that tab isn't the library's.
@@ -2033,6 +2106,9 @@ class Library(Screen):
         self.watched = None  # all, False: unwatched, True: watched
         self.genre = None
         self.year = None
+        # Tokens of QUALITY_FILTERS' words ("4k", "dolby_vision"), or None.
+        self.resolution = None
+        self.dynamic_range = None
         self.items = []
         self.total = 0
         self.collections = None
@@ -2060,6 +2136,9 @@ class Library(Screen):
     def shape(self) -> str:
         return "square" if self.library.get("kind") == "music" else "grid"
 
+    def sorts(self) -> tuple:
+        return KIND_SORTS.get(self.library.get("kind"), SORTS)
+
     def query(self, offset: int) -> dict:
         q = {"sort": self.sort, "order": "desc" if self.descending else "asc", "offset": offset, "limit": PAGE}
         if self.watched is not None:
@@ -2068,16 +2147,39 @@ class Library(Screen):
             q["genre"] = self.genre
         if self.year:
             q["year"] = self.year
+        if self.resolution:
+            q["resolution"] = self.resolution
+        if self.dynamic_range:
+            q["dynamic_range"] = self.dynamic_range
         return q
 
     @property
     def filtered(self) -> bool:
-        return self.watched is not None or bool(self.genre) or bool(self.year)
+        return self.watched is not None or bool(self.genre or self.year or self.resolution or self.dynamic_range)
+
+    @property
+    def badged(self) -> bool:
+        """Whether the grid's posters carry their quality badges ("4K",
+        "DV"): only where they say something, sorted by bitrate or filtered
+        by resolution or dynamic range (as on the other apps)."""
+        return self.sort == "bitrate" or bool(self.resolution or self.dynamic_range)
+
+    def tile(self, item: dict) -> xbmcgui.ListItem:
+        """A title of the grid; sorted by bitrate, its line under the poster
+        is its bitrate and size."""
+        return tiles.tile(self.session.base, item, self.shape, quality=self.badged, bitrate=self.sort == "bitrate")
+
+    def quality_words(self) -> str:
+        """The resolution and dynamic range chosen, as the Filter chip says
+        them while on, in the posters' short words: "4K", "4K · DV"."""
+        chosen = [words.RESOLUTIONS.get(self.resolution or ""), words.chip_ranges().get(self.dynamic_range or "")]
+        return " · ".join(w for w in chosen if w)
 
     def chips(self) -> list:
-        """(chip, whether it is on, its label when on) for Unwatched, Genre
-        and Year."""
+        """(chip, whether it is on, its label when on) for Filter (on with a
+        resolution or dynamic range chosen), Unwatched, Genre and Year."""
         return [
+            (L.LIBRARY_FILTER, bool(self.resolution or self.dynamic_range), self.quality_words()),
             (L.LIBRARY_UNWATCHED, self.watched is False, T("unwatched")),
             (L.LIBRARY_GENRE, bool(self.genre), self.genre or ""),
             (L.LIBRARY_YEAR, bool(self.year), str(self.year or "")),
@@ -2096,6 +2198,11 @@ class Library(Screen):
             parts.append(("genre", self.genre))
         if self.year:
             parts.append(("year", str(self.year)))
+        # Plex's own field, and Pley's for the dynamic range.
+        if self.resolution:
+            parts.append(("resolution", self.resolution))
+        if self.dynamic_range:
+            parts.append(("dynamicRange", self.dynamic_range))
         if self.watched is not None:
             parts.append(("unwatched", "0" if self.watched else "1"))
         field = PLEX_SORTS[self.sort]
@@ -2147,22 +2254,21 @@ class Library(Screen):
             # Music only sorts (TvLibraryScreen's chips); a filter that is on
             # shows its twin, with a check.
             music = self.library.get("kind") == "music"
-            win.visible(L.LIBRARY_FILTER, not music)
             win.put(L.LIBRARY_FILTER, ICON_ROOM + T("filter"))
             for chip, on, text in self.chips():
                 win.visible(chip, not music and not on)
                 win.visible(chip + 100, not music and on)
                 win.put(chip + 100, ICON_ROOM + text)
-            noun = LIBRARY_NOUNS.get(self.library.get("kind"), ("item", "items"))
+            noun = library_noun(self.library)
             every = self.library.get("item_count")
             if self.filtered and every is not None and every >= self.total:
                 # "23 of 342 movies"
-                win.put(L.LIBRARY_COUNT, T("count_of") % ("{:,}".format(self.total), words.plural(every, *noun)))
+                win.put(L.LIBRARY_COUNT, kodi.counted("count_of_" + noun, every) % (kodi.number(self.total), kodi.number(every)))
             else:
-                win.put(L.LIBRARY_COUNT, words.plural(self.total, *noun))
+                win.put(L.LIBRARY_COUNT, kodi.count(noun, self.total))
             grid = win.c(L.grid_list(L.LIBRARY_GRID, self.shape))
             grid.reset()
-            grid.addItems([tiles.tile(self.session.base, item, self.shape) for item in self.items])
+            grid.addItems([self.tile(item) for item in self.items])
             win.visible(L.grid_list(L.LIBRARY_GRID, self.shape), bool(self.items))
             if not self.items:
                 win.put(L.LIBRARY_EMPTY, T("no_matches") if self.filtered else T("library_empty"))
@@ -2213,19 +2319,22 @@ class Library(Screen):
         if control_id in tabs or control_id - 100 in tabs:
             return self.switch(tabs.get(control_id) or tabs[control_id - 100])
         if control_id in (L.LIBRARY_SORT, L.LIBRARY_SORT_DOWN):
-            names = [T(SORT_NAMES[s]) for s in SORTS]
-            chosen = xbmcgui.Dialog().select(T("sort_by"), names, preselect=SORTS.index(self.sort))
+            sorts = self.sorts()
+            names = [T(SORT_NAMES[s]) for s in sorts]
+            chosen = xbmcgui.Dialog().select(T("sort_by"), names, preselect=sorts.index(self.sort) if self.sort in sorts else 0)
             if chosen < 0:
                 return
-            if SORTS[chosen] == self.sort:
+            if sorts[chosen] == self.sort:
                 self.descending = not self.descending
             else:
-                self.sort = SORTS[chosen]
+                self.sort = sorts[chosen]
                 self.descending = self.sort not in ("title",)
             self.reload()
             return win.setFocusId(L.LIBRARY_SORT_DOWN if self.descending else L.LIBRARY_SORT)
-        if control_id == L.LIBRARY_FILTER:
-            return self.filter_menu()
+        if control_id in (L.LIBRARY_FILTER, L.LIBRARY_FILTER_ON):
+            if self.filter_menu():
+                self.refocus(L.LIBRARY_FILTER)
+            return
         if control_id in (L.LIBRARY_UNWATCHED, L.LIBRARY_UNWATCHED_ON):
             self.watched = None if self.watched is False else False
             self.reload()
@@ -2250,36 +2359,57 @@ class Library(Screen):
         elif self.tab == "collections" and self.collections and 0 <= at < len(self.collections):
             win.open(Grid.collection(win, self.collections[at]))
 
-    def filter_menu(self) -> None:
-        """Filter (TvLibraryPanel's): which titles to show, the genre and
-        the year; then Clear filters and Save as…"""
+    def filter_menu(self) -> bool:
+        """Filter (TvLibraryPanel's): which titles to show, the genre, the
+        year, the resolution and the dynamic range; then Clear filters and
+        Save as… Whether the page stays, with what was chosen (Save as…
+        opens the playlist it makes)."""
         shows = ((None, T("all")), (False, T("unwatched")), (True, T("mark_watched_short")))
-        entries = []
+        entries, actions = [], []
         for watched, name in shows:
             li = xbmcgui.ListItem(name, offscreen=True)
             li.select(self.watched is watched)
             entries.append(li)
+            actions.append(lambda watched=watched: self.show_watched(watched))
+
+        def entry(text, action):
+            entries.append(xbmcgui.ListItem(text, offscreen=True))
+            actions.append(action)
+
         # Kodi's select list draws one label: the value goes in it.
-        entries.append(xbmcgui.ListItem("%s: %s" % (T("genre"), self.genre or T("any_genre")), offscreen=True))
-        entries.append(xbmcgui.ListItem("%s: %s" % (T("year"), self.year or T("any_year")), offscreen=True))
+        entry(T("label_value") % (T("genre"), self.genre or T("any_genre")), self.pick_genre)
+        entry(T("label_value") % (T("year"), self.year or T("any_year")), self.pick_year)
+        try:
+            listed = self.filter_options()
+        except api.ApiError:
+            # Without them; Genre's and Year's pickers say what is wrong.
+            listed = {}
+        # The resolution and the dynamic range where the library's titles
+        # differ in them (the server lists two or more), or one is chosen,
+        # so it can be changed or cleared. Music has none.
+        quality = QUALITY_FILTERS.items() if self.library.get("kind") != "music" else ()
+        for field, (key, named) in quality:
+            names = named()
+            value = getattr(self, field)
+            if value or named_tokens(listed.get(key), names):
+                entry(T("label_value") % (T(field), names.get(value) or T("any_" + field)), lambda field=field: self.pick_quality(field))
         if self.filtered:
-            entries.append(xbmcgui.ListItem(T("clear_filters"), offscreen=True))
-            entries.append(xbmcgui.ListItem(T("save_as"), offscreen=True))
+            entry(T("clear_filters"), self.clear_filters)
+            entry(T("save_as"), self.save_as)
         current = next(i for i, (watched, _) in enumerate(shows) if self.watched is watched)
         chosen = xbmcgui.Dialog().select(T("filter"), entries, preselect=current)
         if chosen < 0:
-            return
-        if chosen < len(shows):
-            self.watched = shows[chosen][0]
-            return self.reload()
-        if chosen == len(shows):
-            return self.pick_genre()
-        if chosen == len(shows) + 1:
-            return self.pick_year()
-        if chosen == len(shows) + 2:
-            self.watched, self.genre, self.year = None, None, None
-            return self.reload()
-        self.save_as()
+            return False
+        actions[chosen]()
+        return actions[chosen] != self.save_as
+
+    def show_watched(self, watched) -> None:
+        self.watched = watched
+        self.reload()
+
+    def clear_filters(self) -> None:
+        self.watched, self.genre, self.year, self.resolution, self.dynamic_range = None, None, None, None, None
+        self.reload()
 
     def filter_options(self) -> dict:
         if self.filters is None:
@@ -2306,6 +2436,22 @@ class Library(Screen):
         chosen = xbmcgui.Dialog().select(T("year"), [T("any_year")] + options, preselect=current)
         if chosen >= 0:
             self.year = int(options[chosen - 1]) if chosen else None
+            self.reload()
+
+    def pick_quality(self, field: str) -> None:
+        """Resolution or Dynamic range: none, then what the library's titles
+        have, best first ("4K", "1080p"; "HDR", "Dolby Vision")."""
+        key, named = QUALITY_FILTERS[field]
+        names = named()
+        try:
+            options = named_tokens(self.filter_options().get(key), names)
+        except api.ApiError as e:
+            return self.win.toast(T("server_error") % e.message, 6)
+        value = getattr(self, field)
+        current = options.index(value) + 1 if value in options else 0
+        chosen = xbmcgui.Dialog().select(T(field), [T("any_" + field)] + [names[o] for o in options], preselect=current)
+        if chosen >= 0:
+            setattr(self, field, options[chosen - 1] if chosen else None)
             self.reload()
 
     def save_as(self) -> None:
@@ -2340,7 +2486,7 @@ class Library(Screen):
             if not found or len(self.items) != offset:
                 return
             self.items += found
-            self.win.c(L.grid_list(L.LIBRARY_GRID, self.shape)).addItems([tiles.tile(self.session.base, item, self.shape) for item in found])
+            self.win.c(L.grid_list(L.LIBRARY_GRID, self.shape)).addItems([self.tile(item) for item in found])
 
         def failed():
             # Asked again as focus moves on.
@@ -2369,7 +2515,7 @@ class Library(Screen):
 
 
 def collection_tile(base: str, collection: dict) -> xbmcgui.ListItem:
-    li = xbmcgui.ListItem(collection.get("title") or "", words.plural(collection["item_count"], "title") if collection.get("item_count") is not None else "", offscreen=True)
+    li = xbmcgui.ListItem(collection.get("title") or "", kodi.count("titles", collection["item_count"]) if collection.get("item_count") is not None else "", offscreen=True)
     # Without a poster of its own, the server sends its titles' (a redirect).
     url = collection.get("poster_url") or "/api/collections/%d/images/poster" % collection["id"]
     found = image(base, url, tiles.WIDTHS["grid"])
@@ -2488,7 +2634,7 @@ class Search(Screen):
             if asks:
                 self.look_on_tmdb()
             try:
-                answer = self.session.get("/api/search", q=self.query, limit=100, summaries=1)
+                answer = self.session.get("/api/search", q=self.query, limit=api.SEARCH_LIMIT, summaries=1)
             except api.ApiError:
                 # The page stays as it was: the Discover row's titles aren't put under it.
                 self.asked += 1
@@ -2504,14 +2650,15 @@ class Search(Screen):
                 found = by_kind(kinds)
                 if found:
                     self.found.append({"key": title, "title": title, "shape": shape, "items": found})
-            people = answer.get("people") or []
-            if people:
-                self.found.insert(min(len(self.found), 3), {"key": "people", "title": T("people"), "shape": "person", "items": people})
-            # Live TV's channels, by name, number or what's on (a server
-            # with Live TV open to this profile).
+            # After the titles, Live TV's channels, by name, number or what's
+            # on (a server with Live TV open to this profile), then people,
+            # as on the other apps; the closest matches first in each.
             channels = answer.get("channels") or []
             if channels:
                 self.found.append({"key": "channels", "title": T("live_tv"), "shape": "channel", "items": channels})
+            people = answer.get("people") or []
+            if people:
+                self.found.append({"key": "people", "title": T("people"), "shape": "person", "items": people})
         self.win.put(L.SEARCH_FIELD, self.query or color(T("search_hint"), L.MUTED))
         self.draw()
 
@@ -2677,7 +2824,7 @@ class Grid(Screen):
             return win.session.get("/api/playlists").get("playlists", [])
 
         def tile(playlist):
-            li = xbmcgui.ListItem(playlist.get("title") or "", T("playlist_items") % playlist.get("item_count", 0), offscreen=True)
+            li = xbmcgui.ListItem(playlist.get("title") or "", kodi.count("items", playlist.get("item_count", 0)), offscreen=True)
             artwork = playlist.get("artwork") or []
             if artwork:
                 li.setArt({"tile": image(win.session.base, artwork[0], tiles.WIDTHS["wide"])})
@@ -2977,7 +3124,7 @@ class Live(Screen):
         out = [{"key": ("search", None), "label": T("search_channels"), "count": None}]
         if self.category[0] == "search":
             # What was looked for, marked as the category shown.
-            out[0].update(key=self.category, label="“%s”" % self.category[1], count=self.total)
+            out[0].update(key=self.category, label=T("quoted") % self.category[1], count=self.total)
             # The groups whose names match, to go to (the web's).
             for group in livetv.matching_groups(lineup.get("groups") or [], self.category[1]):
                 out.append({"key": ("group", group["name"]), "label": livetv.group_name(group), "count": group.get("count"), "inner": True})
@@ -3040,9 +3187,9 @@ class Live(Screen):
         if kind == "group":
             heading = livetv.group_name(next((g for g in self.lineup.get("groups") or [] if g["name"] == value), {"label": value}))
         else:
-            heading = {"all": T("all_channels"), "favorites": T("favourites"), "recent": T("recently_watched")}.get(kind) or "“%s”" % value
+            heading = {"all": T("all_channels"), "favorites": T("favourites"), "recent": T("recently_watched")}.get(kind) or T("quoted") % value
         win.put(L.LIVE_HEADING, heading)
-        win.put(L.LIVE_COUNT, words.plural(self.total, "channel") if self.total else "")
+        win.put(L.LIVE_COUNT, kodi.count("channels", self.total) if self.total else "")
         win.put(L.LIVE_EMPTY, "" if self.shown else T("nothing_found") if kind == "search" else T("no_channels"))
         kodi.log("Live TV: %d of %d channels drawn in %d ms" % (len(self.shown), self.total, (time.perf_counter() - began) * 1000), xbmc.LOGDEBUG)
 
@@ -3437,8 +3584,8 @@ def program_text(channel: dict, program: dict, now: float, group=None) -> str:
 
 
 class Libraries(Screen):
-    """Every library (TvLibrariesScreen): the rail shows the first three,
-    and Libraries opens this page. A card for each in the profile's order:
+    """Every library (TvLibrariesScreen): the rail shows the first four or
+    five, and Libraries opens this page. A card for each in the profile's order:
     its kind's icon, its name, how much it holds, and "Scanning…" while the
     server scans it. Sort libraries sorts them as the profile's menu does;
     a card's menu opens it, moves it, or goes back to the server's order."""
@@ -3447,7 +3594,7 @@ class Libraries(Screen):
 
     @property
     def rail(self) -> str:
-        return "libraries" if L.RAIL_ALL_LIBRARIES in rail_entries(len(self.win.libraries)) else "home"
+        return "libraries" if L.RAIL_ALL_LIBRARIES in rail_entries(len(self.win.libraries), livetv.available(self.win.live)) else "home"
 
     def load(self) -> None:
         # How much each holds, and which the server is scanning, as of now.
@@ -3706,6 +3853,7 @@ def run(plugin, base: str) -> None:
         after, listing = window.after, window.listing
         del window
         kodi.clear_property(UI)
+        kodi.clear_property(profiles.PICKING)
         if after == "choose_server":
             plugin.route_choose_server()
         elif after == "sign_in":

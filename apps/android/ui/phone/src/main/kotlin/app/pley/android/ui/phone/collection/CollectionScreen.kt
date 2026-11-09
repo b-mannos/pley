@@ -27,7 +27,6 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -43,6 +42,7 @@ import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
@@ -52,6 +52,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import app.pley.android.common.resolve
 import app.pley.android.data.Loadable
 import app.pley.android.data.valueOrNull
 import app.pley.android.designsystem.PleyColors
@@ -61,6 +62,7 @@ import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.designsystem.image.Artwork
 import app.pley.android.designsystem.image.ArtworkImage
+import app.pley.android.designsystem.image.rememberImagePrefetcher
 import app.pley.android.designsystem.tile.ArtworkTileModel
 import app.pley.android.designsystem.tile.QualityBadge
 import app.pley.android.designsystem.tile.SkeletonTile
@@ -77,16 +79,18 @@ import app.pley.android.screens.collection.CollectionViewModel
 import app.pley.android.screens.screensGraph
 import app.pley.android.ui.phone.R
 import app.pley.android.ui.phone.kit.ErrorState
+import app.pley.android.ui.phone.kit.LocalPhoneDeviceTier
 import app.pley.android.ui.phone.kit.MediaCard
 import app.pley.android.ui.phone.kit.PleyIconButton
 import app.pley.android.ui.phone.kit.PleyTextButton
 import app.pley.android.ui.phone.kit.PrimaryButton
 import app.pley.android.ui.phone.kit.TonalButton
+import app.pley.android.ui.phone.kit.rememberItemGridState
 import app.pley.android.ui.phone.library.EqualCells
-import app.pley.android.ui.phone.library.PhoneTiles
 import app.pley.android.ui.phone.library.cellWidth
 import app.pley.android.ui.phone.library.count
 import app.pley.android.ui.phone.library.libraryColumns
+import app.pley.android.ui.phone.library.rememberPhoneTiles
 import app.pley.android.ui.phone.shell.LocalPhoneNavigator
 import app.pley.android.ui.phone.shell.LocalPhoneShell
 import app.pley.android.ui.phone.shell.ReportLoad
@@ -100,9 +104,9 @@ import app.pley.android.ui.phone.theme.LocalPhoneMetrics
  */
 @Composable
 internal fun CollectionScreen(key: PleyKey.Collection) {
-    val resources = LocalResources.current
+    val tiles = rememberPhoneTiles()
     val vm: CollectionViewModel<ArtworkTileModel> = viewModel {
-        CollectionViewModel(key.collectionId, CollectionDeps.of(screensGraph()), PhoneTiles(resources))
+        CollectionViewModel(key.collectionId, CollectionDeps.of(screensGraph()), tiles)
     }
     val state by vm.state.collectAsStateWithLifecycle()
     val shell = LocalPhoneShell.current
@@ -128,7 +132,17 @@ private fun CollectionContent(state: Loadable<CollectionPage<ArtworkTileModel>>,
     val available = metrics.contentWidth - metrics.margin * 2
     val columns = libraryColumns(app.pley.android.data.GridDensity.Medium, TileKind.Poster, available)
     val width = cellWidth(columns, available)
-    val grid = rememberLazyGridState()
+    // About a screen composed ahead, and the posters of the next 1.5 screens asked for (the header has none).
+    val grid = rememberItemGridState()
+    val density = LocalDensity.current
+    val images = remember(page?.tiles) { listOf(null) + page?.tiles.orEmpty().map { it.image } }
+    rememberImagePrefetcher(
+        state = grid,
+        images = images,
+        widthPx = with(density) { width.roundToPx() },
+        heightPx = with(density) { (width / TileKind.Poster.aspectRatio).roundToPx() },
+        tier = LocalPhoneDeviceTier.current,
+    )
     Box(Modifier.fillMaxSize()) {
         if (page == null && state is Loadable.Failed) {
             Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars).padding(top = 56.dp)) {
@@ -240,7 +254,7 @@ private fun Header(page: CollectionPage<ArtworkTileModel>?, vm: CollectionViewMo
             )
             Spacer(Modifier.height(8.dp))
             val noun = if (page.kind == LibraryKind.Shows) R.plurals.library_count_shows else R.plurals.library_count_movies
-            val parts = listOfNotNull(count(resources, noun, page.count), page.libraryName) + page.notes
+            val parts = listOfNotNull(count(resources, noun, page.count), page.libraryName) + page.noteTexts.map { it.resolve(resources) }
             Text(
                 parts.joinToString(" · "),
                 style = MaterialTheme.typography.labelMedium,

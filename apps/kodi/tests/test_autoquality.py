@@ -3,6 +3,7 @@ import unittest
 import support  # noqa: F401
 from pley import autoquality as aq
 from pley.autoquality import Meter, Watch
+from pley.kodi import text as T
 
 
 class MenuTest(unittest.TestCase):
@@ -10,7 +11,7 @@ class MenuTest(unittest.TestCase):
         # docs/QUALITY.md: the two 4K qualities first, then 1080p and below.
         self.assertEqual(aq.IDS, ["original", "auto", "30m", "15m", "20m", "12m", "8m", "4m", "2m"])
         self.assertEqual(
-            [aq.label(q) for q in aq.IDS],
+            [aq.label(q, T) for q in aq.IDS],
             ["Original", "Automatic", "30 Mbps 4K", "15 Mbps 4K", "20 Mbps 1080p", "12 Mbps 1080p", "8 Mbps 1080p", "4 Mbps 720p", "2 Mbps 480p"],
         )
         self.assertEqual(aq.limits("15m"), (15000, 2160))
@@ -35,6 +36,25 @@ class MenuTest(unittest.TestCase):
         self.assertEqual(aq.offered(20_000, 1080), ["15m", "12m", "8m", "4m", "2m"])
         self.assertEqual(aq.offered(None, None), ["30m", "20m", "15m", "12m", "8m", "4m", "2m"])
         self.assertEqual(aq.offered(1_500, 480), [])
+
+    def test_the_menu_a_file_offers_as_every_app_does(self):
+        # The server's cases (playback.rs, offered_qualities_are_the_players_menu),
+        # which it lists to remotes.
+        mbps = lambda m: m * 1_000_000  # noqa: E731
+        self.assertEqual(aq.menu_for(1920, 1080, mbps(9)), ["original", "auto", "4m", "2m"])
+        self.assertEqual(aq.menu_for(1920, 1080, mbps(10)), ["original", "auto", "8m", "4m", "2m"])
+        self.assertEqual(aq.menu_for(1280, 720, mbps(3)), ["original", "auto", "2m"])
+        self.assertEqual(aq.menu_for(3840, 2160, mbps(6)), ["original", "auto", "20m", "12m", "8m", "4m", "2m"])
+        self.assertEqual(aq.menu_for(3840, 2160, mbps(60)), aq.IDS, "a 4K file keeps the table's order")
+        self.assertEqual(aq.menu_for(3840, 2160, mbps(20)), ["original", "auto", "15m", "20m", "12m", "8m", "4m", "2m"])
+        self.assertEqual(aq.menu_for(1920, 800, mbps(25)), ["original", "auto", "20m", "15m", "12m", "8m", "4m", "2m"])
+        self.assertEqual(aq.menu_for(None, None, None), aq.IDS, "every one, when nothing is known")
+
+    def test_the_pick_a_file_plays(self):
+        offered = ["original", "auto", "4m", "2m"]
+        self.assertEqual(aq.picked("auto", offered), "auto")
+        self.assertEqual(aq.picked("4m", offered), "4m")
+        self.assertEqual(aq.picked("30m", offered), "original", "a quality the file doesn't offer plays the original")
 
     def test_where_a_remembered_ceiling_starts(self):
         self.assertIsNone(aq.start_quality(None))
@@ -294,7 +314,7 @@ class LiveBitrateTest(unittest.TestCase):
         kodi.wait(2)
         self.assertEqual(kodi.steps, [aq.Step(aq.BITRATE, "8m", 4_000, True, 4_500)])
         self.assertEqual((w.quality, w.lines, w.playing_kbps), ("8m", 1080, 4_000), "the same stream, the same size")
-        self.assertEqual(w.label(), "4 Mbps 1080p")
+        self.assertEqual(w.label(T), "4 Mbps 1080p")
         self.assertTrue(w.lowered())
 
     def test_never_below_its_sizes_floor(self):
@@ -315,7 +335,7 @@ class LiveBitrateTest(unittest.TestCase):
         kodi.play(30)
         kodi.wait(2)
         self.assertEqual(kodi.steps, [aq.Step(aq.BITRATE, "15m", 8_000, True, 8_000)], "half, then the margin: 5.6, under 8")
-        self.assertEqual(uhd.label(), "8 Mbps 4K")
+        self.assertEqual(uhd.label(T), "8 Mbps 4K")
 
     def test_two_short_waits_and_slow_delivery_lower_it(self):
         kodi = Kodi(live())
@@ -353,7 +373,7 @@ class LiveBitrateTest(unittest.TestCase):
         kodi.play(180)
         self.assertEqual(kodi.said[-1], (872, 20_000), "34 Mbps carries 1.6 times 20 Mbps")
         self.assertEqual(kodi.steps[-1].memory, 20_000, "the quality's own")
-        self.assertEqual(w.label(), "20 Mbps 1080p")
+        self.assertEqual(w.label(T), "20 Mbps 1080p")
         kodi.play(600)
         self.assertEqual(len(kodi.said), 5, "never above its own")
 
@@ -364,13 +384,13 @@ class LiveBitrateTest(unittest.TestCase):
         kodi.play(30)
         kodi.wait(2)
         self.assertEqual(kodi.said, [(32, 11_000)])
-        self.assertEqual(w.label(), "11 Mbps 4K")
+        self.assertEqual(w.label(T), "11 Mbps 4K")
         kodi.carried = 30_000
         kodi.play(300)
         self.assertEqual(kodi.steps[-1], aq.Step(aq.BITRATE, "original", 12_000, False, 12_000))
         kodi.play(180)
         self.assertEqual(kodi.steps[-1], aq.Step(aq.BITRATE, "original", 15_000, False, 0), "its own: no limit")
-        self.assertEqual(w.label(), "Original")
+        self.assertEqual(w.label(T), "Original")
         self.assertFalse(w.lowered())
 
     def test_the_server_says_what_it_goes_on_at(self):

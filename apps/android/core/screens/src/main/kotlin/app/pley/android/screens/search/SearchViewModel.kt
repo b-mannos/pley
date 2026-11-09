@@ -22,6 +22,7 @@ import app.pley.android.screens.ScreensGraph
 import app.pley.android.screens.library.LibraryViewModel
 import app.pley.android.screens.library.TileFactory
 import app.pley.android.screens.library.TileLook
+import app.pley.android.screens.livetv.ChannelHandoff
 import app.pley.android.screens.requests.Pages
 import app.pley.android.screens.requests.RequestProblem
 import app.pley.android.screens.requests.gathered
@@ -54,8 +55,9 @@ import kotlinx.coroutines.launch
 
 /**
  * What search reads: the server's answers, recent searches, the server's
- * address for pictures, and [requests] for what TMDB has beside them;
- * [launcher] plays a Live TV channel found.
+ * address for pictures, and [requests] for what TMDB has beside them,
+ * [tmdbShown] of its titles at most (a TV's Discover row holds more than a
+ * phone's); [launcher] plays a Live TV channel found.
  */
 class SearchDeps(
     val search: SearchRepository,
@@ -63,10 +65,11 @@ class SearchDeps(
     val compute: CoroutineDispatcher = Dispatchers.Default,
     val launcher: PlayerLauncher? = null,
     val requests: RequestsRepository = RequestsRepository.None,
+    val tmdbShown: Int = SearchViewModel.TMDB_SHOWN,
 ) {
     companion object {
-        fun of(graph: ScreensGraph): SearchDeps =
-            SearchDeps(graph.data.search, graph.data.servers.active, launcher = graph.playerLauncher, requests = graph.data.requests)
+        fun of(graph: ScreensGraph, tmdbShown: Int = SearchViewModel.TMDB_SHOWN): SearchDeps =
+            SearchDeps(graph.data.search, graph.data.servers.active, launcher = graph.playerLauncher, requests = graph.data.requests, tmdbShown = tmdbShown)
     }
 }
 
@@ -107,11 +110,10 @@ interface SearchTiles<T : Any> {
 
 /**
  * The groups results come in, in the order they show (the web's
- * SearchPage): people first, then each kind of item. [look] is how its
- * items are drawn; people are circles.
+ * SearchPage): each kind of item, then people (the Live TV channels found
+ * go between them). [look] is how its items are drawn; people are circles.
  */
 enum class SearchGroupKind(val look: TileLook, internal val kind: ItemKind?) {
-    People(TileLook.Poster, null),
     Movies(TileLook.Poster, ItemKind.Movie),
     Shows(TileLook.Poster, ItemKind.Show),
     Seasons(TileLook.Poster, ItemKind.Season),
@@ -119,6 +121,7 @@ enum class SearchGroupKind(val look: TileLook, internal val kind: ItemKind?) {
     Artists(TileLook.Square, ItemKind.Artist),
     Albums(TileLook.Square, ItemKind.Album),
     Tracks(TileLook.Square, ItemKind.Track),
+    People(TileLook.Poster, null),
 }
 
 /** One group of results: its [tiles], [ids] beside them. */
@@ -140,7 +143,8 @@ sealed interface SearchResultsState<out T : Any> {
 
     /**
      * Results for [query], grouped, with the Live TV [channels] found (shown
-     * after people, as on the web; their logos are on [origin]). While
+     * after the titles and before people, as on the web; their logos are on
+     * [origin]). While
      * [loading], a newer query's answer is on its way and these stay until
      * it comes.
      */
@@ -173,8 +177,9 @@ data class SearchUiState<T : Any>(
  * What is typed is asked for once typing has paused 250 ms, and only the
  * latest query's answer counts: a newer one replaces a request still on
  * its way. The results already shown stay while the next ones load.
- * Results come in groups: People, Live TV, Movies, Shows, Seasons,
- * Episodes, Artists, Albums, Tracks, each with its count. A query is kept among the
+ * Results come in groups: Movies, Shows, Seasons, Episodes, Artists,
+ * Albums, Tracks, Live TV, People, each with its count, the server's
+ * closest matches first in each. A query is kept among the
  * profile's last 10 searches when it is submitted or one of its results
  * is opened.
  */
@@ -245,7 +250,7 @@ class SearchViewModel<T : Any>(
         try {
             do {
                 pages = pages.with(deps.requests.search(q, pages.page + 1, missing = true))
-            } while (pages.short(TMDB_SHOWN) && ++read < TMDB_PAGES)
+            } while (pages.short(deps.tmdbShown) && ++read < TMDB_PAGES)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -255,7 +260,7 @@ class SearchViewModel<T : Any>(
                 return@flow
             }
         }
-        var titles = pages.titles.take(TMDB_SHOWN)
+        var titles = pages.titles.take(deps.tmdbShown)
         if (titles.isEmpty()) {
             emit(TmdbSection.Hidden)
             return@flow
@@ -322,6 +327,7 @@ class SearchViewModel<T : Any>(
     fun watch(channel: LiveChannel) {
         val q = shown.query
         if (q.isNotEmpty()) viewModelScope.launch { deps.search.remember(q) }
+        ChannelHandoff.give(channel)
         deps.launcher?.watchLive(channel.id, "all")
     }
 
@@ -404,25 +410,25 @@ class SearchViewModel<T : Any>(
         /** How long the results keep being followed after the page stops showing. */
         const val STOP_AFTER_MS = 5_000L
 
-        /** How many of TMDB's titles the Discover row shows; its See all has the rest. */
+        /** How many of TMDB's titles a phone's Discover row shows; its See all has the rest. */
         const val TMDB_SHOWN = 12
 
         /** The most of TMDB's pages the Discover row reads for them. */
         const val TMDB_PAGES = 3
 
         /**
-         * [results] in their groups and the groups' order (people, movies,
-         * shows, seasons, episodes, artists, albums, tracks), each keeping
+         * [results] in their groups and the groups' order (movies, shows,
+         * seasons, episodes, artists, albums, tracks, people), each keeping
          * the server's order of relevance; empty groups left out. Items of
          * other kinds (extras) aren't shown, as on the web.
          */
         fun searchGroups(results: SearchResults): List<Pair<SearchGroupKind, List<Any>>> = buildList {
-            if (results.people.isNotEmpty()) add(SearchGroupKind.People to results.people)
             val byKind = results.items.groupBy { it.kind }
             for (kind in SearchGroupKind.entries) {
                 val items = kind.kind?.let(byKind::get).orEmpty()
                 if (items.isNotEmpty()) add(kind to items)
             }
+            if (results.people.isNotEmpty()) add(SearchGroupKind.People to results.people)
         }
 
         /** Where a result opens: artists and albums their music pages, a track its album, the rest their item page. */

@@ -46,11 +46,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.MediaLibraryInfo
 import androidx.media3.common.util.UnstableApi
 import app.pley.android.auth.Needs
-import app.pley.android.common.sentenceOf
+import app.pley.android.common.UiText
+import app.pley.android.common.errorSentence
+import app.pley.android.common.perf.FrameRate
 import app.pley.android.data.FrameRateMatching
 import app.pley.android.data.Passthrough
 import app.pley.android.data.Settings
-import app.pley.android.player.subtitles.CaptionLook
 import app.pley.android.data.SubtitleBackground
 import app.pley.android.data.SubtitleFont
 import app.pley.android.designsystem.PleyColors
@@ -59,9 +60,13 @@ import app.pley.android.designsystem.PleyType
 import app.pley.android.designsystem.TvSafeArea
 import app.pley.android.designsystem.icon.PleyIcon
 import app.pley.android.designsystem.icon.PleyIcons
+import app.pley.android.designsystem.text.asString
+import app.pley.android.designsystem.text.formatWords
 import app.pley.android.model.SubtitleMode
+import app.pley.android.player.subtitles.CaptionLook
 import app.pley.android.screens.PleyGraphOwner
 import app.pley.android.screens.PleyKey
+import app.pley.android.screens.R as ScreensR
 import app.pley.android.screens.account.MeEvent
 import app.pley.android.screens.account.MeUiState
 import app.pley.android.screens.account.MeViewModel
@@ -69,14 +74,18 @@ import app.pley.android.screens.account.SUBTITLE_MODES
 import app.pley.android.screens.account.TrackLanguages
 import app.pley.android.screens.diagnostics.DiagnosticsViewModel
 import app.pley.android.screens.onboarding.ProfileTile
+import app.pley.android.screens.settings.LanguageUiState
+import app.pley.android.screens.settings.LanguageViewModel
 import app.pley.android.screens.settings.SettingsUiState
 import app.pley.android.screens.settings.SettingsViewModel
 import app.pley.android.ui.tv.R
+import app.pley.android.ui.tv.kit.HeldEnds
+import app.pley.android.ui.tv.kit.TvTextButton
+import app.pley.android.ui.tv.kit.heldKeyStaysIn
 import app.pley.android.ui.tv.kit.rememberFocusMemory
 import app.pley.android.ui.tv.kit.rememberedFocus
 import app.pley.android.ui.tv.onboarding.ProfileAvatar
 import app.pley.android.ui.tv.onboarding.TvDialog
-import app.pley.android.ui.tv.kit.TvTextButton
 import app.pley.android.ui.tv.shell.LocalTvNavigator
 
 /** The TV settings' categories, top to bottom (design spec §4.8). */
@@ -93,6 +102,7 @@ internal enum class Category(val icon: PleyIcon) {
 
 /** The choice whose side panel is open. */
 private sealed interface Picking {
+    data object Language : Picking
     data object AudioLanguage : Picking
     data object SubtitleMode : Picking
     data object SubtitleLanguage : Picking
@@ -121,8 +131,10 @@ private sealed interface Picking {
 internal fun TvSettingsScreen(start: Category = Category.Profile) {
     val me: MeViewModel = viewModel(factory = MeViewModel.factory)
     val settingsModel: SettingsViewModel = viewModel(factory = SettingsViewModel.factory)
+    val languageModel: LanguageViewModel = viewModel(factory = LanguageViewModel.factory)
     val meState by me.state.collectAsStateWithLifecycle()
     val settings by settingsModel.state.collectAsStateWithLifecycle()
+    val language by languageModel.state.collectAsStateWithLifecycle()
     val navigator = LocalTvNavigator.current
     val memory = rememberFocusMemory()
     var shown by rememberSaveable { mutableStateOf(start) }
@@ -130,7 +142,7 @@ internal fun TvSettingsScreen(start: Category = Category.Profile) {
     var lastPicking by remember { mutableStateOf<Picking?>(null) }
     var web by rememberSaveable { mutableStateOf<String?>(null) }
     var confirmSignOut by rememberSaveable { mutableStateOf(false) }
-    var message by remember { mutableStateOf<String?>(null) }
+    var message by remember { mutableStateOf<UiText?>(null) }
     val rows = remember { HashMap<String, FocusRequester>() }
     fun requester(key: String) = rows.getOrPut(key) { FocusRequester() }
     // Focus goes back to Sign out once its dialog closes without signing out.
@@ -144,19 +156,17 @@ internal fun TvSettingsScreen(start: Category = Category.Profile) {
             runCatching { requester("category-${Category.SignOut.name}").requestFocus() }
         }
     }
-    val savedText = stringResource(R.string.tv_account_saved)
-    val readOnlyText = stringResource(R.string.tv_account_defaults_read_only)
-
     LaunchedEffect(me) {
         me.events.collect { event ->
             when (event) {
-                is MeEvent.Saved -> message = savedText
-                MeEvent.ReadOnly -> message = readOnlyText
-                is MeEvent.Failed -> message = sentenceOf(event.error)
+                is MeEvent.Saved -> message = UiText.res(R.string.tv_account_saved)
+                MeEvent.ReadOnly -> message = UiText.res(R.string.tv_account_defaults_read_only)
+                is MeEvent.Failed -> message = errorSentence(event.error)
                 is MeEvent.SignedOut -> navigator.restart(event.server?.let { PleyKey.Link(it) } ?: PleyKey.Servers)
             }
         }
     }
+    LaunchedEffect(languageModel) { languageModel.errors.collect { message = errorSentence(it) } }
     LaunchedEffect(message) {
         if (message != null) {
             kotlinx.coroutines.delay(MESSAGE_MS)
@@ -192,6 +202,7 @@ internal fun TvSettingsScreen(start: Category = Category.Profile) {
                                 false
                             }
                         }
+                        .heldKeyStaysIn(HeldEnds.UpDown)
                         .focusRestorer()
                         .focusGroup(),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -223,6 +234,7 @@ internal fun TvSettingsScreen(start: Category = Category.Profile) {
                     Modifier
                         .padding(start = PANE_START - PleyTv.Gutter - CATEGORIES_WIDTH, end = TvSafeArea.Horizontal)
                         .fillMaxSize()
+                        .heldKeyStaysIn(HeldEnds.UpDown)
                         .focusGroup()
                         .testTag(TV_SETTINGS_PANE),
                     contentPadding = PaddingValues(bottom = TvSafeArea.Vertical),
@@ -233,6 +245,7 @@ internal fun TvSettingsScreen(start: Category = Category.Profile) {
                         meState,
                         settings,
                         settingsModel,
+                        language,
                         memory = memory,
                         requester = ::requester,
                         pick = pick,
@@ -247,13 +260,13 @@ internal fun TvSettingsScreen(start: Category = Category.Profile) {
         message?.let { text ->
             Box(Modifier.align(Alignment.TopEnd).padding(top = TvSafeArea.Vertical, end = TvSafeArea.Horizontal)) {
                 BasicText(
-                    text,
+                    text.asString(),
                     style = PleyType.Tv.Label.copy(color = PleyColors.Fg),
                     modifier = Modifier.background(PleyColors.Surface3, app.pley.android.designsystem.PleyShape.Pill).padding(horizontal = 20.dp, vertical = 10.dp),
                 )
             }
         }
-        Panels(picking, lastPicking, meState, settings, me, settingsModel, onClose = { picking = null }, returnTo = lastPicking?.let { requester(rowKeyOf(it)) })
+        Panels(picking, lastPicking, meState, settings, me, settingsModel, language, languageModel, onClose = { picking = null }, returnTo = lastPicking?.let { requester(rowKeyOf(it)) })
         web?.let { path ->
             val server = meState.profile?.server.orEmpty()
             TvWebDialog(server, path, onDismiss = {
@@ -293,6 +306,7 @@ private fun firstRowOf(c: Category, me: MeUiState): String = when (c) {
 
 /** The row each panel goes back to. */
 private fun rowKeyOf(p: Picking): String = when (p) {
+    Picking.Language -> "row-language"
     Picking.AudioLanguage -> "row-audio"
     Picking.SubtitleMode -> "row-subtitles"
     Picking.SubtitleLanguage -> "row-subtitle-language"
@@ -312,6 +326,7 @@ private fun LazyListScope.pane(
     me: MeUiState,
     ui: SettingsUiState,
     model: SettingsViewModel,
+    language: LanguageUiState,
     memory: app.pley.android.ui.tv.kit.FocusMemory,
     requester: (String) -> FocusRequester,
     pick: (Picking) -> Unit,
@@ -332,23 +347,23 @@ private fun LazyListScope.pane(
             item(key = "profile-header") { ProfileHeader(me) }
             val profile = me.profile
             if (profile?.canSwitch == true) {
-                item(key = "row-switch") {
+                item(key = "row-switch", contentType = SETTING_ROW) {
                     TvSettingRow(stringResource(R.string.tv_account_switch_profile), onClick = { onRestart(PleyKey.Profiles()) }, icon = PleyIcons.Users, chevron = true, modifier = keyed("row-switch"))
                 }
             }
             val defaults = me.trackDefaults
             val editable = defaults?.editable == true
-            item(key = "row-audio") {
+            item(key = "row-audio", contentType = SETTING_ROW) {
                 val webOnly = stringResource(R.string.tv_account_change_on_web)
                 TvSettingRow(
                     stringResource(R.string.tv_account_audio_language),
-                    value = if (defaults == null) null else (TrackLanguages.nameOf(defaults.defaults.audioLanguage) ?: stringResource(R.string.tv_account_file_default)) + if (editable) "" else " · $webOnly",
+                    value = if (defaults == null) null else (TrackLanguages.nameOf(defaults.defaults.audioLanguage, formatWords()) ?: stringResource(R.string.tv_account_file_default)) + if (editable) "" else " · $webOnly",
                     icon = PleyIcons.AudioLines,
                     onClick = { if (editable) pick(Picking.AudioLanguage) else onWeb("/account") },
                     modifier = keyed("row-audio"),
                 )
             }
-            item(key = "row-subtitles") {
+            item(key = "row-subtitles", contentType = SETTING_ROW) {
                 val webOnly = stringResource(R.string.tv_account_change_on_web)
                 TvSettingRow(
                     stringResource(R.string.tv_account_subtitles),
@@ -359,22 +374,34 @@ private fun LazyListScope.pane(
                 )
             }
             if (defaults?.readsSubtitles == true) {
-                item(key = "row-subtitle-language") {
+                item(key = "row-subtitle-language", contentType = SETTING_ROW) {
                     val webOnly = stringResource(R.string.tv_account_change_on_web)
                     TvSettingRow(
                         stringResource(R.string.tv_account_subtitle_language),
-                        value = (TrackLanguages.nameOf(defaults.defaults.subtitleLanguage) ?: stringResource(R.string.tv_account_same_as_audio)) + if (editable) "" else " · $webOnly",
+                        value = (TrackLanguages.nameOf(defaults.defaults.subtitleLanguage, formatWords()) ?: stringResource(R.string.tv_account_same_as_audio)) + if (editable) "" else " · $webOnly",
                         icon = PleyIcons.Captions,
                         onClick = { if (editable) pick(Picking.SubtitleLanguage) else onWeb("/account") },
                         modifier = keyed("row-subtitle-language"),
                     )
                 }
             }
-            item(key = "row-history") {
+            // The account's, on every device it signs in on; on a Pley from before languages, this TV's.
+            if (language.available) {
+                item(key = "row-language", contentType = SETTING_ROW) {
+                    TvSettingRow(
+                        stringResource(ScreensR.string.language_title),
+                        value = language.value.asString(),
+                        icon = PleyIcons.Globe,
+                        onClick = { pick(Picking.Language) },
+                        modifier = keyed("row-language"),
+                    )
+                }
+            }
+            item(key = "row-history", contentType = SETTING_ROW) {
                 TvSettingRow(stringResource(R.string.tv_account_history), onClick = { onOpen(PleyKey.History) }, icon = PleyIcons.History, chevron = true, modifier = keyed("row-history"))
             }
             // The Libraries page sorts them; with three or fewer, the rail lists them and has no way there.
-            item(key = "row-sort-libraries") {
+            item(key = "row-sort-libraries", contentType = SETTING_ROW) {
                 TvSettingRow(
                     stringResource(R.string.tv_account_sort_libraries),
                     value = stringResource(R.string.tv_account_sort_libraries_value),
@@ -385,7 +412,7 @@ private fun LazyListScope.pane(
                 )
             }
             if (ui.profiles.size > 1) {
-                item(key = "row-start-as") {
+                item(key = "row-start-as", contentType = SETTING_ROW) {
                     val chosen = ui.profiles.firstOrNull { it.id == s.alwaysStartAs }?.name
                     TvSettingRow(
                         stringResource(R.string.tv_account_always_start_as),
@@ -396,7 +423,7 @@ private fun LazyListScope.pane(
                     )
                 }
             }
-            item(key = "row-web") {
+            item(key = "row-web", contentType = SETTING_ROW) {
                 TvSettingRow(
                     stringResource(R.string.tv_account_manage_web),
                     value = stringResource(R.string.tv_account_manage_web_value),
@@ -407,10 +434,10 @@ private fun LazyListScope.pane(
             }
         }
         Category.Playback -> {
-            item(key = "row-quality") {
+            item(key = "row-quality", contentType = SETTING_ROW) {
                 TvSettingRow(stringResource(R.string.tv_settings_quality), value = qualityLabel(s.qualityOnHomeNetwork), icon = PleyIcons.Gauge, onClick = { pick(Picking.Quality) }, modifier = keyed("row-quality"))
             }
-            item(key = "row-frame-rate") {
+            item(key = "row-frame-rate", contentType = SETTING_ROW) {
                 TvSettingRow(
                     stringResource(R.string.tv_settings_refresh_rate),
                     value = frameRateLabel(ui.frameRate) + " · " + frameRateHint(ui.frameRate),
@@ -419,7 +446,7 @@ private fun LazyListScope.pane(
                     modifier = keyed("row-frame-rate"),
                 )
             }
-            item(key = "row-autoplay") {
+            item(key = "row-autoplay", contentType = SETTING_ROW) {
                 TvSettingRow(
                     stringResource(R.string.tv_settings_autoplay),
                     value = stringResource(R.string.tv_settings_autoplay_hint),
@@ -429,7 +456,7 @@ private fun LazyListScope.pane(
                     modifier = keyed("row-autoplay"),
                 )
             }
-            item(key = "row-details") {
+            item(key = "row-details", contentType = SETTING_ROW) {
                 TvSettingRow(
                     stringResource(R.string.tv_settings_playback_details),
                     value = stringResource(R.string.tv_settings_playback_details_hint),
@@ -439,8 +466,8 @@ private fun LazyListScope.pane(
                     modifier = keyed("row-details"),
                 )
             }
-            item(key = "advanced") { TvPaneHeading(stringResource(R.string.tv_settings_advanced)) }
-            item(key = "row-tunneling") {
+            item(key = "advanced", contentType = SETTING_HEADING) { TvPaneHeading(stringResource(R.string.tv_settings_advanced)) }
+            item(key = "row-tunneling", contentType = SETTING_ROW) {
                 TvSettingRow(
                     stringResource(R.string.tv_settings_tunneling),
                     value = stringResource(R.string.tv_settings_tunneling_hint),
@@ -451,7 +478,7 @@ private fun LazyListScope.pane(
                 )
             }
             if (ui.debuggable) {
-                item(key = "row-software") {
+                item(key = "row-software", contentType = SETTING_ROW) {
                     TvSettingRow(
                         stringResource(R.string.tv_settings_software_video),
                         value = stringResource(R.string.tv_settings_software_video_hint),
@@ -468,7 +495,7 @@ private fun LazyListScope.pane(
                 BasicText(stringResource(R.string.tv_settings_passthrough_intro), style = PleyType.Tv.Body.copy(color = PleyColors.Muted), modifier = Modifier.padding(start = 20.dp, bottom = 8.dp))
             }
             Settings.PASSTHROUGH_FORMATS.forEach { format ->
-                item(key = "row-passthrough-$format") {
+                item(key = "row-passthrough-$format", contentType = SETTING_ROW) {
                     TvSettingRow(
                         formatLabel(format),
                         value = passthroughLabel(s.passthrough(format)),
@@ -480,10 +507,10 @@ private fun LazyListScope.pane(
             }
         }
         Category.Display -> {
-            item(key = "row-subtitle-size") {
+            item(key = "row-subtitle-size", contentType = SETTING_ROW) {
                 TvSettingRow(stringResource(R.string.tv_settings_subtitle_size), value = stringResource(sizeLabel(s.subtitleSize)), icon = PleyIcons.Captions, onClick = { pick(Picking.SubtitleSize) }, modifier = keyed("row-subtitle-size"))
             }
-            item(key = "row-subtitle-background") {
+            item(key = "row-subtitle-background", contentType = SETTING_ROW) {
                 TvSettingRow(
                     stringResource(R.string.tv_settings_subtitle_background),
                     value = stringResource(backgroundLabel(s.subtitleBackground)),
@@ -492,7 +519,7 @@ private fun LazyListScope.pane(
                     modifier = keyed("row-subtitle-background"),
                 )
             }
-            item(key = "row-subtitle-font") {
+            item(key = "row-subtitle-font", contentType = SETTING_ROW) {
                 TvSettingRow(
                     stringResource(R.string.tv_settings_subtitle_font),
                     value = stringResource(fontLabel(s.subtitleFont)),
@@ -501,7 +528,7 @@ private fun LazyListScope.pane(
                     modifier = keyed("row-subtitle-font"),
                 )
             }
-            item(key = "row-subtitle-position") {
+            item(key = "row-subtitle-position", contentType = SETTING_ROW) {
                 TvSettingRow(
                     stringResource(R.string.tv_settings_subtitle_position),
                     value = stringResource(raiseLabel(s.subtitleRaise)),
@@ -510,7 +537,7 @@ private fun LazyListScope.pane(
                     modifier = keyed("row-subtitle-position"),
                 )
             }
-            item(key = "row-reduce-motion") {
+            item(key = "row-reduce-motion", contentType = SETTING_ROW) {
                 TvSettingRow(
                     stringResource(R.string.tv_settings_reduce_motion),
                     value = stringResource(R.string.tv_settings_reduce_motion_hint),
@@ -522,7 +549,7 @@ private fun LazyListScope.pane(
             }
         }
         Category.Server -> {
-            item(key = "row-server") {
+            item(key = "row-server", contentType = SETTING_ROW) {
                 TvSettingRow(
                     me.profile?.server?.let(::hostPort) ?: stringResource(R.string.tv_settings_server_unknown),
                     value = stringResource(R.string.tv_settings_server_value),
@@ -531,12 +558,12 @@ private fun LazyListScope.pane(
                     modifier = keyed("row-server"),
                 )
             }
-            item(key = "row-switch-server") {
+            item(key = "row-switch-server", contentType = SETTING_ROW) {
                 TvSettingRow(stringResource(R.string.tv_settings_switch_server), onClick = { onRestart(PleyKey.Servers) }, icon = PleyIcons.ArrowLeft, chevron = true, modifier = keyed("row-switch-server"))
             }
         }
         Category.Diagnostics -> {
-            item(key = "row-diagnostics") {
+            item(key = "row-diagnostics", contentType = SETTING_ROW) {
                 TvSettingRow(
                     stringResource(R.string.tv_settings_open_diagnostics),
                     value = stringResource(R.string.tv_settings_open_diagnostics_value),
@@ -546,18 +573,35 @@ private fun LazyListScope.pane(
                     modifier = keyed("row-diagnostics"),
                 )
             }
+            item(key = "row-frame-counter", contentType = SETTING_ROW) {
+                val context = LocalContext.current
+                val shown by FrameRate.on.collectAsStateWithLifecycle()
+                TvSettingRow(
+                    stringResource(R.string.tv_settings_show_frame_rate),
+                    value = stringResource(R.string.tv_settings_show_frame_rate_hint),
+                    checked = shown,
+                    icon = PleyIcons.Gauge,
+                    onClick = { FrameRate.show(context, !shown) },
+                    modifier = keyed("row-frame-counter"),
+                )
+            }
             item(key = "facts") { DeviceFacts() }
         }
         Category.About -> {
-            item(key = "row-version") {
+            item(key = "row-version", contentType = SETTING_ROW) {
                 val context = LocalContext.current
                 TvSettingRow(stringResource(R.string.tv_settings_version), value = versionOf(context), icon = PleyIcons.Info, onClick = {}, modifier = keyed("row-version"))
             }
-            item(key = "licences") { TvPaneHeading(stringResource(R.string.tv_settings_licences)) }
+            item(key = "licences", contentType = SETTING_HEADING) { TvPaneHeading(stringResource(R.string.tv_settings_licences)) }
             licences().forEachIndexed { i, (name, licence) ->
-                item(key = "licence-$i") {
+                item(key = "licence-$i", contentType = SETTING_ROW) {
                     TvSettingRow(name, value = licence, onClick = {}, modifier = keyed("licence-$i"))
                 }
+            }
+            // Discover's titles and pictures: TMDB's terms ask every app that shows them to say this.
+            item(key = "credits", contentType = SETTING_HEADING) { TvPaneHeading(stringResource(R.string.tv_settings_credits)) }
+            item(key = "row-tmdb", contentType = SETTING_ROW) {
+                TvSettingRow("TMDB", value = stringResource(ScreensR.string.requests_credit_about), onClick = {}, modifier = keyed("row-tmdb"))
             }
         }
         Category.SignOut -> {
@@ -568,7 +612,7 @@ private fun LazyListScope.pane(
                     modifier = Modifier.padding(start = 20.dp, bottom = 8.dp),
                 )
             }
-            item(key = "row-sign-out") {
+            item(key = "row-sign-out", contentType = SETTING_ROW) {
                 TvSettingRow(
                     stringResource(R.string.tv_account_sign_out),
                     danger = true,
@@ -607,12 +651,12 @@ private fun ProfileHeader(me: MeUiState) {
 @Composable
 private fun DeviceFacts() {
     val app = LocalContext.current.applicationContext
-    val facts = remember(app) { (app as? PleyGraphOwner)?.screensGraph?.device?.let { DiagnosticsViewModel.deviceFacts(it) }.orEmpty() }
+    val facts = remember(app) { (app as? PleyGraphOwner)?.screensGraph?.device?.let { DiagnosticsViewModel.factsOf(it) }.orEmpty() }
     Column(Modifier.padding(start = 20.dp, top = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         facts.forEach { fact ->
             Row {
-                BasicText(fact.label, style = PleyType.Tv.Caption.copy(color = PleyColors.Muted), modifier = Modifier.width(150.dp))
-                BasicText(fact.value, style = PleyType.Tv.Caption.copy(color = PleyColors.Fg))
+                BasicText(fact.label.asString(), style = PleyType.Tv.Caption.copy(color = PleyColors.Muted), modifier = Modifier.width(150.dp))
+                BasicText(fact.value.asString(), style = PleyType.Tv.Caption.copy(color = PleyColors.Fg))
             }
         }
     }
@@ -627,17 +671,30 @@ private fun Panels(
     ui: SettingsUiState,
     model: MeViewModel,
     settings: SettingsViewModel,
+    language: LanguageUiState,
+    languageModel: LanguageViewModel,
     onClose: () -> Unit,
     returnTo: FocusRequester?,
 ) {
     val s = ui.settings
     val defaults = me.trackDefaults?.defaults
     val visible = open != null
+    val words = formatWords()
+    val languages = remember(words) { TrackLanguages.all(words) }
     when (shown) {
+        Picking.Language -> TvChoicePanel(
+            visible,
+            stringResource(ScreensR.string.language_title),
+            language.choices.map { TvChoice(it, language.label(it).asString()) },
+            language.chosen,
+            languageModel::choose,
+            onClose,
+            returnTo,
+        )
         Picking.AudioLanguage -> TvChoicePanel(
             visible,
             stringResource(R.string.tv_account_audio_language),
-            listOf(TvChoice<String?>(null, stringResource(R.string.tv_account_file_default))) + TrackLanguages.ALL.map { TvChoice<String?>(it.first, it.second) },
+            listOf(TvChoice<String?>(null, stringResource(R.string.tv_account_file_default))) + languages.map { TvChoice<String?>(it.first, it.second) },
             defaults?.audioLanguage,
             model::setAudioLanguage,
             onClose,
@@ -655,7 +712,7 @@ private fun Panels(
         Picking.SubtitleLanguage -> TvChoicePanel(
             visible,
             stringResource(R.string.tv_account_subtitle_language),
-            listOf(TvChoice<String?>(null, stringResource(R.string.tv_account_same_as_audio))) + TrackLanguages.ALL.map { TvChoice<String?>(it.first, it.second) },
+            listOf(TvChoice<String?>(null, stringResource(R.string.tv_account_same_as_audio))) + languages.map { TvChoice<String?>(it.first, it.second) },
             defaults?.subtitleLanguage,
             model::setSubtitleLanguage,
             onClose,
@@ -885,6 +942,10 @@ private val CATEGORIES_WIDTH = 256.dp
 private val PANE_START = 376.dp
 
 private const val MESSAGE_MS = 3_500L
+
+/** The content types of a pane's list, so a row scrolled in reuses one scrolled out. */
+private const val SETTING_ROW = "row"
+private const val SETTING_HEADING = "heading"
 
 internal const val TV_SETTINGS_PAGE = "pley.tv.settings"
 internal const val TV_SETTINGS_PANE = "pley.tv.settings.pane"

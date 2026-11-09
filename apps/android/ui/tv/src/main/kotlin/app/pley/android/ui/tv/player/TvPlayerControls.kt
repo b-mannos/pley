@@ -2,6 +2,7 @@ package app.pley.android.ui.tv.player
 
 import android.text.format.DateFormat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
@@ -21,11 +22,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -48,6 +47,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
@@ -63,13 +63,10 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.constrainWidth
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.Image
 import androidx.tv.material3.Border
 import androidx.tv.material3.Glow
 import androidx.tv.material3.IconButton
 import androidx.tv.material3.IconButtonDefaults
-import app.pley.android.designsystem.image.GradientBitmaps
-import app.pley.android.designsystem.image.drawStretched
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyFocus
 import app.pley.android.designsystem.PleyMotion
@@ -80,16 +77,18 @@ import app.pley.android.designsystem.TvSafeArea
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcon
 import app.pley.android.designsystem.icon.PleyIcons
-import app.pley.android.designsystem.icon.SkipIcon
 import app.pley.android.designsystem.image.Artwork
 import app.pley.android.designsystem.image.ArtworkImage
+import app.pley.android.designsystem.image.ArtworkLoad
+import app.pley.android.designsystem.image.GradientBitmaps
+import app.pley.android.designsystem.image.drawStretched
 import app.pley.android.model.MarkerKind
+import app.pley.android.model.PlaybackMethod
 import app.pley.android.player.PlaybackController
 import app.pley.android.player.PlayerPhase
 import app.pley.android.player.PlayerUiState
 import app.pley.android.player.markers.Markers
 import app.pley.android.ui.tv.R
-import app.pley.android.player.R as PlayerR
 
 /*
  * The controls of design spec §2.7, on the 960 × 540 canvas: the title and
@@ -105,6 +104,7 @@ internal fun BoxScope.TvPlayerTopBar(state: State<PlayerUiState>, alpha: State<F
     val line by remember(state) { derivedStateOf { TvPlayerText.episodeLine(state.value.subtitle) } }
     val paused by remember(state) { derivedStateOf { state.value.phase == PlayerPhase.Paused } }
     val method by remember(state) { derivedStateOf { state.value.method } }
+    val way by remember(state) { derivedStateOf { state.value.playbackMethod } }
     Column(
         Modifier
             .align(Alignment.TopStart)
@@ -127,7 +127,7 @@ internal fun BoxScope.TvPlayerTopBar(state: State<PlayerUiState>, alpha: State<F
         val clock = rememberClock(now)
         Row(verticalAlignment = Alignment.CenterVertically) {
             method?.let {
-                MethodBadge(it)
+                MethodBadge(it, way)
                 Spacer(Modifier.width(12.dp))
             }
             BasicText(clock, style = PleyType.Tv.Label.copy(color = PleyColors.Muted))
@@ -153,12 +153,10 @@ internal fun BoxScope.TvPlayerTopBar(state: State<PlayerUiState>, alpha: State<F
  * doesn't wash it out. Info, in the control row, says why.
  */
 @Composable
-private fun MethodBadge(method: String) {
-    val direct = setOf(stringResource(PlayerR.string.session_method_direct), stringResource(PlayerR.string.session_method_downloaded))
-    val stream = setOf(stringResource(PlayerR.string.session_method_remux), stringResource(PlayerR.string.session_method_remux_audio))
-    val colour = when (method) {
-        in direct -> PleyColors.Success
-        in stream -> PleyColors.Info
+private fun MethodBadge(method: String, way: PlaybackMethod?) {
+    val colour = when (way) {
+        PlaybackMethod.Direct -> PleyColors.Success
+        PlaybackMethod.Remux -> PleyColors.Info
         else -> PleyColors.Accent
     }
     BasicText(
@@ -193,8 +191,10 @@ private fun rememberClock(now: () -> Long): String {
  * chapter starts; the thumb, 10 dp, grows to 12 with a slim ring while
  * focused (18 dp across, where the tiles' ring made it 32); the
  * times above, a running marker's name below. Left and Right on it seek
- * ([TvSeeker], keys handled by the screen); it says its place to screen
- * readers as a slider.
+ * ([TvSeeker], keys handled by the screen): while a seek is coming, the
+ * thumb, the played part and both times stand where it goes, and while the
+ * chapters' cards show, at the start of the one focused; at the playhead
+ * otherwise ([scrubberAt]). It says its place to screen readers as a slider.
  */
 @Composable
 internal fun BoxScope.TvScrubber(
@@ -208,9 +208,9 @@ internal fun BoxScope.TvScrubber(
     val interactions = remember { MutableInteractionSource() }
     val focused by interactions.collectIsFocusedAsState()
     val thumbScale by animateFloatAsState(if (focused) 1f else 0f, PleyMotion.focus(), label = "thumb")
-    val elapsed by remember(state) { derivedStateOf { state.value.positionMs / 1000 } }
+    val elapsed by remember(state, seeker, ui) { derivedStateOf { scrubberAt(state.value, seeker, ui) / 1000 } }
     val duration by remember(state) { derivedStateOf { state.value.durationMs } }
-    val remaining by remember(state) { derivedStateOf { (state.value.durationMs - state.value.positionMs).coerceAtLeast(0) / 1000 } }
+    val remaining by remember(state, seeker, ui) { derivedStateOf { (state.value.durationMs - scrubberAt(state.value, seeker, ui)).coerceAtLeast(0) / 1000 } }
     val skip = ui.requester(PlayerFocus.Skip)
     val down = ui.requester(PlayerFocus.PlayPause)
     Box(
@@ -223,7 +223,8 @@ internal fun BoxScope.TvScrubber(
     ) {
         BasicText(TvPlayerText.time(elapsed * 1000), style = PleyType.Tv.Caption.copy(color = PleyColors.Fg), modifier = Modifier.align(Alignment.TopStart))
         BasicText(TvPlayerText.remaining(0, remaining * 1000), style = PleyType.Tv.Caption.copy(color = PleyColors.Fg), modifier = Modifier.align(Alignment.TopEnd))
-        val spoken = stringResource(R.string.tv_player_position, TvPlayerText.spoken(elapsed * 1000), TvPlayerText.spoken(duration))
+        val resources = LocalResources.current
+        val spoken = stringResource(R.string.tv_player_position, TvPlayerText.spoken(resources, elapsed * 1000), TvPlayerText.spoken(resources, duration))
         Box(
             Modifier
                 .padding(top = TRACK_CENTRE - TIMES_TOP - SCRUB_HEIGHT / 2)
@@ -242,21 +243,33 @@ internal fun BoxScope.TvScrubber(
                     contentDescription = spoken
                     stateDescription = spoken
                     val d = state.value.durationMs.coerceAtLeast(1)
-                    progressBarRangeInfo = ProgressBarRangeInfo(state.value.positionMs.toFloat() / d, 0f..1f)
+                    progressBarRangeInfo = ProgressBarRangeInfo((elapsed * 1000f / d).coerceIn(0f, 1f), 0f..1f)
                     setProgress { fraction ->
+                        // A seek of its own, as Previous and Next are: one waiting for OK gives way to it.
+                        seeker.cancel()
                         controller.seekTo((fraction * d).toLong())
                         true
                     }
                 }
                 .focusable(interactionSource = interactions)
-                .drawBehind { drawTrack(state.value, seeker.target, thumbScale) },
+                .drawBehind {
+                    val s = state.value
+                    drawTrack(s, scrubberAt(s, seeker, ui), thumbScale)
+                },
         )
         MarkerLabel(state)
     }
 }
 
-/** The track, the played and buffered parts, chapter gaps and the thumb. */
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTrack(s: PlayerUiState, target: Long?, focus: Float) {
+/**
+ * Where the scrubber stands: the start of the chapter focused in the cards,
+ * where a seek coming goes, or the playhead. Read where it is shown.
+ */
+private fun scrubberAt(s: PlayerUiState, seeker: TvSeeker, ui: TvPlayerUi): Long =
+    ui.chapter?.let { s.chapters.getOrNull(it)?.startMs } ?: seeker.target ?: s.positionMs
+
+/** The track, the played part and the thumb at [at], the buffered part and chapter gaps. */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTrack(s: PlayerUiState, at: Long, focus: Float) {
     val h = TRACK_HEIGHT.toPx()
     val y = size.height / 2f - h / 2f
     val w = size.width
@@ -271,7 +284,8 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTrack(s: Player
         starts.forEach { add(it) }
         add(w)
     }
-    val played = x(s.positionMs)
+    // Accent up to the thumb: where it plays, or where a seek or a chapter focused would take it.
+    val played = x(at)
     val buffered = x(s.bufferedMs.coerceAtLeast(s.positionMs))
     for (i in 0 until edges.size - 1) {
         val a = edges[i] + if (i == 0) 0f else gap / 2f
@@ -281,7 +295,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTrack(s: Player
         if (buffered > a) drawRoundRect(BUFFERED, Offset(a, y), Size(minOf(buffered, b) - a, h), r)
         if (played > a) drawRoundRect(PleyColors.Accent, Offset(a, y), Size(minOf(played, b) - a, h), r)
     }
-    val thumbX = x(target ?: s.positionMs)
+    val thumbX = x(at)
     val thumb = PleyTv.ScrubThumb.toPx()
     val radius = (thumb + (PleyTv.ScrubThumbFocused.toPx() - thumb) * focus) / 2f
     val centre = Offset(thumbX.coerceIn(radius, w - radius), size.height / 2f)
@@ -324,7 +338,8 @@ private fun MarkerLabel(state: State<PlayerUiState>) {
  * 2 dp fg 20 % edge, its bottom at y = 347, centred on the thumb but kept
  * in the safe area; the target time under it and the chapter's name. The
  * server's seek previews when the file has them, else the chapter's
- * picture; without either, only the time and chapter show.
+ * picture, letterboxed on black as the video is: a 2.39:1 film's previews
+ * keep their shape. Without either, only the time and chapter show.
  */
 @Composable
 internal fun BoxScope.TvSeekPreview(state: State<PlayerUiState>, seeker: TvSeeker, controller: PlaybackController) {
@@ -338,7 +353,10 @@ internal fun BoxScope.TvSeekPreview(state: State<PlayerUiState>, seeker: TvSeeke
     val picture by produceState<ImageBitmap?>(null, bucket, hasThumbs) {
         if (hasThumbs) controller.thumbnail(bucket)?.let { value = it.asImageBitmap() }
     }
-    val chapterImage = chapter?.imageUrl?.takeIf { !hasThumbs }
+    // Kept across the key repeats that move the target within the chapter.
+    val chapterUrl = chapter?.imageUrl?.takeIf { !hasThumbs }
+    val chapterImage = remember(chapterUrl) { chapterUrl?.let { ArtworkImage(listOf(it), maxWidth = PREVIEW_IMAGE_WIDTH) } }
+    val chapterLoad = remember(chapterImage) { ArtworkLoad() }
     val showsPicture = hasThumbs || chapterImage != null
     Column(
         Modifier
@@ -362,23 +380,27 @@ internal fun BoxScope.TvSeekPreview(state: State<PlayerUiState>, seeker: TvSeeke
                 Modifier
                     .size(PREVIEW_WIDTH, PREVIEW_HEIGHT)
                     .clip(PleyShape.TileTv)
-                    .drawBehind { drawRect(PleyColors.Surface2) }
-                    .border(2.dp, PleyColors.Fg.copy(alpha = 0.2f), PleyShape.TileTv),
+                    // The well until a picture shows, then black where the picture doesn't reach.
+                    .drawBehind { drawRect(if (picture != null || chapterLoad.loaded) Color.Black else PleyColors.Surface2) }
+                    .border(2.dp, PleyColors.Fg.copy(alpha = 0.2f), PleyShape.TileTv)
+                    .testTag(TAG_PREVIEW_PICTURE),
             ) {
                 val bitmap = picture
                 when {
-                    bitmap != null -> Image(bitmap, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                    chapterImage != null -> Artwork(ArtworkImage(listOf(chapterImage), maxWidth = PREVIEW_IMAGE_WIDTH), title = "", modifier = Modifier.fillMaxSize())
+                    bitmap != null -> Image(bitmap, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                    chapterImage != null -> Artwork(chapterImage, title = "", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit, load = chapterLoad)
                 }
             }
         }
         Spacer(Modifier.height(6.dp))
         BasicText(TvPlayerText.time(target), style = PleyType.Tv.Label.copy(color = PleyColors.Fg))
         if (chapterIndex != null) {
-            val name = chapter?.title?.takeIf { it.isNotBlank() }
+            val name = chapter?.name
+            // A name that says it is a chapter, in English as files often do or in the language shown, stands alone.
+            val word = stringResource(R.string.tv_player_chapter_word)
             val text = when {
                 name == null -> stringResource(R.string.tv_player_chapter, chapterIndex + 1)
-                name.startsWith("Chapter", ignoreCase = true) -> name
+                name.startsWith("Chapter", ignoreCase = true) || name.startsWith(word, ignoreCase = true) -> name
                 else -> stringResource(R.string.tv_player_chapter_named, chapterIndex + 1, name)
             }
             BasicText(text, style = PleyType.Tv.Caption.copy(color = PleyColors.Muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -396,11 +418,12 @@ internal data class RowOptions(
 )
 
 /**
- * The control row, top y = 441 (design spec §2.7): Previous · −10 s ·
- * Play/Pause · +10 s · Next centred; Subtitles · Audio · Quality · Info at
- * the right safe edge; Chapters, when the file has them, the sleep
- * timer and Speed at the left one. Up goes back to the scrubber. As in streaming
- * apps' players, the icons stand on the scrim alone until focused.
+ * The control row, top y = 441 (design spec §2.7): Previous · Play/Pause ·
+ * Next centred; Subtitles · Audio · Quality · Info at the right safe edge;
+ * Chapters (their cards over the scrubber, [onChapters]), when the file has
+ * them, the sleep timer and Speed at the left one. Up goes back to the
+ * scrubber. As in streaming apps' players, the icons stand on the scrim
+ * alone until focused.
  */
 @Composable
 internal fun BoxScope.TvControlRow(
@@ -409,10 +432,9 @@ internal fun BoxScope.TvControlRow(
     ui: TvPlayerUi,
     alpha: State<Float>,
     onPlayPause: () -> Unit,
-    onBack10: () -> Unit,
-    onForward10: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
+    onChapters: () -> Unit,
 ) {
     val up = Modifier.focusProperties {
         this.up = ui.requester(PlayerFocus.Scrubber)
@@ -420,7 +442,6 @@ internal fun BoxScope.TvControlRow(
     }
     // The 36 dp buttons sit this far down, so their centres line up with Play/Pause's.
     val beside = Modifier.padding(top = (PLAY_BUTTON - BUTTON) / 2).then(up)
-    val skipSeconds = TvPlayerText.seconds(TvSeeker.STEP_MS)
     Box(
         Modifier
             .align(Alignment.TopStart)
@@ -434,7 +455,7 @@ internal fun BoxScope.TvControlRow(
             horizontalArrangement = Arrangement.spacedBy(PleyTv.ButtonGap),
         ) {
             if (options.chapters) {
-                PlayerRoundButton(stringResource(R.string.tv_player_chapters), PleyIcons.ListVideo, { ui.openPanel(PlayerPanel.Chapters) }, beside, ui, PlayerFocus.Chapters)
+                PlayerRoundButton(stringResource(R.string.tv_player_chapters), PleyIcons.ListVideo, onChapters, beside, ui, PlayerFocus.Chapters)
             }
             PlayerRoundButton(stringResource(R.string.tv_player_sleep), MoonIcon, { ui.openPanel(PlayerPanel.Sleep) }, beside, ui, PlayerFocus.Sleep)
             PlayerRoundButton(stringResource(R.string.tv_player_speed), PleyIcons.FastForward, { ui.openPanel(PlayerPanel.Speed) }, beside, ui, PlayerFocus.Speed)
@@ -446,9 +467,6 @@ internal fun BoxScope.TvControlRow(
             if (options.previousNext) {
                 PlayerRoundButton(stringResource(R.string.tv_player_previous), PleyIcons.SkipBack, onPrevious, beside, ui, null, iconSize = TRANSPORT_ICON)
             }
-            PlayerRoundButton(stringResource(R.string.tv_player_back_10), onBack10, beside, ui, null) { tint ->
-                SkipIcon(forward = false, seconds = skipSeconds, size = TRANSPORT_ICON, tint = tint)
-            }
             PlayerRoundButton(
                 stringResource(if (playing) R.string.tv_player_pause else R.string.tv_player_play),
                 if (playing) PleyIcons.Pause else PleyIcons.Play,
@@ -459,9 +477,6 @@ internal fun BoxScope.TvControlRow(
                 size = PLAY_BUTTON,
                 iconSize = PLAY_ICON,
             )
-            PlayerRoundButton(stringResource(R.string.tv_player_forward_10), onForward10, beside, ui, null) { tint ->
-                SkipIcon(forward = true, seconds = skipSeconds, size = TRANSPORT_ICON, tint = tint)
-            }
             if (options.previousNext) {
                 PlayerRoundButton(stringResource(R.string.tv_player_next), PleyIcons.SkipForward, onNext, beside, ui, null, iconSize = TRANSPORT_ICON)
             }
@@ -484,7 +499,13 @@ internal fun BoxScope.TvControlRow(
     }
 }
 
-/** A [PlayerRoundButton] showing [icon], [iconSize] square. */
+/**
+ * A button of the player (design spec §2.5): its [icon], [iconSize] square,
+ * alone on the scrim, in fg; focused, the accent fills a
+ * [control][PleyShape.Control] square behind it, 1.08 larger, and its label
+ * fades in 8 dp below (always there for screen readers). [target] names it
+ * for focus requests.
+ */
 @Composable
 private fun PlayerRoundButton(
     label: String,
@@ -495,26 +516,6 @@ private fun PlayerRoundButton(
     target: PlayerFocus?,
     size: Dp = BUTTON,
     iconSize: Dp = ICON,
-) = PlayerRoundButton(label, onClick, modifier, ui, target, size) { tint ->
-    Icon(icon, contentDescription = null, size = iconSize, tint = tint)
-}
-
-/**
- * A button of the player (design spec §2.5): its [glyph] alone on the
- * scrim, in fg; focused, the accent fills a [control][PleyShape.Control]
- * square behind it, 1.08 larger, and its label fades in 8 dp below (always
- * there for screen readers). [target] names it for focus requests; [glyph]
- * is drawn in the colour it is given.
- */
-@Composable
-private fun PlayerRoundButton(
-    label: String,
-    onClick: () -> Unit,
-    modifier: Modifier,
-    ui: TvPlayerUi,
-    target: PlayerFocus?,
-    size: Dp = BUTTON,
-    glyph: @Composable (Color) -> Unit,
 ) {
     val interactions = remember { MutableInteractionSource() }
     val focused by interactions.collectIsFocusedAsState()
@@ -547,7 +548,7 @@ private fun PlayerRoundButton(
             glow = IconButtonDefaults.glow(Glow.None, Glow.None, Glow.None),
             border = IconButtonDefaults.border(Border.None, Border.None, Border.None, Border.None, Border.None),
         ) {
-            glyph(androidx.tv.material3.LocalContentColor.current)
+            Icon(icon, contentDescription = null, size = iconSize, tint = androidx.tv.material3.LocalContentColor.current)
         }
         BasicText(
             label,
@@ -595,8 +596,12 @@ private val ControlScrim by lazy {
 internal fun PlayerPhase.wantsToPlay(): Boolean = this == PlayerPhase.Playing || this == PlayerPhase.Buffering || this == PlayerPhase.Preparing || this == PlayerPhase.Switching
 
 private const val MINUTE_MS = 60_000L
-private const val PREVIEW_STEP_MS = 2_000L
-private const val PREVIEW_IMAGE_WIDTH = 480
+
+/** Seek previews are asked for every 2 s of the target at most. */
+internal const val PREVIEW_STEP_MS = 2_000L
+
+/** A chapter's picture is asked for this wide, in pixels: the preview's 240 dp on a 1080p TV. */
+internal const val PREVIEW_IMAGE_WIDTH = 480
 
 private val TRACK = PleyColors.Fg.copy(alpha = 0.25f)
 private val BUFFERED = PleyColors.Fg.copy(alpha = 0.45f)
@@ -637,6 +642,7 @@ internal fun tagOf(target: PlayerFocus): String = when (target) {
 
 internal const val TAG_SCRUBBER = "pley.tv.player.scrubber"
 internal const val TAG_PREVIEW = "pley.tv.player.preview"
+internal const val TAG_PREVIEW_PICTURE = "pley.tv.player.previewPicture"
 internal const val TAG_PLAY_PAUSE = "pley.tv.player.playPause"
 internal const val TAG_SUBTITLES = "pley.tv.player.subtitles"
 internal const val TAG_INFO = "pley.tv.player.info"

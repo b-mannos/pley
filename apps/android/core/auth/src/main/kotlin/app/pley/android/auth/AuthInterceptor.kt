@@ -2,6 +2,7 @@ package app.pley.android.auth
 
 import app.pley.android.common.Addresses
 import app.pley.android.common.Servers
+import app.pley.android.common.UiText
 import java.io.IOException
 import java.net.Inet4Address
 import java.net.Inet6Address
@@ -20,8 +21,7 @@ import okhttp3.Response
 import okhttp3.Route
 
 /** Signing in over plain http beyond the home network. */
-const val UNENCRYPTED =
-    "this server's address isn't on your network and its connection isn't encrypted: open it by its https address to sign in"
+val UNENCRYPTED: UiText = UiText.res(R.string.auth_unencrypted)
 
 /**
  * Plain http is for home networks: pley's apps send codes and tokens over
@@ -34,12 +34,12 @@ object Transport {
         val uri = try {
             URI(server)
         } catch (_: URISyntaxException) {
-            throw AuthException("that isn't a server address")
+            throw AuthException(NOT_AN_ADDRESS)
         }
         when (uri.scheme?.lowercase()) {
             "https" -> return
             "http" -> if (!Servers.isLocalHost(uri.host ?: "")) throw AuthException(UNENCRYPTED)
-            else -> throw AuthException("that isn't a server address")
+            else -> throw AuthException(NOT_AN_ADDRESS)
         }
     }
 
@@ -96,6 +96,24 @@ class AuthInterceptor(private val tokens: Tokens) : Interceptor {
             throw IOException("the sign-in couldn't be read on this device", e)
         } ?: return chain.proceed(request)
         return chain.proceed(request.newBuilder().header("Authorization", "Bearer $token").build())
+    }
+}
+
+/**
+ * A request to the server that gets no answer (no network, nothing at the
+ * address, no answer in time): the device may be on another network now,
+ * so what answers there next proves it is the server before a token goes
+ * ([Tokens.doubtServer]). An application interceptor: a connection that
+ * fails never reaches the network interceptors.
+ */
+class DoubtWhenUnanswered(private val tokens: Tokens) : Interceptor {
+    private val issuer = tokens.issuer.toHttpUrlOrNull()
+
+    override fun intercept(chain: Interceptor.Chain): Response = try {
+        chain.proceed(chain.request())
+    } catch (e: IOException) {
+        if (onServer(chain.request().url, issuer) && !chain.call().isCanceled()) tokens.doubtServer()
+        throw e
     }
 }
 
@@ -181,12 +199,14 @@ object AuthHttp {
 
     /**
      * For the server's API, images and streams: [tokens] on its own
-     * address only, a refresh on an expired token, redirects within a
-     * scheme but never from https down to http.
+     * address only, once the server there has proved itself, a refresh on
+     * an expired token, redirects within a scheme but never from https
+     * down to http.
      */
     fun api(base: OkHttpClient, tokens: Tokens): OkHttpClient = base.newBuilder()
         .followRedirects(true)
         .followSslRedirects(false)
+        .addInterceptor(DoubtWhenUnanswered(tokens))
         .addNetworkInterceptor(AuthInterceptor(tokens))
         .authenticator(TokenAuthenticator(tokens))
         .build()

@@ -1,11 +1,13 @@
 package app.pley.android.auth
 
+import app.pley.android.common.UiText
 import okhttp3.OkHttpClient
 
-const val WIDER_SCOPE_MESSAGE = "the server allowed more than this app asks for: signed out"
+/** Why a sign-in with more than the app asks for ended. */
+val WIDER_SCOPE: UiText = UiText.res(R.string.auth_wider_scope)
 
 /** A token answer with more rights than were asked for. Its grant was ended. */
-class WiderScopeException : AuthException(WIDER_SCOPE_MESSAGE)
+class WiderScopeException : AuthException(WIDER_SCOPE)
 
 /**
  * The app holds viewer tokens only. Every token answer (a code exchanged, a
@@ -46,6 +48,7 @@ internal suspend fun keepNewSignIn(
 ): StoredTokens {
     ScopeGuard.check(http, answer, asked, fresh)
     val previous = tokens.install(fresh)
-    if (previous != null && previous.refreshToken != fresh.refreshToken) Tokens.revoke(http, previous)
+    // The sign-in before goes only to the server that proves it holds its key.
+    if (previous != null && previous.refreshToken != fresh.refreshToken && tokens.proves(previous)) Tokens.revoke(http, previous)
     return fresh
 }

@@ -66,6 +66,15 @@ public class SignInTests
     }
 
     [Fact]
+    public void Asks_for_requests_and_approvals_only_where_the_server_lists_them()
+    {
+        var listed = Auth.Metadata.Parse(Metadata().Replace(@"""profiles"",""admin""", @"""profiles"",""requests"",""approvals"",""admin"""), Home);
+        Assert.Equal("library play playlists profiles requests approvals", DeviceSignIn.ScopeFor(listed));
+        // An older server refuses a sign-in that asks for a scope it doesn't know.
+        Assert.Equal("library play playlists profiles", DeviceSignIn.ScopeFor(Auth.Metadata.Parse(MetadataJson, Home)));
+    }
+
+    [Fact]
     public async Task Start_refuses_plain_http_beyond_the_home_network()
     {
         var e = await Assert.ThrowsAsync<AuthException>(() => Device_(new FakeServer(), new FakeClock()).SignIn.Start("http://pley.example.com"));
@@ -103,7 +112,7 @@ public class SignInTests
         var ok = await Auth.Metadata.Fetch(new FakeServer().On("GET", Home + Auth.Metadata.Path, 200, MetadataJson,
             new Dictionary<string, string> { ["Content-Type"] = "application/json; charset=utf-8" }).Transport, Home);
         Assert.Equal(Home + "/api/oauth/authorize", ok.AuthorizationEndpoint);
-        Assert.Equal(Auth.Metadata.NoCodes, "this server can't sign in with a code yet: update it, or sign in with a password");
+        Assert.Equal("this server can't sign in with a code yet: update it, or sign in with a password", Auth.Metadata.NoCodes);
     }
 
     [Fact]
@@ -298,6 +307,24 @@ public class SignInTests
         Assert.Equal("That PIN isn't right", e.Message);
         Assert.Empty(signedOut);
         Assert.Equal("pley_at_0", tokens.Load()!.AccessToken);
+    }
+
+    [Fact]
+    public async Task A_casts_ticket_switches_in_place_of_a_PIN_and_a_spent_one_changes_nothing()
+    {
+        var (tokens, server, _, _, signedOut) = Kept();
+        server.On("POST", Token, 200, Tokens("pley_at_1", "pley_rt_1", "library play"));
+        await tokens.SwitchProfile(4, null, "t1");
+        var sent = server.Requests.Last(r => r.Url == Token).Body!;
+        Assert.Contains("profile=4", sent);
+        Assert.Contains("ticket=t1", sent);
+        Assert.DoesNotContain("pin=", sent);
+        Assert.Equal("pley_at_1", tokens.Load()!.AccessToken);
+        server.On("POST", Token, 400, @"{""error"":""invalid_grant"",""error_description"":""this cast's switch has expired or was used: cast again"",""reason"":""ticket_spent""}");
+        var e = await Assert.ThrowsAsync<TokenException>(() => tokens.SwitchProfile(4, null, "t1"));
+        Assert.Equal("ticket_spent", e.OAuth?.Reason);
+        Assert.Empty(signedOut);
+        Assert.Equal("pley_at_1", tokens.Load()!.AccessToken);
     }
 
     [Fact]

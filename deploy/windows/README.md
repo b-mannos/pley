@@ -30,7 +30,7 @@ whether to delete the data folder too (no by default).
 |---|---|---|
 | How Pley runs | Service, service as a user of its own, or notification area (below) | Service |
 | Data folder | Where Pley keeps its database, artwork and settings; optionally a Pley you already use to copy from (stop it first) | `C:\ProgramData\pley`, or `%LOCALAPPDATA%\pley` in the notification area |
-| Network | Only this computer, this computer and the networks you tick, or every network; the port; the compatibility API | Only this computer (`127.0.0.1`), port 7539, compatibility API on |
+| Network | Only this computer, this computer and the networks you tick, or every network; the port; the Plex-compatible API | Only this computer (`127.0.0.1`), port 7539, Plex-compatible API on |
 | Windows Firewall | The kinds of network to let Pley through on, from which devices, and whether Pley's apps can find the server | Private and domain networks, devices on them, apps can find it |
 
 How Pley runs:
@@ -53,7 +53,12 @@ Good to know:
 - A network adapter that isn't up when Pley starts (Wi-Fi, Tailscale) is
   retried every 30 seconds.
 - You can change where Pley listens later in **Settings → Network**. The
-  firewall rule follows, for the kinds of network you chose here.
+  firewall rule follows, for the kinds of network you chose here. It lets
+  Pley's TCP and UDP through on any port: the web port, the apps' broadcast
+  and Bonjour's (UDP 5353), by which Apple's apps find the server once
+  Bonjour is turned on in **Settings → Network**.
+- The Jellyfin-compatible API, for Jellyfin's apps, is off. **Settings →
+  Network** turns it on, on Pley's port or one of its own.
 - FFmpeg comes with the installer, in `ffmpeg\` next to Pley. Releases carry
   gyan.dev's full build (NVENC, Quick Sync, AMF, Vulkan tone mapping). The
   ARM64 installer carries the same x64 build, which Windows emulates, so on
@@ -99,7 +104,7 @@ pley-server-0.0.1-windows-x86_64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /MODE=s
 | `/COPYDATA=` | A data folder to copy first | none |
 | `/LISTEN=` | `local`, `all`, or the addresses of the networks to listen on, separated by commas | `local` |
 | `/PORT=` | The port | `7539` |
-| `/PLEX=` | `yes` or `no`: the compatibility API, on Pley's port | `yes` |
+| `/PLEX=` | `yes` or `no`: the Plex-compatible API, on Pley's port | `yes` |
 | `/FIREWALL=` | `private`, `domain`, `public` (separated by commas), or `none` | `private,domain` |
 | `/FROM=` | `subnet` (devices on those networks) or `any` (a VPN too) | `subnet` |
 | `/DISCOVERY=` | `yes` or `no`: Pley's apps can find the server | `yes` |
@@ -149,7 +154,12 @@ and setup link.
   the shared objects GPU drivers create. Impersonation is removed.
 - **The data folder** (database, the key that seals two-step sign-in
   secrets, logs) is owned by the administrators and closed to other users.
-  Setup refuses one that is, or contains, a link or junction.
+  Setup refuses one that is, or contains, a link or junction. It sets the
+  owner and permissions of every file in it only when the folder itself
+  isn't set up that way already for the same accounts: on an update, the
+  files inherit the folder's, and a library's artwork and seek previews
+  are hundreds of thousands of files. `pley service install
+  --reset-permissions` sets every file's again.
 - **RedirectionGuard is off** for Setup, so the Pley it starts can follow
   WinGet's FFmpeg links and junctions in media folders. Setup writes only in
   Program Files and its own temporary folder.

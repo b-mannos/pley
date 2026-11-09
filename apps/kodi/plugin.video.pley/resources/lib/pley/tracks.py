@@ -1,6 +1,7 @@
 """Audio and subtitles: the account's choice shown when a file starts in
-Kodi, a change made in Kodi's player saved for the show or the movie, and
-the account's defaults (docs/API.md, Your account).
+Kodi, a change made in Kodi's player saved for the show or the movie, the
+user's remote's picks (docs/API.md, Remote control) made as one in Kodi's
+player is, and the account's defaults (docs/API.md, Your account).
 
 pley names tracks by their stream index in the file (sidecar subtitle files
 from 1000); Kodi by their place in its lists. Kodi's audio streams are the
@@ -18,6 +19,9 @@ from __future__ import annotations
 import re
 import threading
 import time
+import unicodedata
+
+from . import remote
 
 # Kodi's video player, in JSON-RPC.
 VIDEO_PLAYER = 1
@@ -33,15 +37,11 @@ QUIET = 3
 SETTLE = 2
 
 # The languages offered for the defaults, as ISO 639-2/B codes (the TV
-# apps' and the Android app's 34).
+# apps' and the Android app's 34), in English's alphabetical order; each
+# named by the add-on's words "language_<code>".
 LANGUAGES = [
-    ("ara", "Arabic"), ("bul", "Bulgarian"), ("cat", "Catalan"), ("chi", "Chinese"), ("hrv", "Croatian"),
-    ("cze", "Czech"), ("dan", "Danish"), ("dut", "Dutch"), ("eng", "English"), ("fin", "Finnish"),
-    ("fre", "French"), ("ger", "German"), ("gre", "Greek"), ("heb", "Hebrew"), ("hin", "Hindi"),
-    ("hun", "Hungarian"), ("ind", "Indonesian"), ("ita", "Italian"), ("jpn", "Japanese"), ("kor", "Korean"),
-    ("nor", "Norwegian"), ("per", "Persian"), ("pol", "Polish"), ("por", "Portuguese"), ("rum", "Romanian"),
-    ("rus", "Russian"), ("srp", "Serbian"), ("slo", "Slovak"), ("spa", "Spanish"), ("swe", "Swedish"),
-    ("tha", "Thai"), ("tur", "Turkish"), ("ukr", "Ukrainian"), ("vie", "Vietnamese"),
+    "ara", "bul", "cat", "chi", "hrv", "cze", "dan", "dut", "eng", "fin", "fre", "ger", "gre", "heb", "hin", "hun", "ind",
+    "ita", "jpn", "kor", "nor", "per", "pol", "por", "rum", "rus", "srp", "slo", "spa", "swe", "tha", "tur", "ukr", "vie",
 ]
 # subtitle_mode, and the name of its words (the TV apps' SUBTITLE_MODES).
 SUBTITLE_MODES = [
@@ -103,6 +103,36 @@ def chosen_subtitle(file):
         if stream.get("kind") == "subtitle" and stream.get("index") == wanted:
             return stream
     return None
+
+
+def given_tracks(file, audio=None, subtitle=None) -> dict:
+    """The tracks a cast named for a movie or an episode (the server's
+    stream indexes, `subtitle` -1 for none) that `file`, the one it plays,
+    has: {"audio", "subtitle"}, each None when not named or not the file's
+    (a track of another version, which leaves the choice to the account)."""
+    streams = (file or {}).get("streams") or []
+
+    def has(kind, index):
+        return isinstance(index, int) and any(s.get("kind") == kind and s.get("index") == index for s in streams)
+
+    return {
+        "audio": audio if has("audio", audio) else None,
+        "subtitle": subtitle if subtitle == -1 or has("subtitle", subtitle) else None,
+    }
+
+
+def with_given(file, given):
+    """`file` as a play with `given` tracks (given_tracks) shows it: their
+    subtitles (-1 none) and audio as its choice, in place of the account's,
+    for that play alone; `file` itself when none are given."""
+    if not file or not given:
+        return file
+    shown = dict(file)
+    if given.get("subtitle") is not None:
+        shown["selected_subtitle"] = None if given["subtitle"] == -1 else given["subtitle"]
+    if given.get("audio") is not None:
+        shown["selected_audio"] = given["audio"]
+    return shown
 
 
 def burn_index(file):
@@ -212,6 +242,11 @@ def to_kodi(entries: list, index, found: list):
     return found[place].get("index", place) if place is not None else None
 
 
+def listed(found: list, place):
+    """What Kodi lists at its place `place` (None for nothing there)."""
+    return next((e for i, e in enumerate(found) if e.get("index", i) == place), None)
+
+
 def from_kodi(entries: list, position, found: list):
     """pley's track at Kodi's place `position` (None for one pley doesn't
     know, as captions Kodi found in the video)."""
@@ -273,9 +308,24 @@ class Follower:
         self.baseline = None
         self.pending = None
         self.pending_since = 0.0
+        # Whether a turn saw Kodi play audio: none playing after that is a
+        # player stopping or between files, also where the layout lists no
+        # audio (a converted stream's).
+        self.had_audio = False
+        # The account's subtitles when show() left Kodi's off (drawn onto the
+        # video, or a track Kodi doesn't list, as a `.sup` file it couldn't
+        # add): still the choice until the person picks subtitles in Kodi's
+        # player.
+        self.hidden = None
         # Off once Kodi lists a track the layout doesn't know (subtitles
         # added while it plays): its places no longer say pley's tracks.
         self.following = True
+        # What Kodi plays as the server's stream indexes (indexes()), as a
+        # turn last saw it or the remote last switched to: what progress
+        # reports say. A remote's pick stands until `told_until`: Kodi
+        # switches a moment after it is asked.
+        self.now = None
+        self.told_until = 0.0
 
     def turn(self) -> None:
         # Kodi's callback and the loop may both turn it: one at a time, the
@@ -299,11 +349,19 @@ class Follower:
                 self.quiet_until = now + QUIET
             return
         state = current(props)
-        if state[0] is None and (props.get("audiostreams") or self.layout["audio"]):
+        if state[0] is None and (props.get("audiostreams") or self.layout["audio"] or self.had_audio):
             # A player between files, or stopping: nothing to go by.
             return
+        self.had_audio = self.had_audio or state[0] is not None
+        if now >= max(self.told_until, self.quiet_until):
+            # Not while Kodi may still be switching to the account's choice or
+            # the remote's: until then the server has what the play asked.
+            self.now = self.indexes(state, props)
         if now < self.quiet_until or self.baseline is None:
-            # Where it starts, the account's choice shown.
+            # Where it starts, the account's choice shown. Subtitles turned
+            # on once Kodi took show()'s off are the person's pick.
+            if state[1] is not None and self.baseline is not None and self.baseline[1] is None:
+                self.hidden = None
             self.baseline = state
             return
         if state == self.baseline:
@@ -317,10 +375,20 @@ class Follower:
             self._flush()
 
     def finish(self) -> None:
-        """The playback ended: a change still settling is saved."""
+        """The playback ended: a change that held SETTLE seconds, which no
+        turn came to save, is saved. One still settling isn't, nor one that
+        turned subtitles off: Kodi turns them off as it stops, and the last
+        turn may have seen that."""
         if self.lock.acquire(timeout=1):
             try:
-                self._flush()
+                if self.pending is not None:
+                    state, _ = self.pending
+                    # Subtitles off all along are no part of the change: audio
+                    # changed with them off is saved.
+                    turned_off = state[1] is None and self.baseline is not None and self.baseline[1] is not None
+                    if not turned_off and self.clock() - self.pending_since >= SETTLE:
+                        self._flush()
+                    self.pending = None
             finally:
                 self.lock.release()
 
@@ -329,6 +397,9 @@ class Follower:
             return
         state, body = self.pending
         self.pending = None
+        if state[1] is not None:
+            # Subtitles the person picked: theirs from now on, off too.
+            self.hidden = None
         self.baseline = state
         if body is not None:
             self.save(body)
@@ -362,6 +433,7 @@ class Follower:
             # doesn't list: none rather than Kodi's own.
             at = to_kodi(lay["subtitles"], lay["subtitle_index"], subtitles)
         if at is None:
+            self.hidden = lay["subtitle_index"]
             if props.get("subtitleenabled"):
                 self.rpc("Player.SetSubtitle", {"playerid": VIDEO_PLAYER, "subtitle": "off"})
         elif at != playing_subtitle:
@@ -369,14 +441,18 @@ class Follower:
         return True
 
     def body(self, state: tuple, props: dict):
-        """PUT /api/items/{id}/streams's body for what Kodi plays (None for a
+        """PUT /api/items/{id}/streams's body for what Kodi plays, the
+        account's subtitles while show() keeps Kodi's off (None for a
         subtitle pley doesn't know, which isn't saved). The audio goes only
         when it was changed: the track playing was the server's choice for
         this Kodi, and another device may play another of that language
         better, so subtitles changed alone keep the audio picked before."""
         lay = self.layout
         audio_at, subtitle_at = state
-        subtitle = None
+        # Off as show() left them: the account's choice, sent as it was.
+        # Leaving it out would save them off too (the server reads none as
+        # off), and the audio changed must still be saved.
+        subtitle = self.hidden
         if subtitle_at is not None:
             subtitle = from_kodi(lay["subtitles"], subtitle_at, props.get("subtitles") or [])
             if subtitle is None:
@@ -389,14 +465,104 @@ class Follower:
             body["audio_index"] = lay["audio_index"] if audio is None else audio
         return body
 
+    def indexes(self, state: tuple, props: dict) -> tuple:
+        """What Kodi plays (`state`, its places) as the server's stream
+        indexes: (audio, subtitles), -1 for no subtitles, None for one pley
+        doesn't know (captions Kodi found in the video, a file's audio
+        without its details)."""
+        lay = self.layout
+        audio_at, subtitle_at = state
+        if lay["audio"]:
+            audio = from_kodi(lay["audio"], audio_at, props.get("audiostreams") or [])
+        else:
+            # A converted stream carries only the audio the server put in.
+            audio = lay["audio_index"] if lay["hls"] else None
+        if subtitle_at is not None:
+            subtitle = from_kodi(lay["subtitles"], subtitle_at, props.get("subtitles") or [])
+        else:
+            # Kodi shows none: those drawn onto the video, else none at all.
+            subtitle = lay["burned"] if lay["burned"] is not None else -1
+        return audio, subtitle
+
+    def playing(self):
+        """What Kodi plays (indexes()), for progress reports: None before a
+        turn saw it, and once Kodi's places no longer say pley's tracks."""
+        return self.now if self.following else None
+
+    def obey(self, session_id: str, command: dict) -> dict:
+        """The remote's `audio` or `subtitles` for the session `session_id`
+        plays (remote.obey_track), from the event stream's thread: Kodi's
+        player switches to the track as a pick in its own menu does, by the
+        track's place there, and the pick is saved as that one is, once it
+        held (turn). Only what Kodi lists can be picked: a converted stream
+        carries only the audio the server put in, and subtitles drawn onto
+        the video stay. Nothing until the account's choice is shown, which
+        would undo it. {act, report}, as remote.obey_track's, with `track`,
+        Kodi's entry for the track switched to, which remote.notice names."""
+        if not self.lock.acquire(timeout=1):
+            return dict(remote.NONE)
+        try:
+            if not self.following or not self.shown:
+                return dict(remote.NONE)
+            props = self.rpc("Player.GetProperties", {"playerid": VIDEO_PLAYER, "properties": PROPERTIES})
+            if not isinstance(props, dict):
+                return dict(remote.NONE)
+            lay = self.layout
+            audios = props.get("audiostreams") or []
+            subtitles = props.get("subtitles") or []
+            playing = self.indexes(current(props), props)
+            if self.now is not None and self.clock() < self.told_until:
+                # The remote's last pick, which Kodi may not have switched to yet.
+                playing = self.now
+            if lay["audio"]:
+                audio = [e["index"] for e in lay["audio"] if to_kodi(lay["audio"], e["index"], audios) is not None]
+            else:
+                audio = [lay["audio_index"]] if lay["hls"] and lay["audio_index"] is not None else []
+            if lay["burned"] is not None:
+                offered = [lay["burned"]]
+            else:
+                offered = [e["index"] for e in lay["subtitles"] if to_kodi(lay["subtitles"], e["index"], subtitles) is not None]
+            player = {"session_id": session_id, "audio": audio, "subtitles": offered, "audio_index": playing[0], "subtitle_index": playing[1]}
+            action = remote.obey_track(player, command)
+            act, index = action["act"], action.get("stream_index")
+            if act == "subtitles" and lay["burned"] is not None:
+                # Drawn onto the video: Kodi can't take them off.
+                return dict(remote.NONE)
+            if act == "audio":
+                at = to_kodi(lay["audio"], index, audios) if lay["audio"] else None
+                if at is None:
+                    return dict(remote.NONE)
+                self.rpc("Player.SetAudioStream", {"playerid": VIDEO_PLAYER, "stream": at})
+                playing = (index, playing[1])
+                action = dict(action, track=listed(audios, at))
+            elif act == "subtitles" and index == -1:
+                self.rpc("Player.SetSubtitle", {"playerid": VIDEO_PLAYER, "subtitle": "off"})
+                playing = (playing[0], -1)
+            elif act == "subtitles":
+                at = to_kodi(lay["subtitles"], index, subtitles)
+                self.rpc("Player.SetSubtitle", {"playerid": VIDEO_PLAYER, "subtitle": at, "enable": True})
+                playing = (playing[0], index)
+                action = dict(action, track=listed(subtitles, at))
+            if act != "none":
+                self.told_until = self.clock() + QUIET
+            self.now = playing
+            return action
+        finally:
+            self.lock.release()
+
 
 # ----------------------------------------------------------- the defaults
 
 
-def language_name(code) -> str | None:
+def language_name(code, text) -> str | None:
     if not code:
         return None
-    return next((name for c, name in LANGUAGES if c == code), code)
+    return text("language_" + code) if code in LANGUAGES else code
+
+
+def sort_key(name: str) -> str:
+    """A name as an alphabetical list orders it: "Árabe" with the A's."""
+    return "".join(c for c in unicodedata.normalize("NFKD", name) if not unicodedata.combining(c)).casefold()
 
 
 def mode_word(mode) -> str:
@@ -408,13 +574,14 @@ def rows(me: dict, text) -> list:
     subtitle language when the mode shows full subtitles. `text(name)` is
     the add-on's words."""
     mode = me.get("subtitle_mode") or "forced"
+    audio = language_name(me.get("audio_language"), text) or text("files_default")
     shown = [
-        ("audio", "%s: %s" % (text("audio_language"), language_name(me.get("audio_language")) or text("files_default"))),
-        ("mode", "%s: %s" % (text("subtitles"), text(mode_word(mode)))),
+        ("audio", text("label_value") % (text("audio_language"), audio)),
+        ("mode", text("label_value") % (text("subtitles"), text(mode_word(mode)))),
     ]
     if mode in WITH_LANGUAGE:
-        name = language_name(me.get("subtitle_language")) or text("same_as_audio")
-        shown.append(("subtitle", "%s: %s" % (text("subtitle_language"), name)))
+        name = language_name(me.get("subtitle_language"), text) or text("same_as_audio")
+        shown.append(("subtitle", text("label_value") % (text("subtitle_language"), name)))
     return shown
 
 
@@ -426,7 +593,9 @@ def choices(what: str, me: dict, text) -> tuple:
         heading = text("subtitles")
     else:
         none = text("files_default") if what == "audio" else text("same_as_audio")
-        options = [(None, none)] + list(LANGUAGES)
+        # Alphabetical in the language shown, as the TV apps list them.
+        named = sorted(((code, language_name(code, text)) for code in LANGUAGES), key=lambda option: sort_key(option[1]))
+        options = [(None, none)] + named
         now = me.get("audio_language" if what == "audio" else "subtitle_language")
         heading = text("audio_language" if what == "audio" else "subtitle_language")
     at = next((i for i, (value, _) in enumerate(options) if value == now), 0)

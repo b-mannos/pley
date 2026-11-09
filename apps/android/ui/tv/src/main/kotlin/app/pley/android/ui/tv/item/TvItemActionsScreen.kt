@@ -13,13 +13,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import app.pley.android.common.UiText
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyTv
 import app.pley.android.designsystem.PleyType
@@ -41,9 +41,10 @@ import app.pley.android.ui.tv.theme.LocalTvTier
 
 /**
  * An item's actions as a screen of their own (PleyKey.ItemActions), for
- * the screens that open them by key: its backdrop, its name and the
- * actions as a list with focus on the first (D-pad rule 6). Pages of
- * this area show the same actions in a side panel instead.
+ * what opens them by key: its backdrop, its name and the actions as a
+ * list with focus on the first (D-pad rule 6). Tiles show the same
+ * actions in a side panel over their page instead ([TvTileActionsPanel],
+ * the item page's [TvPanels]).
  */
 @Composable
 internal fun TvItemActionsScreen(itemId: Long, continueWatching: Boolean = false) {
@@ -51,12 +52,11 @@ internal fun TvItemActionsScreen(itemId: Long, continueWatching: Boolean = false
     val state by model.state.collectAsStateWithLifecycle()
     val navigator = LocalTvNavigator.current
     val toasts = remember { TvToastState() }
-    val resources = LocalResources.current
     val tier = LocalTvTier.current
     LaunchedEffect(model) {
         model.events.collect { event ->
             when (event) {
-                ItemEvent.NothingToPlay -> toasts.show(resources.getString(R.string.tv_item_nothing_to_play))
+                ItemEvent.NothingToPlay -> toasts.show(UiText.res(R.string.tv_item_nothing_to_play))
                 is ItemEvent.Failed -> toasts.report(event.error)
             }
         }

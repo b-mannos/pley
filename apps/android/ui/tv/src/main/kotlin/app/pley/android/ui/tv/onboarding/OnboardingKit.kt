@@ -48,6 +48,7 @@ import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.PleyType
 import app.pley.android.designsystem.icon.PleyMark
 import app.pley.android.screens.onboarding.OnboardingSource
+import app.pley.android.ui.tv.kit.OverlayShowing
 import io.nayuki.qrcodegen.QrCode
 import kotlinx.coroutines.delay
 import kotlin.math.floor
@@ -58,10 +59,10 @@ import kotlin.math.floor
  */
 val LocalOnboardingSource = staticCompositionLocalOf<OnboardingSource?> { null }
 
-/** The pley mark on its tile and the wordmark, [height] tall (design spec §2.8: 40 on the link screen). */
+/** The pley mark on its tile and the wordmark close by, [height] tall (design spec §2.8: 40 on the link screen). */
 @Composable
 internal fun PleyLogo(modifier: Modifier = Modifier, height: Dp = 40.dp) {
-    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(height * 0.4f)) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(height * 0.15f)) {
         Image(rememberVectorPainter(PleyMark.Tile), contentDescription = null, modifier = Modifier.size(height))
         BasicText(
             "Pley",
@@ -167,6 +168,7 @@ internal fun TvDialog(
     buttons: @Composable () -> Unit,
 ) {
     BackHandler(onBack = onDismiss)
+    OverlayShowing()
     val view = LocalView.current
     // Once the dialog's buttons are gone from the focus tree, after this frame.
     DisposableEffect(returnTo) { onDispose { returnTo?.let { r -> view.post { runCatching { r.requestFocus() } } } } }

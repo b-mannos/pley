@@ -4,8 +4,8 @@ One app, `com.formandelement.pley`, for phones, tablets, Android TV, Google
 TV and Fire TV (Fire OS 7 and later), on Android 8 or later. It is native
 Kotlin and Jetpack Compose, playing with Media3: `MainActivity` on phones
 and tablets, `TvActivity` on TVs. Pley's other TV apps ([Kodi](KODI.md),
-[Roku](ROKU.md), [Samsung and LG](TV_PLATFORMS.md)) follow its TV screens.
-No store carries it yet, so you sideload it.
+[Roku](ROKU.md), [Samsung](TV_PLATFORMS.md), [LG](LG.md)) follow its TV
+screens. No store carries it yet, so you sideload it.
 
 - [Install](#install)
 - [Using it](#using-it)
@@ -42,35 +42,220 @@ sign-in, the sign-in screen says so, and whoever hasn't set it up yet does
 it on that page as they sign in (for a code, on the device that approves
 it).
 
+Before its token goes to the server's address, the app has the server
+prove it is the one signed in to, at that address
+([API.md](API.md#telling-servers-apart)): for the access token, a proof
+made within the half hour on the same networks (joining or leaving the
+default network, or any Wi-Fi or Ethernet, asks for a new one, and so does
+a request there that got no answer); for the refresh token and a profile's
+PIN, one made then. What can't prove itself gets no token: the app shows
+what it saved and says "Another device answers there."
+
 ### Profiles
 
-A TV asks "Who's watching?" as it starts when the household has more than
-one profile, unless Settings' Always start as names one; Switch profile
-opens it at any time, on phones too. A profile with a PIN shows a lock and
-asks it on a number pad: a wrong one clears the dots, too many say how
-long to wait, and a PIN locked after 100 wrong ones in a row stops the
-pad. Going on as the profile a TV was left on asks its PIN at a start. A
+A TV starts as the profile it was left on, straight into Home, when that
+profile has no PIN. In a household of more than one profile it asks "Who's
+watching?" as it starts when that profile has a PIN, or while the TV
+doesn't know whether it has one. Phones open on the profile used last, and
+a sign-in on the profile picked while approving it. Switch profile opens
+"Who's watching?" at any time. A profile with a PIN shows a lock and asks
+it on a number pad: a wrong one clears the dots, too many say how long to
+wait, and a PIN locked after 100 wrong ones in a row stops the pad. Going
+on as the profile a TV was left on asks its PIN at a start. A
 profile that can see more and has no PIN takes its password: a phone signs
 in again in the browser, and a TV shows a code to approve on a phone,
 where its owner picks it.
 
-Always start as only skips the question: the TV starts as the profile it
-was left on, but never past its PIN. When that profile has one, the start
-opens "Who's watching?" on its PIN pad, and Back shows the other profiles.
-Whether it has one is the profile's `has_pin` from `GET /api/auth/me`, saved
-with the session, so the start reads it from the device; until the TV has
-heard it for that profile, the start asks "Who's watching?".
+A start never goes past a PIN: with Always start as, it opens "Who's
+watching?" on the PIN pad of the profile the TV was left on, and Back
+shows the other profiles. Whether that profile has a PIN is its `has_pin`
+from `GET /api/auth/me`, saved with the session, so the start reads it from
+the device; until the TV has heard it for that profile, the start asks
+"Who's watching?".
+
+### Language
+
+Pley is in English, French and Spanish. The app shows the language of the
+account, else this device's (one picked with the globe, below, else the
+first of the device's languages that Pley has), else the server
+language, else English ([API.md](API.md#language)): `language` of
+`GET /api/auth/me` and of `GET /api/server`, which the app asks while
+signed in. Without an account (no server chosen, or signed out of the one
+chosen), it shows this device's. A code Pley doesn't have counts as none,
+and a region doesn't count (`fr-CA` is French).
+
+The screens shown before signing in have a globe, labelled with the
+language shown by its two letters ("FR") and heard as "Choose a
+language". On phones it is at the top left of the sign-in screen
+(choosing a server, or typing its address) and of the code screen, in
+line with their text; "Continue in browser" has an arrow out of a box, so
+the globe only means the language. On TVs it is a small button at the
+bottom right of "Choose your server", on the forget hint's line, and at
+the top right of the code screen, on the logo's line: Down from the
+buttons, or Up from Change server, reaches it, and Left or Right never
+does. It opens **Automatic (English)** (the device's language where Pley
+has it, else English), then English, Français and Español, each named in itself,
+the current choice checked: in a sheet on phones, in a side panel on TVs,
+as Settings' choices open. A pick shows at once and is this device's
+language, kept on the device and read before the first screen; Automatic
+forgets it. Signed in, an account's own language comes first, and its
+Automatic means this one.
+
+Settings has a **Language** row, on phones at the top and on TVs under
+Profile: **Automatic**, naming what that is on this device ("Automatic
+(Français)": this device's language, or the server's on a device in a
+language Pley doesn't have), then English, Français and Español, each
+named in itself. A choice is the account's, on every device it signs
+in on (`PUT /api/me/language`); it shows at once, and is put back, with a
+word, if the server refuses. A Pley from before languages keeps no
+account's language (its `GET /api/server` names none, and the route
+answers 404 or 405): there the row is this device's, as the globe picks it, and
+a choice shows and stays on this device. A language picked in the
+system's settings is too. On phones the hint under the row says so:
+what Pley is in on this device, and that keeping it for the account
+needs a newer Pley on the server. A server that answers a choice 404 or
+405 is taken for one such, though it names a language, until another
+server is in use or the app starts again, so the row stays this
+device's when Settings opens again.
+
+The app remembers the language it showed last and starts in it, before
+the server has answered; signed in, it waits for the account's language
+before it turns to the device's, and on a device in a language Pley
+doesn't have, for the server's, so no other language shows for a
+moment. A Pley from before languages has no account's language to wait
+for, and one an account saved means nothing there. Android 13 and later keep it as the app's own language, which
+the system's settings list (Apps → Pley → Language); the app sets it
+again as it hears the account's and the server's. A language picked
+there is chosen as the app's own picker would choose it, and its System
+default is that picker's Automatic: signed in, the Language row's, for
+the account (refused by the server, the language the app goes by comes
+back); without an account, the globe's, for this device. Below 13 the
+app keeps it itself, and remakes its screens when it changes. A player open then
+plays on: on Android 13 and later its words change where they are, below
+the next time it opens.
+
+Dates, times and numbers follow the language shown, in the device's
+region when the device is in that language (en-GB keeps its 24-hour
+clock). The app's requests to its server say the language shown
+(`Accept-Language`), in which the server writes the titles of Home's and
+the libraries' rows; they are asked for again when it changes.
+
+An open page follows a change at once: its words, and the runtimes, times
+left, "3 hours ago", episode numbers and track languages it writes. Tiles
+already listed in a library, a collection or search results follow when
+they load again. The names of audio and subtitle languages are the
+language shown's own ("Anglais", "Inglés"), sorted as it sorts them. A
+quality the server converts to keeps its name in every language ("8 Mbps
+1080p"), as on the web. Playback details write their numbers as the
+language shown does ("23,976 i/s" in French); Diagnostics writes frame
+rates as the decoder gives them, the same in every language.
+
+### Phones and tablets
+
+- **The player** shows its controls, the title with them, for 3 s as
+  playback starts and as each later item begins (the next episode, a
+  queue's next), where TVs show the title alone at the top; a tap shows
+  them again.
 
 ### TVs and Fire TV
 
-- Select opens, holding Select or Menu (☰) opens a title's actions, Back
-  goes back. In the player, OK within two seconds of a seek plays on from
-  there; later, OK pauses.
+- Select opens, holding Select or Menu (☰) opens a title's actions in a
+  panel over the page, which stays as it was, and Back goes back: to the
+  page the rail opened as it was left, focus included.
+- **Typing** (Search, a playlist's name, a request, a server's address):
+  Select on a field opens the TV's keyboard, Gboard or Amazon's, whose
+  Done or Search acts on the words; Back closes it, keeping them, with
+  focus on the field. Amazon's keyboard shows the words in a box of its
+  own, which follows each key.
+- **The rail** lists, between the profile's avatar and Settings, Search,
+  Home, Discover (or the requests), Live TV, the first six libraries in
+  the server's order, **Libraries** when there are more (it lists them
+  all), Playlists, Collections when there is no **Libraries**, Now Playing
+  and the USB drive, each where it applies. Nothing makes way for
+  another: entries are 40 dp tall on a 44 dp pitch, nine fit, and more
+  scroll between the avatar and Settings, which stay put. Going down,
+  focus moves until it is the fourth entry shown, then stays there while
+  the entries move under it a whole entry a press, until the last ones
+  show and focus goes on to the last; going up is the same backwards. An
+  entry shows in the same place whichever way focus came, as in the app's
+  lists, and none is ever cut in half. The closed rail shows the page's
+  entry where focus on it would, so opening the rail moves nothing.
+- **The player**: OK with the controls hidden shows them on the scrubber,
+  as Up does (Down shows them on Play/Pause), and OK there plays and
+  pauses. It seeks as YouTube's TV app does: Left and Right show the
+  controls and move where it goes, 10 s a press (held, faster the longer
+  it's held), and it goes there on OK, or by itself 5 s after the last
+  key; Back lets it go. Fast forward and rewind (30 s) go without OK,
+  400 ms after the last press. OK on the
+  scrubber within two seconds of a seek plays on from there; later, it
+  pauses. Play/Pause, the button or the remote's key, plays and pauses,
+  and a seek waiting still goes. Up while a seek waits shows the chapters
+  as a row of cards over the scrubber, on the one it was going to; the
+  Chapters button shows them on the one playing. Left and Right go
+  through them, OK goes to one, Down or Back closes them, and so does a
+  media key's seek (Previous, Next, fast forward or rewind).
+- A direction key held for 400 ms, about when the system's own repeats
+  begin, moves focus by itself, every 45 ms (about 22 a second), on the
+  app's own clock: the system's repeats come unevenly, so the app drops
+  them. A press that lasts a little longer than most, as a remote's can,
+  still moves focus once. A held Left or Right slides a row on at that
+  pace, a tile every 45 ms, under a ring that stays still at the row's
+  left edge, the tiles keeping their resting look; when the key comes up,
+  focus lands on the tile under the ring (or the next one the way the row
+  was going) and the row settles there. Near a row's end, where tiles no
+  longer reach that edge, focus steps across them instead. A held Up or
+  Down glides a page of rows (Home, an item page, search) or a grid on a
+  row at each step, each glide a little longer than the step, so the page
+  never stops; in a grid the tiles keep their resting look under one ring
+  that stays still where focus is going, until the key comes up. A press
+  moves a row, a page or a grid over 150 ms, eased out, and so does Up
+  from the rows of Home or an item page, or from a collection's grid, to
+  its top. A tile's focus look comes in over 150 ms, eased out, and goes
+  over 120 ms, eased in, with the native Samsung app's curves; where a
+  held key's slide or glide stops, the still ring goes at once and the
+  tile's look comes in that way. Elsewhere under a held key a tile's focus
+  look changes evenly from one tile to the next, and backdrops and info
+  blocks wait until focus has rested 400 ms. With Reduce motion a held key
+  steps focus a tile or a row at a time and nothing slides.
+  Search's recent searches move only when the next chip would pass the
+  gutter or the safe area's edge, and then glide as a row does.
+- Home's hero features what the web's banner does: the newest movies and
+  shows not yet watched that have a backdrop, a library's at a time, then
+  My List's (the newest watched ones once everything has been). It takes
+  turns through them: Right from its last button (My List) goes on to the
+  next title, focus back on Play, and it turns by itself every 9 s while
+  no key is pressed, each press starting the time over; with Reduce
+  motion only Right turns it. With nothing to feature, the hero is
+  Continue Watching's first and stays. On a phone the same titles are a
+  banner under a clear top bar, swiped between and turning by themselves
+  (not while touched, scrolled away, or with Reduce motion).
+- A held key never leaves its list, as on a TV's home screen: it stops
+  on a row's first or last tile, on a page's first or last row, and at a
+  grid's edges, wherever the list is (Home, a show's page, search, a
+  library, collections, playlists, Live TV, Settings). The rail, a
+  page's hero, the A to Z jump and the chips or tabs above a grid take a
+  press of their own, once the key has come up or at the edge. In a
+  grid, Up and Down keep the column, held too. Coming back to a
+  grid (Back from a title or its actions, Right from the rail, Down from
+  the chips) lands on the tile focus left.
+- On a show's page, Up from the episodes and Down from the buttons go to
+  the tab of the season shown; another season shows once focus rests on
+  its tab.
+- Pictures wait while a key is held: the tiles a row slides past or a
+  page glides past ask for none, unless the memory cache has them, and
+  no backdrop is fetched ahead; where the key comes up, the tiles on
+  screen and just past it load, with the backdrops around the focused
+  tile. Every page's rows ask for the pictures ahead of them, a screen
+  and a half, and stop asking for those the row has moved past.
 - **Fire TV** runs the same APK and TV screens. The app spots it by the
   `amazon.hardware.fire_tv` feature and follows Amazon's player guidelines
   (asynchronous decoder queueing, surround from Fire OS's audio setting,
   Alexa's play and pause). Fire OS 16 asks for the nearby-devices
-  permission before the app searches the network.
+  permission before the app searches the network. An Appstore app's
+  tile is the 16:9 icon in its listing
+  (`deploy/stores/tv-banner-1280x720.png`, the mark and name); a
+  sideloaded app's is drawn from the app's icon, squeezed into a square in
+  the middle of a grey tile, whatever its shape or banner.
 - **Watch Next** (Android TV and Google TV): the home screen's row shows
   the profile's Continue Watching, ten at most.
 - **Dolby Vision and HDR** go by the display mode each video plays in: the
@@ -87,6 +272,300 @@ heard it for that profile, the start asks "Who's watching?".
   this screen doesn't show Dolby Vision)"). Their Decoded line names what
   the decoder makes: HEVC and HDR10 for a base layer.
 
+### Remote control
+
+The phone is a remote for the profile's other devices, and sends them
+what to play (Play on…), the household's other profiles' devices too,
+which switch to the phone's profile first; phones and TVs alike obey a
+remote and play what one sends them. A TV shows no remote and has no
+Play on….
+
+On the phone, while another of the profile's devices is on, playing or
+not, Home's top bar has the remote's button, beside the profile's
+avatar, in the accent while one of them plays (TalkBack says "Remote, 2
+devices playing" or "Remote, 1 device ready to play"); the other tabs
+reach the remote through the bar below while the phone controls a
+device. The devices are the receivers (`GET /api/remote/devices`, the
+apps that take casts) merged with the sessions (`GET /api/sessions`) by
+`device_id`, both read again on `sessions_changed`, `session_stopped`
+and each time the event stream connects; a session whose device takes no
+casts (a Jellyfin or Plex app) is listed too, and a device with several
+sessions shows its newest. The phone's own sessions are left out (its
+players say which they play), and so is its own receiver. The phone asks
+for the household's too (`?household=1`): for a home member, the
+receivers include the other profiles' devices that switch to the
+caster's profile, each with the profile it is on (`profile`); what those
+play stays their profile's, so they are listed as on it, not playing.
+
+The button opens the remote, a sheet of **Your devices**: a row for
+each, those that play first, then the profile's own, then the other
+profiles', each by name (**Unknown device** when the server can't name
+it; two of the same name are numbered), with an icon for its kind (TV,
+phone, tablet, computer, browser, other), and what it plays (an episode
+as "Show — S1 · E2 — Title", a channel as its number and name) with a
+thin bar of how far, or **Ready to play**; another profile's device says
+whose it is, **On Sam's profile**. Choosing one that
+plays shows its controls in the list's place; Back, or the arrow by its
+name, goes back to the list. A device ready to play is only listed: it
+has nothing to control. With one device only, playing, its controls show
+at once.
+
+While the phone controls what a device plays, a bar above the tabs, over
+the mini player when music plays here too, says **Playing on** the device
+(**Paused on** while it is paused) and what plays there, and opens that device's controls. The phone
+controls it once it sends it a command from the remote, or with Play on…:
+the bar then says **Starting on** the device until what it sent plays
+there (not what played there before), and turns into **Playing on** in
+place, with no toast and no sheet coming up over it; what others play on
+their own shows no bar. The bar keeps to that device
+through a title ending into the next one, and lets go once the device
+has played nothing for 5 s (stopped, or at the end). A cast that hasn't
+started playing within 30 s isn't waited for, so what plays there later
+isn't taken for the phone's.
+
+A device's controls, top to bottom:
+
+- the poster or the channel's logo, and what plays: an episode's show,
+  season and number over its title, a track over its artist, a channel's
+  number and name over Live TV, a movie over its year;
+- how far it is, estimated each second while it plays from the last
+  report, its age and the time since, by the phone's clock: a slider when
+  its player seeks, a bar otherwise. On Live TV, the programme on, a thin
+  bar of how far it is by the phone's clock, from when it started to when
+  it ends (the channel's `now_start` and `now_stop`), its times as the
+  phone writes them ("20:00 – 21:00"), and **Next:** the programme after
+  it; no seek bar;
+- **Skip Intro** or **Skip Credits** at the end of the poster's row while
+  what plays is in an intro or the credits of its file (the session's
+  `markers`), from the start until a second before the end, where its
+  player seeks: a seek to where the player's own button lands, just before
+  the intro ends or at the credits' end. The title gives way to it;
+- the transport, one centred row: previous, back 30 s, play or pause,
+  forward 30 s and next, each where its player declares it. Next shows
+  where its player declares it or what plays has a next by nature (an
+  episode, a track), dimmed when the player didn't declare it; a movie
+  whose player declares none has no next. Where only one of previous and
+  next shows, the other's place is kept, so play stays in the middle. On
+  Live TV, play or pause only where its player declares pause,
+  then a channel rocker: one rounded pill holding channel down, the word
+  **CHANNEL** and channel up, each dimmed when the player can't change
+  channel that way;
+- on the left, **Audio**, **Subtitles** and **Quality** as icons, each
+  where its player declares it and has a choice: more than one audio
+  track, any subtitles, the qualities its Quality menu offers for the file
+  (the session's `qualities`). A long press says which is which; each
+  opens a menu, showing as selected while it is open, of the tracks
+  labelled as the phone's own player labels them, or of the qualities, the
+  one playing ticked (no quality is until its player says which);
+  Subtitles starts with **Off**. On the right, **Stop**, which asks first
+  (**Stop playing on** the device?, Stop or Cancel).
+
+What a command asks shows at once, with nothing said while it waits:
+the place a seek or a skip goes (a skip goes from there), playing or
+paused, the track or quality picked. A next or previous dims the title
+and the transport until what comes next shows. A command waits up to 5 s
+for the list to show it acted (a new state, a new title, a report from
+where it was sent, the track or quality picked); without one the
+controls say the device **didn't answer**, until the device reports
+again, and show what it plays. A next or previous with nothing there
+changes nothing, and isn't a failure. A next, or a track or quality its
+player plays as a new session, ends one session before the next one's
+is listed: until then, for up to those 5 s, what played stays on the bar
+and in the sheet, and the device stays listed even if it takes no casts.
+Refusals are said plainly: the device isn't playing any more, can't do
+that, or too many commands at once.
+
+The players obey the remote on the profile's other devices
+([API.md](API.md#remote-control)), on phones and TVs alike, and say what
+they obey when they start (`controls`), with the device's name from
+Android's settings (else its model) as remotes show it, and whether it
+is a TV, a tablet or a phone (`device_kind`: a TV in the TV interface,
+else a tablet when the screen is at least 600 dp at its narrowest). They
+obey:
+
+- **Movies and episodes:** play, pause, seek and skip, and next where
+  something can come next (an episode, a playlist or collection). Next at
+  the end does nothing, and says nothing on the device; a video has no
+  previous. Audio and subtitles, where the file has them, change as the
+  player's own track menu changes them, and are remembered the same way:
+  another track in the file as it plays switches at once, one a stream
+  doesn't carry, or picture subtitles to burn in, starts a new session
+  where it is. The quality changes as a pick in the player's Quality menu
+  does, and is kept as its pick the same way. A pick of what plays
+  already is said again at once.
+- **Music:** play, pause, seek, skip, next and previous, as the buttons:
+  previous more than 3 s into a track goes back to its start.
+- **Live TV:** next and previous, channel up and down in the order the
+  player goes through. It has no pause or seek. Stopped from another
+  device or by an administrator, it shows **Live TV stopped** and says who
+  and why, as for a connection taken over.
+
+Only the player of the session named acts on a command, a seek stays
+within the title, and a skip counts from where it is. Each change is
+reported at once, so the remote sees it, and a play or pause that changes
+nothing is reported too, so a remote a little behind settles. A video's
+reports say the audio and subtitles it plays (`audio_index` and
+`subtitle_index`, `-1` for none), and its Quality menu's pick (`quality`:
+`auto`, `original`, `8m`…); a track that needs a new session is said by
+that session as it starts, not by the one it replaces, and a quality is
+said at once and again as its session starts. While a
+player has a session, the event stream stays open in the background too,
+so music playing with the screen off still hears the remote; it closes
+once playback ends, once music has been paused for 90 s (the server's
+window for a session it hasn't heard from), or on signing out. The
+phone's video player, its screen left, obeys nothing until it shows
+again: its engine is stopped, and a next episode would play with no
+screen. What the server's events change meanwhile is fetched again
+on coming back, not in the background.
+
+A command never brings up a video player's controls: whoever sent it is
+on another device. What it changed shows as the player's toast instead,
+for 2 s on a TV, top right, and as long as the phone's toasts: "Paused",
+"Playing", "+30 s" or "−10 s" as far as a skip asked, "Jumped to 12:34"
+where a seek went, and "Audio: …", "Subtitles: …", "Subtitles off" or
+"Quality: …" as the menus name them. A command that changes nothing says
+nothing, and the next episode shows its title as it begins. The remote's
+pause is the remote's until anyone plays again: it doesn't bring up the
+controls as another pause does on the phone, and controls already up
+hide as they do while it plays. A key or a touch on the device makes the
+pause the person's own, and the controls then stay.
+
+#### Play on…
+
+On the phone, what a page plays goes to another of the profile's devices
+that takes it ([API.md](API.md#casting)): a receiver whose `casts` names
+`item` for titles, music and playlists, or `live` for a channel. **Play
+on…** shows only while one does:
+
+- beside Play on a movie's, an episode's, a show's and a season's page,
+  a square button as tall as Play: a title being watched starts there
+  where its Resume would (`start_ms`), with the audio and subtitles picked
+  on the page (`audio_index` when a track is picked, else the device plays
+  its best of the language as Play does; `subtitle_index`, `-1` for none,
+  when the file has subtitles), and a show or a season plays its next
+  episode;
+- beside Play and Shuffle on an album's and an artist's page;
+- under Play on a playlist's page, where the row beside it is full;
+- as **Watch on…** under Watch in a programme's details in Live TV, and
+  in the live player's bar;
+- in an item's actions (a long press on its tile or row, a track's too),
+  after the ways to play it here.
+
+It opens a chooser of those devices as the remote lists them: an icon for
+the kind, the name, and what each plays now or **Ready to play** (**On
+Sam's profile** for another profile's). An album, an artist or a
+playlist has a Shuffle switch, which makes it **Shuffle on…** and sends
+`shuffle`. Picking a device sends `POST /api/remote/devices/{id}/cast`;
+once it is on its way the chooser closes, and the remote's bar says
+**Starting on** the device, then **Playing on** once what it was sent
+plays there; it opens the device's controls. The live player closes as
+its channel goes to the device, and the bar follows it the same way. A refusal is said under the
+devices, and another can be picked: the device **isn't on any more**
+(`404`), **can't play that** (`409`), **Too many at once** (`429`), else
+the server's own words.
+
+A device of another profile of the household plays as the phone's
+profile: the cast names that device's profile (`profile_id`), and the
+device switches to the phone's before it plays. When the phone's profile
+has a PIN (`has_pin` of `GET /api/auth/me`, or the server answering
+`403 pin_needed`, for a PIN set since), the chooser shows **Enter your
+PIN** in the list's place, the PIN pad of "Who's watching?" with the
+device's icon and what it is for ("Den TV switches from Sam's profile to
+yours"), and sends the cast again with `pin`. A wrong PIN shakes the dots
+and says **Wrong PIN. Try again.**; after too many, the server's words
+say how long to wait (`429`); a locked PIN stops the pad, and **Back to
+the devices** leads back to the list, as Back and the arrow by the
+device's name do. Any other refusal goes back to the list and is said
+there.
+
+#### Taking casts
+
+Phones, tablets and TVs play what the profile's remotes send them
+([API.md](API.md#casting)). While the app is in front and signed in, its
+event stream names the device as a receiver: its install id (the
+`client_id` its players send), its name and kind as its play requests
+give them, and what it plays, titles always and Live TV's channels while
+Live TV is open to the profile (the stream waits up to 2 s for Live TV's
+summary as it opens, so it doesn't open twice), and that it switches to
+the profile of a remote on another profile of the household (`switch`,
+as in `casts=item,live,switch`). In the background, where
+a player keeps the stream open, it names none: going there and back opens
+the stream again, and nothing cast plays while the app is hidden.
+
+A `cast` for this device's receiver, heard while the stream names it,
+plays as the app's own Play on that page would: a movie or an episode in
+the player, from `start_ms` when given, else where Play resumes, with the
+audio and subtitles cast (`audio_index`, `subtitle_index`, `-1` for none)
+in place of the profile's saved choices for that play, not saved, a track
+the file it plays doesn't have leaving the choice to them; a show or a
+season its next episode; a track, an album or an artist in the
+music player, shuffled with `shuffle`; a playlist from its first entry
+(a random one with `shuffle`), video as a queue in the player and music
+in the music player; a channel in the live player, tuned as Watch on that
+channel would, on a phone or a TV, Fire TV included. What plays makes way,
+as for Play there: music pauses for a video or a channel, and a player
+window open closes for music; one player window shows at a time, video
+or Live TV. A cast for another device does nothing, and so does one that
+comes while "Who's watching?" shows, its PIN pad too, on a phone or a
+TV: whoever is at the device is choosing, and a cast would choose for
+them.
+
+A cast from a remote on another profile of the household names that
+profile (`profile_id`) and carries a `switch_ticket`. The device first
+ends what plays, video, music or Live TV, and waits up to 5 s for its
+last reports (`stopped` where it was, the session's end) and Live TV's
+leave to go out: they carry the sign-in's tokens as they are sent, so
+after the switch they would land on the caster's profile. What hasn't
+gone out by then is dropped, never sent as the caster's profile, a
+channel's leave from a window that closes later too. Then it
+switches to that profile, as "Who's watching?" switches (the
+switch-profile grant with `ticket` in place of a PIN): what shows, its
+caches and the event stream follow the new profile, and then it plays
+the cast once. Every other cast heard from the start of the switch until
+it is done is dropped, whichever profile it is from; once switched,
+casts play as usual, those of the profile switched to included. A switch
+that fails (the ticket spent or expired, the server out of reach) plays
+nothing, and says **Couldn't switch to the remote's profile** where
+**Playing from** would show on the shell: a toast on a phone, the top
+right on a TV. A cast that names another profile without a ticket is
+ignored.
+
+As it starts, it says where it came from, **Playing from** the remote's
+device (**Playing from another device** when the server can't name it),
+for about 4 s: the video players in their toast, the live players at the
+top, the phone's shell in a toast while music plays, and a TV's shell at
+the top right as it opens Now Playing for music.
+
+### Libraries
+
+A library's Library tab sorts and filters its grid as the web app does:
+watched or not, genre, year and, in movie and show libraries, resolution
+(4K, 1080p, 720p, SD) and dynamic range (Any HDR, HDR, which takes in
+Dolby Vision and HDR+, Dolby Vision, HDR+, HLG, SDR), the choices the
+server lists where the library's titles differ in them. A title counts by
+its best file, a show by its best episode.
+
+- **Phones**: each filter is a chip over the grid that opens its sheet.
+- **TVs**: Genre and Year are chips and rows of the Filter panel;
+  Resolution and Dynamic range are rows of the Filter panel after Year,
+  with a chip ("4K", "Dolby Vision") while one is chosen. Chips that don't
+  all fit scroll with focus.
+- Clear filters clears them all, Save as… keeps them in the smart playlist
+  (`resolution=4k&dynamicRange=hdr`), and a library opens as it was left,
+  filters included; a stored value the server wouldn't take is dropped.
+- Posters carry their quality badges ("4K", "DV", "HDR") only while the
+  grid is sorted by bitrate or filtered by resolution or dynamic range;
+  sorted by bitrate, each also shows its bitrate and size. Recommended
+  rows, collections, playlists, search and Home show none.
+
+### Search
+
+Search asks the server for up to 200 titles, 200 people and 200 Live TV
+channels (`GET /api/search?limit=200`), the most it gives, and shows every
+one: a row per group (Movies, Shows, Seasons, Episodes, Artists, Albums,
+Tracks, Live TV, People) on phones and TVs, each scrolling sideways, with
+no See all. TMDB's Discover row comes after them ([Requests](#requests)).
+
 ### Audio and subtitles
 
 Unless you pick a track, the server picks the audio in the profile's
@@ -98,13 +577,14 @@ leaves the audio unpinned.
 |---|---|---|
 | Audio language, Subtitles, Subtitle language | Me (phones), Settings (TVs) | The profile's defaults |
 | Sync | The subtitle menu | 0.1 s steps, up to 10 s either way, kept per file on the device |
-| Subtitle style | Settings, or the player's subtitle menu | Size, background, font, and position (bottom, or raised 5, 10 or 15 %) |
+| Subtitle style | Settings, or the player's subtitle menu while text subtitles show | Size, background, font, and position (bottom, or raised 5, 10 or 15 %) |
 | Find subtitles… | End of the subtitle menu, while streaming | Searches online in the profile's subtitle language |
 | Speed | Phones: player settings. TVs: a button at the player's left | 0.5× to 2×, pitch kept, this title only |
 | Audio delay | Above the audio tracks (Left and Right on TVs) | Up to 5 s either way in 50 ms steps, this title only |
 
-A chosen font overrides the system's caption style; position applies to
-text subtitles only.
+A chosen font overrides the system's caption style. The style is for text
+subtitles only: picture subtitles (PGS, VobSub, DVB) keep their own look,
+so the player doesn't offer it for them, nor with subtitles off.
 
 Media3 changes the speed of decoded sound only, and a tunneled output
 times the picture against the sound itself. So while the speed isn't
@@ -140,13 +620,14 @@ The menu, Original and Automatic work as in
 ### Live TV
 
 This is how every Pley app shows Live TV; the [Kodi](KODI.md#live-tv),
-[Roku](ROKU.md#live-tv) and [Samsung and LG](TV_PLATFORMS.md#live-tv) docs
-list only what differs. It appears only where `GET /api/live` says
-`available` (a source with channels this profile may watch),
-administrators included: in the web app's sidebar, the phone's Libraries
-tab, after Home in the TV's rail. It comes and goes as sources are added
-or removed (`live_channels_changed`). Sources, the lineup and connections
-are set up in the web app's Settings → Live TV ([API.md](API.md#live-tv)).
+[Roku](ROKU.md#live-tv), [Samsung](TV_PLATFORMS.md#live-tv) and
+[LG](LG.md#live-tv) docs list only what differs. It appears only where
+`GET /api/live` says `available` (a source with channels this profile may
+watch), administrators included: in the web app's sidebar, the phone's
+Libraries tab, after Home in the TV's rail. It comes and goes as sources
+are added or removed (`live_channels_changed`). Sources, the lineup and
+connections are set up in the web app's Settings → Live TV
+([API.md](API.md#live-tv)).
 
 - **Categories:** Favourites, Recently watched, All channels, then the
   regions in alphabetical order, each opening to its groups ("UK| Sport"),
@@ -154,11 +635,13 @@ are set up in the web app's Settings → Live TV ([API.md](API.md#live-tv)).
   or cards) and the last channel are kept per server and profile.
 - **Search** looks across every channel by name, number or what's on, and
   offers the groups whose names match. The app's own search has a Live TV
-  row too.
+  row too, which moves as the other rows do.
 - **Paging:** channels come 100 at a time (`GET /api/live/browse`), and the
   guide asks only for the rows in view, six hours at a time, so a lineup of
   50,000 channels opens at once.
-- **Live only:** no pause, rewind or seeking; media keys do nothing.
+- **Live only:** no pause, rewind or seeking; play, pause, rewind and fast
+  forward do nothing in the player, and the remote offers only next and
+  previous ([Remote control](#remote-control)).
 - **Changing channel:** channel up and down stay in the category the player
   was opened from, wrapping round its ends. A typed number tunes that
   channel among all channels.
@@ -166,19 +649,52 @@ are set up in the web app's Settings → Live TV ([API.md](API.md#live-tv)).
   id, so the server ends the channel watched before.
 - **Every connection in use (`409`):** the player lists each connection's
   channel and who holds it, with **Watch here instead** where the server
-  allows it (`can_take_over`). A connection taken from you shows the
-  server's `410` message.
+  allows it (`can_take_over`).
+- **A connection taken from you:** the server's `live_taken_over` event
+  for the channel stops the player at once, and it shows **Live TV
+  stopped** with the server's words (docs/API.md, "Taken over") and
+  **Watch again**; a `410` from the stream says the same. It doesn't tune
+  again by itself.
 
-On Android the player reads the channel's MPEG-TS (`stream.ts`) at once
-while it asks for the session's `plan`: a channel the server sends as it is
-plays that MPEG-TS from its first keyframe; anything else plays the
-server's HLS. Leaving the player ends the session.
+On Android the player reads the channel's MPEG-TS (`stream.ts`) as it
+asks for the channel (`POST …/watch`), the server tuning for whichever
+comes first, then asks for the session's `plan`: a channel the server sends
+as it is plays that MPEG-TS from its first keyframe, as does one whose AC3
+or E-AC3 sound the server converts, where the device decodes it or sends it
+to its receiver as it is (Diagnostics lists both); anything else
+plays the server's HLS. Taking over a connection, it reads `stream.ts` only once
+the watch has answered, as only the watch takes the connection. Leaving
+the player ends the session. A page of channels that didn't load is asked
+for again once 10 s have passed, as the list moves. When the player fails,
+the channel is tuned again twice, after 1 s and then 3 s, before the player
+says why; not when the server refused it (every connection in use, the
+channel stopped, gone or not allowed). Try again starts the count again.
+
+On TVs, OK in the player opens the channel list, as Menu and Guide do;
+holding OK shows the controls (the channel list and the favourite's star) over
+what's on. Up and Down, Channel up and down, and Previous and Next change
+channel. In the guide, Left and Right go programme by programme, back
+through a programme that began before the guide a screen at a time, and a
+half hour at a time on a channel without a guide; rewind and fast forward
+(or Previous and Next) move it two hours, and the time now shows in a pill
+over the now line. Holding OK, Menu or Info on a programme or a channel's
+tile opens its details, with Watch and, beside it, the favourite as a star
+alone, filled for a favourite, as in the player's controls (screen readers
+say Add to or Remove from favourites). Back goes up a step at a time: the
+guide back to now, a search back to the category before, the guide or the tiles to the
+categories, then the rail. A held Left stops at the start of the guide or of the
+tiles, and a held Up at the top: a press of its own goes on to the
+categories or the tabs, in the guide not within 0.5 s of Left moving.
 
 ### Requests
 
 Where the server takes requests ([API.md](API.md#requests)), people ask
 for movies and shows found on TMDB and administrators decide; Radarr and
-Sonarr fetch what is approved. On phones and tablets:
+Sonarr fetch what is approved. A poster in Discover, its grids or
+Search's Discover row opens the title's page, except that a title a
+library this account can open has whole opens its library page, where
+it plays; a show partly there opens its title's page, for Request more
+seasons. On phones and tablets:
 
 - **Ways in**: Search before typing (Discover), Search's Discover row
   after the libraries' results, and Me's rows: Discover, and Your requests
@@ -192,7 +708,9 @@ Sonarr fetch what is approved. On phones and tablets:
   badge, in a grid under "Results for “dune”", read page by page; Back
   goes back to Search. Words past the server's 200 characters are cut to
   them.
-- **Discover**: a hero for the first trending title with its main action;
+- **Discover**: a hero for the first trending title with its main action
+  (when trending has nothing the profile may ask for, every row is read
+  at once and the hero is the first title of the next one with any);
   rows (Trending this week, Popular movies, Popular shows, Coming to
   cinemas, Popular anime), each read as it comes into view and page by
   page; the person's requests. It has no search of its own.
@@ -213,22 +731,61 @@ Sonarr fetch what is approved. On phones and tablets:
   requests and ones that couldn't be sent) shows as a toast with Open
   while the app is open, never over the player; what came while it was
   closed is told at the next start.
-- **Signed in before requests**: Discover offers Sign in again, which asks
-  for the `requests` and `approvals` scopes the server now lists.
-- The summary follows the event stream; without it, the app reads the
-  summary every minute in the foreground and an open list every 30 s.
-  Download progress sends no events: a list, a title's page, a library
-  title or Discover's requests showing a download are read again every
-  10 s while they show.
+
+On Android TV and Fire TV, as on the Samsung and LG apps:
+
+- **Way in**: the rail's entry after Home, Discover where the profile may
+  ask, else Your requests (Requests for administrators), with the number
+  that waits there beside its icon, in red while a request couldn't be
+  sent.
+- **Discover**: the hero's main action and Details; TMDB's rows, each read
+  as focus comes near, whose See all opens the whole list in a grid that
+  reads five pages at most at a time and then offers Show more, as an age
+  limit can leave page after page empty; the profile's requests, and the
+  way to them at the top with their number. Back from the rows goes to
+  the hero.
+- **A title's page**: the one main action, Requested and Following
+  focusable as every TV button is; Which seasons? is a side panel, opened
+  from Request more seasons or a season's poster at that season.
+- **Requests**: tabs with their numbers, the administrators' filters
+  (movies or shows, Asked by, a title's words) and a card per request. OK
+  on a card opens a side panel: Open where a library has it, the server's
+  actions in its order, and Details. Withdraw, Remove and Delete ask first
+  in the panel; Decline with a reason… takes the words on the TV's
+  keyboard. Approve is plain: the server's settings choose the quality
+  profile and folder.
+- **Search's Discover row**, after the libraries' results: up to 20 of
+  TMDB's titles that no library has, with See all; with nothing in the
+  libraries, the line saying so above it. When TMDB can't be searched,
+  the row says why, with Retry where trying again may help.
+- **A library title** from a request shows its stage under its facts,
+  with the download's progress, and a show with seasons left to ask for
+  offers Request more seasons beside its play button.
+- **News**: only what became ready to watch pops up, at the bottom right
+  with the title's poster, Open and Close, once the remote has rested for
+  1.5 s and nothing else holds focus (the open rail, a panel, a dialog,
+  the keyboard, cards being sorted or moved); never over the player or on
+  the requests, and coming back from the player counts as a press. It
+  takes focus and gives it back, and goes by itself after 10 s untouched.
+  The rest shows as the rail's number and in the lists.
+
+On either, an app signed in before requests offers Sign in again on
+Discover (a TV shows a new code to link), which asks for the `requests`
+and `approvals` scopes the server now lists, and Settings → About credits
+TMDB, as its terms ask. The summary follows the event stream; without
+it, the app reads the summary every minute in the foreground and an open
+list every 30 s. Download progress sends no events: a list, a title's
+page, a library title or Discover's requests showing a download are read
+again every 10 s while they show.
 
 ### Offline and downloads
 
 The app needs no internet. On a phone whose Wi-Fi has no internet, traffic
 to the home server still goes over the Wi-Fi (`LocalRoute`).
 
-- **Server out of reach:** screens show what was saved ("Showing what Pley
-  had saved. Reconnecting…") and recover on their own. A home address gets
-  3 s to connect.
+- **Server out of reach:** screens show what was saved, under "Pley is
+  offline" (with Downloads on phones and tablets), and recover on their
+  own. A home address gets 3 s to connect.
 - **Playback that loses the server** plays what it has, then retries for
   90 s.
 - **Downloads** (phones and tablets): Download is under Play, beside each
@@ -241,6 +798,72 @@ to the home server still goes over the Wi-Fi (`LocalRoute`).
   unless Settings → Downloads allows mobile data. Progress made offline is
   sent when the server is back.
 
+### Videos on a USB drive
+
+On Android TV, Google TV and Fire TV, while a USB drive is plugged in, the
+rail has **USB drive** after Now Playing, as in the native Samsung app;
+no other entry makes way for it ([the rail](#tvs-and-fire-tv) scrolls).
+The drive's page
+lists the drive's folders, then its videos (MKV, MP4, M4V, MOV, TS, WebM,
+AVI, MPEG), each sorted as a person sorts names ("Part 2" before "Part
+10"); hidden files and what Windows and macOS leave on a drive aren't
+shown. The page's title is the drive's make and model as it reports them
+("Kingston DataTraveler 3.0") when the app can read them, else the
+system's name for it ("SanDisk USB drive"), else "USB drive"; under it,
+the folder's path ("/Films/2019"), at the drive's top "/" and how full the
+drive is. A folder opens over the one before, with ".." first to go back
+up. A video's line gives its kind, or where it resumes with a bar of how
+far through it is, and its size. No drive, an empty folder and one that
+can't be read say so centred on the page under an icon, as in the native
+Samsung app; with nothing to focus (no ".." line) focus waits on that
+message, showing nothing, so the rail closes over the page and Left opens
+it. A video plays in Pley's player as it is, with no server, also while
+the server is out of reach, the way a download plays: seeking, the
+panels, the sleep timer and the subtitles' look are the same. The page is
+in the rail, which shows once the TV is signed in to a server.
+
+- **The drive** is the first mounted volume of `StorageManager`'s that
+  isn't the device's own, removable ones first (some TV builds don't mark a
+  USB drive removable), at the folder Android 11 and later give, else
+  `/storage/<id>`; with none listed, a readable volume folder under
+  `/storage`. The app follows the media broadcasts and, from Android 11,
+  `StorageManager`'s callback, and looks again as the app or the page
+  opens, for builds that send neither. Its make and model come from the
+  disk `/proc/self/mounts` says it is mounted from, in `/sys`, as the
+  native Samsung app reads them; most TVs keep both from apps, and the
+  volume's own description stands in.
+- **Leave to read it** is asked for as the page opens: `READ_MEDIA_VIDEO`
+  from Android 13, `READ_EXTERNAL_STORAGE` before (Android 10 reads the
+  drive as earlier versions do: `requestLegacyExternalStorage`). Refused,
+  the page says so, with **Open settings**. A build for Google Play
+  declares `READ_MEDIA_VIDEO` in the Play Console as the app's core use
+  (playing the videos on the device); an APK installed by hand needs no
+  declaration.
+- **Tracks and chapters** are Media3's, as it reads the file: the audio it
+  starts with is the one Media3 picks, the file's default where the device
+  plays it. The file's own subtitles show as the player draws them.
+- **Subtitle files beside it**, `.srt` and `.vtt` named after the video and
+  then a language, "forced" and SDH in any order (`Film.en.forced.srt`;
+  `Film 2.srt` is Film 2's), show through the app's own subtitles, and
+  Sync moves them; it doesn't move the file's own tracks. Their text is
+  UTF-16 or UTF-32 when it starts with that byte-order mark (Windows'
+  "Unicode"), UTF-16 without one when its NUL bytes say so, else UTF-8,
+  else Windows' Western code page (Windows-1252), as on LG TVs.
+  From Android 11 the system decides which of a drive's files an app may
+  read: a subtitle file it keeps from Pley isn't offered.
+- **Where it stopped** is kept on the device, by the file's path; past 95 %
+  it was watched, and it starts over next time.
+- **Dolby Vision** profile 7 plays as its HDR10 base layer on the HEVC
+  decoder, as there is no server to convert it; other profiles play as a
+  server's stream of them does.
+- **What doesn't play** says so: a file that only a conversion would play
+  ("a file on a drive has no server to convert it"), a picture that doesn't
+  start in 12 s, and a file that can't be read again or that stands still
+  12 s once its picture has shown (the drive pulled out), as on LG TVs.
+
+What only a server does isn't there: converting, the quality menu, seek
+previews, Find subtitles…, saving track choices and the next episode.
+
 ## Building and testing
 
 ### Modules
@@ -251,7 +874,7 @@ sees only what it builds on.
 | Module | What it holds | Builds on |
 |---|---|---|
 | `:app` | `PleyApplication`, `AppGraph`, the two launchers, Watch Next, the web view clean-up | everything |
-| `:core:common` | Address rules, discovery, local network access, device profile, trace names | nothing |
+| `:core:common` | Address rules, discovery, local network access, device profile, trace names, the language shown (`AppLanguage`), words made outside the interface (`UiText`), the format functions' words (`formatWords`) | model |
 | `:core:model` | The server's requests and answers, events, the capability report (plain Kotlin) | nothing |
 | `:core:auth` | Sign-in: the browser page, the TV's code, tokens | common |
 | `:core:network` | OkHttp clients, `PleyApi`, server events | common, model, auth |
@@ -278,6 +901,33 @@ Rules the build keeps:
 - The only exported components are the two launchers,
   `SignInRedirectActivity`, `MusicService` and `WatchNextImageProvider`
   (`CutoverTest` checks).
+
+### Words
+
+Each module keeps the words people read in
+`src/main/res/values/strings_<area>.xml`, with the same file in
+`values-fr/` and `values-es/`; a count is a `<plurals>` (English one and
+other, French and Spanish one, many and other). Lint fails on a word, or a
+count's form, missing in one of them (`MissingTranslation`,
+`MissingQuantity`, set in `build-logic`).
+
+Words made where nothing is drawn (a ViewModel, an error, the player's
+messages) are a `UiText` (`:core:common`): a resource and its arguments,
+a count's plural, or text as it is (the server's, a name). The interface
+puts them into words (`asString()` in Compose, `resolve` elsewhere), in
+the language shown, so they follow a change of language. An error's words
+are `errorText(error)`: the app's own (`UserFacing.text`) or the server's
+sentence. An activity or a service is made in the language shown
+(`AppLanguage.wrap` in `attachBaseContext`).
+
+`:core:model`'s format functions (durations and time left, relative
+times, episode numbers, counts, sizes and bitrates, a stream's details,
+track languages) take a `FormatWords` last, English when given none:
+`formatWords()` in Compose, `formatWords(resources)` with a screen's or a
+service's resources, `AppLanguage.formatWords()` where a ViewModel builds
+its state. A ViewModel that keeps what they write combines
+`AppLanguage.shown`, so it builds its state again when the language
+changes.
 
 ### Commands
 
@@ -328,7 +978,7 @@ server, start a disposable one:
 ```powershell
 $data = Join-Path $env:TEMP "pley-android-test"
 pley --data-dir $data reset-password admin <password> --admin
-pley --data-dir $data --bind 127.0.0.1:7712 --plex-bind off --no-discovery --no-tray
+pley --data-dir $data --bind 127.0.0.1:7712 --no-discovery --no-tray
 adb reverse tcp:7712 tcp:7712
 ```
 
@@ -341,8 +991,15 @@ Measure on devices (a mid-range phone, a 1 GB Fire TV stick, a Chromecast
 with Google TV HD), never on emulators. `TvStartupBenchmark` starts the TV
 app cold ten times against the demo server built into benchmark builds, and
 records the time to the first frame and to Home fully drawn, with a
-Perfetto trace of each. Run it with adb on one device; a connected Gradle
-task installs the app on every attached device.
+Perfetto trace of each. `TvScrollBenchmark` and `PhoneScrollBenchmark`
+record the frames (FrameTimingMetric: each frame's time on the main thread
+and how late it was shown) while the app scrolls, five times each: on a TV,
+Right held along Home's rows and Down held through a library's grid; on a
+phone, Home's page and a row flung, and a library's grid. Each run starts
+the app cold and goes to where it scrolls before measuring, and each
+benchmark runs only on its kind of device. The demo server has no Live TV,
+so the guide has no benchmark. Run them with adb on one device; a connected
+Gradle task installs the app on every attached device.
 
 ```powershell
 .\gradlew.bat :app:assembleStoreBenchmarkRelease :benchmark:assembleBenchmarkRelease
@@ -350,10 +1007,145 @@ adb -s <device> install -r app\build\outputs\apk\store\benchmarkRelease\app-stor
 adb -s <device> install -r benchmark\build\outputs\apk\benchmarkRelease\benchmark-benchmarkRelease.apk
 adb -s <device> shell am instrument -w -e class app.pley.android.benchmark.TvStartupBenchmark `
   app.pley.android.benchmark/androidx.test.runner.AndroidJUnitRunner
+# The same with TvScrollBenchmark on a TV, PhoneScrollBenchmark on a phone.
 ```
 
 On an emulator, add `-e androidx.benchmark.suppressErrors EMULATOR`. Traces
-are in `/storage/emulated/0/Android/data/app.pley.android.benchmark/cache`.
+are in `/storage/emulated/0/Android/media/app.pley.android.benchmark` (on
+Android 10 and earlier, `.../Android/data/app.pley.android.benchmark/cache`),
+and the run's output names each.
+
+On a device that already has Pley, signed with another key, build both with
+`-Ppley.applicationIdSuffix=.bench`: the benchmarked app installs beside it
+as `com.formandelement.pley.bench`, and the benchmarks (which clear the
+app's data between runs) touch only that one. The benchmarks take the
+suffix too (`app.pley.android.benchmark.bench`, in the commands and the
+traces' folder above), so copies built with different suffixes, and with
+different keys, install side by side. Each copy runs its own demo server
+on port 7740 when it can, and on any free port when another copy holds
+that one; signed in to such a port, a copy finds nothing there once it
+restarts and shows only what it had saved. Stop the other copies
+(`adb shell am force-stop <id>`) before signing one in or measuring it:
+one cached in the background keeps the port, and where Android freezes
+cached apps (Android 12 and later), answers nothing on it.
+
+Any build, release ones too, counts its frames while "Show frame rate" is
+on: Settings → Diagnostics on a TV, Diagnostics on a phone, kept on the
+device. For one run, the launch intent's `frames` extra turns it on (or
+off), also when the app is already open:
+
+```powershell
+adb -s <device> shell am start -n com.formandelement.pley/app.pley.android.TvActivity --ez frames true
+adb -s <device> logcat -s PleyFrames
+```
+
+Each half second something moves, the window shown (its frame metrics,
+read on a thread of its own) gives a line, `fps=58 longest=21.4
+missed=2 screen=Home`: frames drawn a second, the longest frame in
+milliseconds from its vsync to its drawing done, and how many missed
+their deadline (the deadline Android 12 and later give, else the
+display's refresh, which also counts as late a frame that took longer
+than a refresh but still showed in time, its drawing overlapping the
+next one's). The screen is the route shown in the TV's or phone's
+shell, else the activity (`TvPlayerActivity`). A box shows the same, on
+a TV at the top right above the safe area, on a phone at the top centre
+under the status bar: green with none late, amber with a few, red with a
+frame in four or more. Dialogs and popups are windows of their own and
+aren't counted. At rest nothing is drawn, so nothing is told. Off, none
+of it runs.
+
+A key held for a measure has to repeat as a remote's does: the TV app
+takes a key that sends no repeats for half a second past the system's
+first as up. `adb shell input keyevent --duration` sends none, and the
+`input` of many TVs (a Google TV Streamer's, on Android 14) has no such
+option at all: there `--duration 200 22` presses key 200, which the app
+takes as Select, and then 22. Quick presses in a loop on the device
+(`for i in 1 2 3; do input keyevent 22; sleep 0.15; done`) are single
+presses; for a hold, use the benchmarks' journeys. The benchmarks'
+journeys hold keys with the system's repeats (`Steps.hold`), injected
+without UI Automator's accessibility connection, as a remote's come:
+while an accessibility client is connected, Compose describes every
+change of the screen to it.
+
+A key held through a TV grid or along a row brings in a row of tiles
+every 45 ms, and a frame has 16.7 ms. What keeps it smooth:
+
+- Rows are made ahead of the screen between frames (each list's cache
+  window). A held step that finds its row not made yet waits up to two
+  frames for it, the glide under way spread over the wait so the grid
+  goes on moving, rather than make it in the frame: once behind, steps
+  that made their own rows left the frames no time to get ahead again.
+  The key coming up ends the wait, and the step with it, and a press
+  right after goes from where focus is.
+  Each held glide stays a step and a quarter long, so focus never runs
+  further ahead of the grid than the rows on the screen.
+- A tile is few nodes, and costs little to make: its caption is one node
+  drawing its two lines with the platform's paint, its picture draws in
+  its own box, and its placeholder's title is laid out on a thread of its
+  own. While a key holds pictures back, their requests are set aside off
+  the main thread, and go on there when the key comes up.
+- A held Up or Down on a page of rows moves focus to the next row's
+  tile itself (the one nearest across, or the tile that row comes back
+  to), and stays at the page's ends and below a hero. Compose's own
+  focus search lays the focused row out again at every step, and the
+  whole page at its ends, to look for more beyond them.
+- A tile is drawn in its rounded shape, not clipped to it (a clip is a
+  pass of its own for a TV's GPU, for each tile), on a layer of its own
+  that scrolling moves rather than draws again, and its placeholder's
+  gradient is one draw of one small picture shared by every title.
+
+On an emulator, frame times (the benchmarks', the counter's or
+`dumpsys gfxinfo`'s) say little about drawing: the emulator's GPU takes
+about the same time a frame whatever is drawn, so its late frames are the
+GPU's, not the main thread's. A change that draws less shows in HWUI's
+overdraw view (`adb shell setprop debug.hwui.overdraw show`, then
+restart the app) instead. What an emulator does show is compilation: the
+first flings after a start run far slower, with many more janky frames,
+when the app isn't compiled from its profile.
+
+The Baseline and Startup Profiles come from `BaselineProfileGenerator`'s
+journeys against the demo server: a cold start (the Startup Profile, which
+puts what starting runs first in the dex), then, for the Baseline Profile
+only, on a TV, with the
+D-pad, signing in, Who's watching?, Home (a tile's actions, the rows), a
+show's page (its episodes, OK held on one, its rows, the cast, a person),
+search, a library's grid, Collections and a collection, Playlists and a
+playlist, Settings (a choice's panel, the Libraries page), the rail and the
+player; on a phone, by touch, Home, a show's page and its cast, the player,
+a library's grid, search, a playlist and Me's Settings. Each journey runs
+on its own kind of device and is skipped on the other, so generate with a
+TV and a phone (or their emulators, API 33 or later) attached. Each step
+waits for the screen it leads to, and a journey that goes astray fails
+there, saying where. The phone signs in through the browser, or with a
+code where it has none: on a new device with a browser, open it once
+first, past its welcome pages. Besides, `:core:designsystem` and `:ui:tv`
+each name in their own `src/main/baseline-prof.txt` the packages every
+list a held key scrolls goes through (tiles and their artwork, the TV
+kit, the library grid), compiled ahead whatever the journeys reach.
+
+### Recording an animation
+
+A pull request that changes an animation shows it moving
+([DEVELOPMENT.md](DEVELOPMENT.md), "Screenshots for a pull request").
+`scripts/record-android.mjs` records the app as it is installed, any
+build, with adb and FFmpeg: it sets the device's animator duration scale
+to slow its animations as many times as it says (Compose follows the scale
+at once), presses the keys given 300 ms apart, records the screen with
+`screenrecord` for as long as it says, and puts the scale back. The frames,
+cut to an area of the recording in its pixels, are saved in
+`apps/android/build/rec-<time>-<model>`, each named with when it was shown
+at the animation's own speed, for `scripts/mark-animation.mjs`.
+The recording is the display's size, or its override size where
+`adb shell wm size` shows one (a 4K TV's interface is usually 1920×1080);
+the script says the size, and refuses an area that isn't inside it.
+`screenrecord` gives a frame each time the screen changes, up to 60 a
+second, but some devices give five or so a second while an animation plays
+slowly; slowing it more gives more frames of it.
+
+```sh
+bun scripts/record-android.mjs 20 6000 0,0,960,1080 Right                         # 20× slower, 6 s, the left half
+bun scripts/record-android.mjs 40 4000 0,0,1920,1080 Down OK --serial <device>    # adb's serial, where more than one is attached
+```
 
 ## Releases
 
@@ -396,9 +1188,10 @@ base64 -w0 pley-release.keystore   # the ANDROID_KEYSTORE_BASE64 secret
 ## Known limits
 
 - Downloads are on phones and tablets only; TVs stream everything.
-- Requests are on phones and tablets only: Android TV and Fire TV have no
-  Discover, no requests and none of their news, and their code sign-in
-  doesn't ask for the `requests` and `approvals` scopes.
 - No Watch Next row on phones or Fire TV.
 - Live TV has no picture in picture, and the TV's display mode isn't
   matched for live channels.
+- Videos on a USB drive are on TVs only. Their display mode isn't
+  matched, as their frame rate is known only once they play; HDR10+ shows
+  as HDR10 in the player's details; M2TS and MTS files aren't listed, as
+  Media3 doesn't read their 192-byte packets.

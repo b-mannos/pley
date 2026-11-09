@@ -47,6 +47,11 @@ pub struct Inner {
     pub sessions: Arc<Sessions>,
     /// The `sessionKey`s Plex tools know the sessions by.
     pub(crate) plex_session_keys: crate::plex::SessionKeys,
+    /// The Jellyfin clients the user's remotes reach, through their socket.
+    pub(crate) jellyfin_remotes: Arc<crate::jellyfin::Remotes>,
+    /// The devices the user's remotes cast to, while their event streams
+    /// are open.
+    pub(crate) receivers: Arc<crate::api::remote::Receivers>,
     /// When library work runs (see [`crate::schedule`]).
     pub schedule: Arc<Scheduler>,
     pub markers: Arc<MarkerService>,
@@ -56,6 +61,8 @@ pub struct Inner {
     pub two_step: crate::two_step::TwoStep,
     /// What Automatic quality knows of each client's networks.
     pub bandwidth: crate::bandwidth::Bandwidth,
+    /// This server's id and its proofs to apps (see [`crate::identity`]).
+    pub identity: crate::identity::Identity,
     /// Sign-ins of apps in progress (see [`crate::oauth`]).
     pub oauth: crate::oauth::AuthorizationServer,
     /// Where the server listens, and wants to (see [`crate::network`]).
@@ -78,9 +85,9 @@ impl Deref for AppState {
 }
 
 impl AppState {
-    /// This server's stable id (Plex's `machineIdentifier`).
-    pub fn plex_machine_id(&self) -> String {
-        crate::plex::PlexInfo::load(&self.config.data_dir).machine_id
+    /// This server's stable id ([`crate::identity::load_id`]).
+    pub fn server_id(&self) -> String {
+        crate::identity::load_id(&self.config.data_dir)
     }
 
     pub async fn init(mut config: Config) -> anyhow::Result<Self> {
@@ -179,6 +186,7 @@ impl AppState {
         auth.require_two_step(require_two_step);
         // After two-step sign-in, which makes the key it derives its own from.
         let bandwidth = crate::bandwidth::Bandwidth::new(db.clone(), &config.data_dir);
+        let identity = crate::identity::Identity::new(&config.data_dir);
         let users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users").fetch_one(&db.read).await?;
         if users == 0 {
             auth.setup.issue();
@@ -190,12 +198,15 @@ impl AppState {
                 auth,
                 sessions,
                 plex_session_keys: Default::default(),
+                jellyfin_remotes: Default::default(),
+                receivers: Default::default(),
                 schedule,
                 markers,
                 trickplay,
                 live,
                 two_step,
                 bandwidth,
+                identity,
                 oauth,
                 started_at: Instant::now(),
                 stopping,
@@ -282,8 +293,26 @@ impl AppState {
                 tick.tick().await;
                 state.auth.purge_expired().await;
                 state.oauth.sweep();
+                // Ages go up on the first of a month: an hourly look finds
+                // it in the server's time, whatever its time zone does.
+                state.birthday_ages().await;
             }
         });
+    }
+
+    /// Age limits that follow birthdays, kept up with the profiles' ages;
+    /// their devices are told what they may see changed.
+    pub async fn birthday_ages(&self) {
+        match crate::accounts::birthday_ages(&self.db).await {
+            Ok(changed) => {
+                for id in changed {
+                    self.auth.forget_user(id);
+                    self.events.send(crate::events::ServerEvent::OwnLibrariesChanged { user_id: id });
+                    self.events.send(crate::events::ServerEvent::RequestsSettingsChanged { user_id: Some(id) });
+                }
+            }
+            Err(err) => tracing::warn!("updating age limits from birthdays failed: {err}"),
+        }
     }
 
     pub async fn shutdown(&self) {

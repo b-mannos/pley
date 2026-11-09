@@ -13,11 +13,27 @@
         <!-- The current access token, for the HTTP agents of pictures and video. -->
         <field id="accessToken" type="string" />
         <field id="userAgent" type="string" />
+        <!-- This Roku as its players name it to the server: its client_id,
+             and the name its owner gave it ("" for none, Remote.brs's
+             remoteDeviceName). The event stream says it takes casts by
+             them. -->
+        <field id="playerId" type="string" />
+        <field id="deviceName" type="string" />
         <field id="appVersion" type="string" />
         <field id="device" type="string" />
         <!-- The profile signed in (GET /api/auth/me), once the server said:
              0 and "" until then. -->
         <field id="profileId" type="integer" />
         <field id="profileName" type="string" />
+        <!-- The language Pley is in for the account (GET /api/auth/me's
+             language, "" for Automatic), once the server said for the
+             profile signed in (accountHeard); and the server's own (GET
+             /api/server's language, "" for a Pley from before languages),
+             once it answered (serverHeard). The scene picks the language
+             shown from them (I18n.brs's i18nShown). -->
+        <field id="accountLanguage" type="string" />
+        <field id="accountHeard" type="boolean" />
+        <field id="serverLanguage" type="string" />
+        <field id="serverHeard" type="boolean" />
     </interface>
 </component>

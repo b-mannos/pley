@@ -1,6 +1,7 @@
 import { useEffect, useEffectEvent, useId, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/cn";
 import { Button, IconButton } from "./ui";
 
@@ -13,6 +14,11 @@ export interface ModalProps {
   size?: "sm" | "md" | "lg" | "xl";
   /** Prevent closing via backdrop / Escape (e.g. while saving). */
   locked?: boolean;
+  /**
+   * Where it sits on wider screens: centred, or near the top, for a dialog
+   * whose height changes (tabs), so that its top and tabs stay put.
+   */
+  align?: "center" | "top";
 }
 
 /** Keeps Tab and Shift+Tab inside `container`: past its last control, back to its first. */
@@ -32,12 +38,16 @@ export function keepTabInside(e: KeyboardEvent, container: HTMLElement) {
   }
 }
 
-export function Modal({ open, onClose, title, children, footer, size = "md", locked }: ModalProps) {
+export function Modal({ open, onClose, title, children, footer, size = "md", locked, align = "center" }: ModalProps) {
+  const { t } = useTranslation();
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   /** Escape closes the dialog unless it is locked (a request in flight). */
   const onEscape = useEffectEvent((e: KeyboardEvent) => {
     if (locked) return;
+    // An open list in a field (a combobox's) closes first, on its own Escape.
+    const target = e.target as HTMLElement | null;
+    if (target?.getAttribute?.("role") === "combobox" && target.getAttribute("aria-expanded") === "true") return;
     e.stopPropagation();
     onClose();
   });
@@ -70,7 +80,12 @@ export function Modal({ open, onClose, title, children, footer, size = "md", loc
   if (!open) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-6">
+    <div
+      className={cn(
+        "fixed inset-0 z-50 flex items-end justify-center p-0 sm:p-6",
+        align === "top" ? "sm:items-start sm:pt-[6vh]" : "sm:items-center",
+      )}
+    >
       <div
         className="absolute inset-0 animate-fade-in bg-black/70 backdrop-blur-sm"
         onClick={() => {
@@ -85,6 +100,7 @@ export function Modal({ open, onClose, title, children, footer, size = "md", loc
         tabIndex={-1}
         className={cn(
           "relative flex max-h-[92vh] w-full animate-pop-in flex-col overflow-hidden rounded-t-xl border border-border bg-surface shadow-2xl shadow-black/60 outline-none sm:rounded-xl",
+          align === "top" && "sm:max-h-[88vh]",
           size === "sm" && "sm:max-w-sm",
           size === "md" && "sm:max-w-lg",
           size === "lg" && "sm:max-w-2xl",
@@ -96,7 +112,7 @@ export function Modal({ open, onClose, title, children, footer, size = "md", loc
           <h2 id={titleId} className="min-w-0 break-words text-base font-semibold">
             {title}
           </h2>
-          <IconButton label="Close" size="sm" onClick={onClose} disabled={locked}>
+          <IconButton label={t("actions.close")} size="sm" onClick={onClose} disabled={locked}>
             <X className="size-4" />
           </IconButton>
         </div>
@@ -114,7 +130,7 @@ export function ConfirmModal({
   onConfirm,
   title,
   message,
-  confirmLabel = "Confirm",
+  confirmLabel,
   danger,
   loading,
 }: {
@@ -127,6 +143,7 @@ export function ConfirmModal({
   danger?: boolean;
   loading?: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <Modal
       open={open}
@@ -137,10 +154,10 @@ export function ConfirmModal({
       footer={
         <>
           <Button variant="ghost" onClick={onClose} disabled={loading}>
-            Cancel
+            {t("actions.cancel")}
           </Button>
           <Button variant={danger ? "danger" : "primary"} onClick={onConfirm} loading={loading} data-autofocus>
-            {confirmLabel}
+            {confirmLabel ?? t("actions.confirm")}
           </Button>
         </>
       }

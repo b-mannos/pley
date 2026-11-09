@@ -32,9 +32,15 @@
     <string name="tv_livetv_no_guide">No guide for this channel</string>
     <string name="tv_livetv_no_info">No information for this time</string>
     <string name="tv_livetv_next">Next %1$s · %2$s</string>
-    <string name="tv_livetv_span">%1$s – %2$s</string>
-    <string name="tv_livetv_minutes_left">%1$d min left</string>
-    <string name="tv_livetv_hours_left">%1$d h left</string>
+    <string name="tv_livetv_span" translatable="false">%1$s – %2$s</string>
+    <plurals name="tv_livetv_minutes_left">
+        <item quantity="one">%1$d min left</item>
+        <item quantity="other">%1$d min left</item>
+    </plurals>
+    <plurals name="tv_livetv_hours_left">
+        <item quantity="one">%1$d h left</item>
+        <item quantity="other">%1$d h left</item>
+    </plurals>
     <string name="tv_livetv_hours_minutes_left">%1$d h %2$d min left</string>
     <string name="tv_livetv_today">Today</string>
     <string name="tv_livetv_tomorrow">Tomorrow</string>
@@ -50,6 +56,8 @@
     <string name="tv_livetv_favorite_remove">Remove from favourites</string>
     <string name="tv_livetv_no_description">The guide says nothing more of it.</string>
     <string name="tv_livetv_ended">It has ended.</string>
+    <string name="tv_livetv_episode">S%1$d E%2$d</string>
+    <string name="tv_livetv_episode_only">E%1$d</string>
     <string name="tv_livetv_favorite_failed">The favourite wasn\'t saved: %1$s</string>
 
     <!-- The live player (apps/web/src/player/live/LivePlayerPage.tsx). -->
@@ -72,12 +80,13 @@
     <string name="tv_live_player_live">Live</string>
     <string name="tv_live_player_radio">Sound only</string>
     <string name="tv_live_player_no_channel">No channel %1$s</string>
-    <string name="tv_live_player_hint">▲▼ change channel · OK for more</string>
+    <string name="tv_live_player_hint">▲▼ change channel · OK for channels · hold OK for more</string>
     <string name="tv_live_player_retry">Try again</string>
     <string name="tv_live_player_other_channels">Other channels</string>
     <string name="tv_live_player_back_to_guide">Back to the guide</string>
     <string name="tv_live_player_busy">All connections are in use</string>
-    <string name="tv_live_player_stopped">Watching stopped</string>
+    <string name="tv_live_player_stopped">Live TV stopped</string>
+    <string name="tv_live_player_watch_again">Watch again</string>
     <string name="tv_live_player_missing">This channel isn\'t here any more</string>
     <string name="tv_live_player_not_allowed">Live TV isn\'t open to this profile</string>
     <string name="tv_live_player_unavailable">%1$s isn\'t playing</string>

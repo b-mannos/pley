@@ -1,20 +1,20 @@
 package app.pley.android.ui.phone.library
 
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -23,9 +23,11 @@ import app.pley.android.data.GridDensity
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcons
+import app.pley.android.designsystem.text.formatWords
 import app.pley.android.designsystem.tile.ArtworkTileModel
 import app.pley.android.model.LibraryKind
 import app.pley.android.model.SortOrder
+import app.pley.android.model.format.dynamicRangeFilterLabel
 import app.pley.android.screens.library.LibraryUiState
 import app.pley.android.screens.library.LibraryViewModel
 import app.pley.android.ui.phone.R
@@ -34,8 +36,9 @@ import app.pley.android.ui.phone.kit.SegmentedControl
 
 /**
  * The toolbar's sheets (design spec §3.4): Sort (the sorts, the order,
- * which titles to show, the card size), Genre and Year (the library's,
- * from its filters). The choice in force has a check.
+ * which titles to show, the card size), Genre, Year, Resolution and
+ * Dynamic range (the library's, from its filters). The choice in force
+ * has a check.
  */
 @Composable
 internal fun LibrarySheetHost(
@@ -111,14 +114,39 @@ internal fun LibrarySheetHost(
                 },
             )
         }
+        LibrarySheet.Resolution -> PleySheet(onDismiss = onDismiss, title = stringResource(R.string.library_resolution)) {
+            Choices(
+                all = stringResource(R.string.library_all_resolutions),
+                values = state.resolutions,
+                selected = params.resolution,
+                label = { it.label },
+                onSelect = {
+                    vm.resolution(it)
+                    onDismiss()
+                },
+            )
+        }
+        LibrarySheet.DynamicRange -> PleySheet(onDismiss = onDismiss, title = stringResource(R.string.library_dynamic_range)) {
+            val words = formatWords()
+            Choices(
+                all = stringResource(R.string.library_all_dynamic_ranges),
+                values = state.dynamicRanges,
+                selected = params.dynamicRange,
+                label = { dynamicRangeFilterLabel(it, words) },
+                onSelect = {
+                    vm.dynamicRange(it)
+                    onDismiss()
+                },
+            )
+        }
     }
 }
 
 @Composable
 private fun <T : Any> Choices(all: String, values: List<T>, selected: T?, label: (T) -> String, onSelect: (T?) -> Unit) {
     LazyColumn(Modifier.fillMaxWidth().heightIn(max = 520.dp)) {
-        item(key = "all") { ChoiceRow(all, selected = selected == null, onClick = { onSelect(null) }) }
-        items(values, key = { it.toString() }) { value ->
+        item(key = "all", contentType = "choice") { ChoiceRow(all, selected = selected == null, onClick = { onSelect(null) }) }
+        items(values, key = { it.toString() }, contentType = { "choice" }) { value ->
             ChoiceRow(label(value), selected = value == selected, onClick = { onSelect(value) })
         }
     }

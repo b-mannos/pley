@@ -1,8 +1,15 @@
 import type { ReactNode } from "react";
+import { useOptionalAuth } from "@/auth";
 import { Logo } from "@/components/Logo";
+import { LanguagePicker } from "@/i18n/LanguagePicker";
 
-/** Centered card used by the login and setup screens. */
+/**
+ * Centered card used by the login and setup screens. Without an account
+ * signed in, a small globe under the card picks this device's
+ * language: once signed in, the account's comes first, and Account changes it.
+ */
 export function AuthLayout({ title, subtitle, children }: { title: string; subtitle?: ReactNode; children: ReactNode }) {
+  const signedIn = useOptionalAuth() !== null;
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-12">
       <div
@@ -22,6 +29,11 @@ export function AuthLayout({ title, subtitle, children }: { title: string; subti
           {subtitle ? <p className="mt-1.5 text-sm text-muted">{subtitle}</p> : null}
           <div className="mt-6">{children}</div>
         </div>
+        {signedIn ? null : (
+          <div className="mt-4 flex justify-center">
+            <LanguagePicker />
+          </div>
+        )}
       </div>
     </div>
   );

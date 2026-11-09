@@ -6,10 +6,14 @@
 ' says plainly why when it can't), then given to the Video node as live
 ' content, from its live edge. Live is live: the Video node's own controls
 ' are off, and nothing pauses, rewinds or skips. Up and down
-' change channel within the category the player was opened from, a page
-' of it at a time (GET /api/live/browse?around=), round its ends. Leaving
+' change channel within the category the player was opened from (or the
+' one a channel was last chosen in from the list, which can list another
+' category or a search), a page of it at a time (GET
+' /api/live/browse?around=), round its ends. Leaving
 ' sends DELETE /api/live/sessions/{session}, so the connection goes at
-' once, and Live TV opens back at the channel watched.
+' once, and Live TV opens back at the channel watched. The user's remote,
+' on another device, changes channel as up and down do (Remote.brs), and
+' watching stopped from elsewhere stops here, saying who stopped it.
 
 sub init()
     m.video = m.top.findNode("video")
@@ -35,6 +39,9 @@ sub init()
     m.listTitle = m.top.findNode("listTitle")
     m.listRange = m.top.findNode("listRange")
     m.channelList = m.top.findNode("channelList")
+    m.categoryList = m.top.findNode("categoryList")
+    m.listHint = m.top.findNode("listHint")
+    m.listHint.text = listHintText()
     m.notice = m.top.findNode("notice")
     m.noticeTitle = m.top.findNode("noticeTitle")
     m.noticeText = m.top.findNode("noticeText")
@@ -46,6 +53,7 @@ sub init()
     m.clock = m.top.findNode("clock")
     m.pictureTimer = m.top.findNode("pictureTimer")
     m.toastTimer = m.top.findNode("toastTimer")
+    m.retryTimer = m.top.findNode("retryTimer")
     m.stallTimer = m.top.findNode("stallTimer")
     m.stallTimer.observeField("fire", "onStall")
     ' Waiting for data since the timer started (the spinner shows after it).
@@ -55,19 +63,54 @@ sub init()
         spinner.poster.width = 64
         spinner.poster.height = 64
     end for
-    m.twelve = CreateObject("roDeviceInfo").GetClockFormat() <> "24h"
+    ' The Live chip: the badge's word, in capitals.
+    m.top.findNode("liveMark").text = UCase(t("livetv.program.live"))
+    m.twelve = fmtTwelveHour()
     m.started = false
     ' The channel shown (Live.brs's liveChannel), and the one up and down
     ' lead to before it is tuned.
     m.channel = invalid
     m.zapTo = invalid
-    ' The category the player was opened from, and the page of it held
-    ' ({ total, offset, channels }; up and down go through it, the list
-    ' shows it); a page asked for up or down, to step into as it comes.
+    ' Channels picked (the list, Watch again; Live.brs's liveTunePicks), so
+    ' a step waiting for a page can tell one was chosen meanwhile, the same
+    ' channel again too.
+    m.picks = 0
+    ' The category up and down go through (the one the player was opened
+    ' from, or the one a channel was last chosen in from the list), the
+    ' page of it held ({ total, offset, channels }) and its rows, and the
+    ' asking an answer must be for.
     m.category = "all"
-    m.categoryName = "All channels"
+    m.categoryName = t("livetv.categories.all")
     m.page = invalid
+    m.pageContent = invalid
     m.pageAsked = 0
+    m.asks = 0
+    ' What the list shows: that category, unless another was chosen in it
+    ' or a search made there, with its page, the asking it waits for, and
+    ' whether it shows a search made there, with the category before it.
+    m.listCategory = "all"
+    m.listName = m.categoryName
+    m.listPage = invalid
+    m.listAsked = 0
+    m.listSearched = false
+    m.listBefore = "all"
+    ' Choosing another category in the list: the groups (GET
+    ' /api/live/groups, once), the entries listed, the one in focus, the
+    ' region open.
+    m.summary = invalid
+    m.groups = []
+    m.railEntries = []
+    m.railFocused = 0
+    m.open = ""
+    ' A page that failed ({ offset, around }) and when (m.span's ms): asked
+    ' for again once 10 s have passed, as the list moves or Up or Down is
+    ' pressed.
+    m.failedPage = invalid
+    m.failedAt = -1
+    m.failedCategory = ""
+    m.span = CreateObject("roTimespan")
+    ' When the channel playing was last asked for again (m.span's ms).
+    m.refreshedAt = -1
     ' Which tuning the answers belong to, the watch asked for last (until
     ' it answers), the session and its playlist.
     m.attempt = 0
@@ -75,22 +118,34 @@ sub init()
     m.sessionId = ""
     m.playlist = ""
     m.played = false
-    ' When the stream was tuned again after breaking (playerMayRestart).
-    m.restarts = []
-    m.span = CreateObject("roTimespan")
+    ' The session of the channel tuned, kept after it failed (until another
+    ' tuning), so a stop from elsewhere that comes after its 410 still says
+    ' who stopped it.
+    m.watched = ""
+    ' The times the channel was tuned again after failing, since it was
+    ' tuned or Try again was chosen (liveRetryDelay), and the tuning the
+    ' retry waiting belongs to.
+    m.retries = 0
+    m.retryAttempt = 0
     m.trouble = invalid
     m.video.notificationInterval = 1
     m.video.observeField("state", "onState")
     m.noticeButtons.observeField("buttonSelected", "onNoticeButton")
     m.channelList.observeField("itemSelected", "onListSelected")
+    m.categoryList.observeField("itemSelected", "onCategorySelected")
+    m.categoryList.observeField("itemFocused", "onCategoryFocused")
     m.bannerTimer.observeField("fire", "onBannerTimer")
     m.zapTimer.observeField("fire", "onZapTimer")
     m.clock.observeField("fire", "onClock")
     m.pictureTimer.observeField("fire", "onPictureTimer")
     m.toastTimer.observeField("fire", "onToastTimer")
+    m.retryTimer.observeField("fire", "onRetryTimer")
     m.cardLogo.observeField("loadStatus", "onLogos")
     m.bannerLogo.observeField("loadStatus", "onLogos")
     m.top.observeField("active", "onActive")
+    m.top.observeField("liveTakenOver", "onTakenOver")
+    m.top.observeField("serverStopped", "onServerStopped")
+    m.top.observeField("playerCommand", "onPlayerCommand")
 end sub
 
 sub onActive()
@@ -113,12 +168,10 @@ sub onActive()
     if GetInterface(channel, "ifAssociativeArray") = invalid then return
     m.categoryName = httpString(params.categoryName)
     if m.categoryName = "" then m.categoryName = liveCategoryName(m.category, [])
+    m.listCategory = m.category
+    m.listName = m.categoryName
     m.listTitle.text = m.categoryName
-    ' Recently watched changes with every channel watched: its order is
-    ' the one it had as the player opened.
-    around = channel.id
-    if m.category = "recent" then around = 0
-    askPage(0, around, "")
+    askPage(m.category, 0, aroundIn(m.category, channel), "")
     tune(channel)
 end sub
 
@@ -132,39 +185,85 @@ end function
 
 ' --- The category's channels ---
 
-' A page of the category (from offset, or around a channel), as the list
-' shows it; then pick "first" or "last" of it is the channel up or down
-' leads to.
-sub askPage(offset as integer, around as integer, pick as string)
-    m.pageAsked = m.pageAsked + 1
-    uiRequest({ op: "livePage", kind: "list", category: m.category, offset: offset, limit: livePageSize(), around: around, asked: m.pageAsked, pick: pick }, "onPage")
+' Where a category's page is asked around: the channel. Recently watched
+' changes with every channel watched: its order is the one it had as it
+' was asked for, from its top.
+function aroundIn(category as string, channel as dynamic) as integer
+    if channel = invalid or category = "recent" then return 0
+    return channel.id
+end function
+
+' A page of a category (from offset, or around a channel): for up and
+' down when it is the category they go through (then pick "first" or
+' "last" of it is the channel they lead to), for the list when it is the
+' one the list shows (pick "top" or "bottom": where its focus goes).
+' Within 10 s of a page of the category that failed, nothing more of it is
+' asked: the other categories, the list's or up and down's, go on. from:
+' the channel up or down stepped from, for a pick.
+sub askPage(category as string, offset as integer, around as integer, pick as string, from = 0 as integer)
+    if category = m.failedCategory and not liveMayAskAgain(m.failedAt, m.span.TotalMilliseconds()) then return
+    m.asks = m.asks + 1
+    if category = m.category then m.pageAsked = m.asks
+    if category = m.listCategory then m.listAsked = m.asks
+    uiRequest({ op: "livePage", kind: "list", category: category, offset: offset, limit: livePageSize(), around: around, asked: m.asks, pick: pick, from: from, picks: m.picks }, "onPage")
 end sub
 
 sub onPage(event as object)
     request = event.getRoSGNode()
     spec = request.spec
-    if spec.asked <> m.pageAsked then return
+    zapping = spec.category = m.category and spec.asked = m.pageAsked
+    listed = spec.category = m.listCategory and spec.asked = m.listAsked
+    if not zapping and not listed then return
     answer = event.getData()
-    if not answer.ok then return
-    m.page = answer.data
+    if not answer.ok
+        ' Watching goes on; the list says why it is empty.
+        m.failedPage = { category: spec.category, offset: spec.offset, around: spec.around }
+        m.failedAt = m.span.TotalMilliseconds()
+        m.failedCategory = spec.category
+        if listed and m.listPage = invalid then m.listRange.text = answer.message
+        return
+    end if
+    if spec.category = m.failedCategory
+        m.failedPage = invalid
+        m.failedAt = -1
+        m.failedCategory = ""
+    end if
+    page = answer.data
     content = request.content
     if content = invalid then content = CreateObject("roSGNode", "ContentNode")
-    m.channelList.content = content
-    markCurrent()
-    m.listRange.text = liveRange(m.page.offset, m.page.channels.Count(), m.page.total)
-    ' The channel shown, with what's on now.
-    if m.channel <> invalid
-        at = liveIndexOf(m.page.channels, m.channel.id)
+    if zapping
+        m.page = page
+        m.pageContent = content
+        ' The channel shown, with what's on now.
+        at = -1
+        if m.channel <> invalid then at = liveIndexOf(page.channels, m.channel.id)
         if at >= 0
-            m.channel = m.page.channels[at]
-            m.channelList.jumpToItem = at
+            m.channel = page.channels[at]
             if m.banner.visible then showBanner(false)
         end if
+        ' The step waited for this page: it goes on only from where it
+        ' started, and while watching goes on, so it can't undo a channel
+        ' chosen meanwhile.
+        if stepStillFrom(spec.from, spec.picks)
+            if spec.pick = "first" and page.channels.Count() > 0 then zapTo(page.channels[0])
+            if spec.pick = "last" and page.channels.Count() > 0 then zapTo(page.channels[page.channels.Count() - 1])
+        end if
     end if
-    if spec.pick = "first" and m.page.channels.Count() > 0 then zapTo(m.page.channels[0])
-    if spec.pick = "last" and m.page.channels.Count() > 0 then zapTo(m.page.channels[m.page.channels.Count() - 1])
-    if spec.pick = "top" then m.channelList.jumpToItem = 0
-    if spec.pick = "bottom" then m.channelList.jumpToItem = content.getChildCount() - 1
+    if listed then showListPage(page, content, spec.pick)
+end sub
+
+' A page in the list, its focus on the channel playing when it is there,
+' else at its top, or at its top or bottom as pick says (paged to).
+sub showListPage(page as object, content as object, pick as string)
+    m.listPage = page
+    m.channelList.content = content
+    markCurrent()
+    if not m.categoryList.visible then m.listRange.text = liveRange(page.offset, page.channels.Count(), page.total)
+    at = -1
+    if m.channel <> invalid then at = liveIndexOf(page.channels, m.channel.id)
+    if at < 0 or pick = "top" then at = 0
+    if pick = "bottom" then at = content.getChildCount() - 1
+    if at >= 0 and at < content.getChildCount() then m.channelList.jumpToItem = at
 end sub
 
 ' The channel playing stands out in the list.
@@ -178,17 +277,33 @@ sub markCurrent()
     end for
 end sub
 
+' The list opens on the category up and down go through, at the channel
+' playing, as on Android: another chosen in it last time, or a search,
+' isn't kept.
 sub openList()
     hideBanner()
+    m.listSearched = false
+    if m.listCategory <> m.category
+        m.listCategory = m.category
+        m.listAsked = m.pageAsked
+        m.listPage = invalid
+        m.channelList.content = invalid
+        m.listRange.text = ""
+        if m.page <> invalid then showListPage(m.page, m.pageContent, "")
+    end if
+    m.listName = m.categoryName
+    m.listTitle.text = m.listName
+    if m.page = invalid then askAgain(m.category)
     m.list.visible = true
-    if m.channel <> invalid and m.page <> invalid
-        at = liveIndexOf(m.page.channels, m.channel.id)
+    if m.channel <> invalid and m.listPage <> invalid
+        at = liveIndexOf(m.listPage.channels, m.channel.id)
         if at >= 0 then m.channelList.jumpToItem = at
     end if
     m.channelList.setFocus(true)
 end sub
 
 sub closeList()
+    closeCategories()
     m.list.visible = false
     ' The list gives the focus up: its parent taking it may not.
     m.channelList.setFocus(false)
@@ -199,57 +314,254 @@ sub closeList()
     end if
 end sub
 
+' Whether channel up or down from the channel with id may still go on
+' (Live.brs's liveStepGoesOn has the rule).
+function stepStillFrom(id as dynamic, picks as dynamic) as boolean
+    from = m.zapTo
+    if from = invalid then from = m.channel
+    shownId = invalid
+    if from <> invalid then shownId = from.id
+    return liveStepGoesOn(id, picks, m.picks, shownId, m.trouble <> invalid, m.top.active)
+end function
+
+' The page that failed, when it was category's, asked for again.
+sub askAgain(category as string)
+    if m.failedPage <> invalid and m.failedPage.category = category then askPage(category, m.failedPage.offset, m.failedPage.around, "")
+end sub
+
 ' Past the list's ends, the page after it (or before), round the ends of
-' the category.
+' its category.
 sub listPage(by as integer)
-    if m.page = invalid or m.page.total <= m.page.channels.Count() then return
+    page = m.listPage
+    if page = invalid or page.total <= page.channels.Count() then return
     size = livePageSize()
-    pages = Int((m.page.total + size - 1) / size)
-    pageNo = Int(m.page.offset / size)
+    pages = Int((page.total + size - 1) / size)
+    pageNo = Int(page.offset / size)
     pick = "top"
     if by < 0 then pick = "bottom"
-    askPage(((pageNo + by + pages) mod pages) * size, 0, pick)
+    askPage(m.listCategory, ((pageNo + by + pages) mod pages) * size, 0, pick)
 end sub
 
 sub onListSelected(event as object)
-    if m.page = invalid then return
+    page = m.listPage
+    if page = invalid then return
     at = event.getData()
-    if at < 0 or at >= m.page.channels.Count() then return
-    channel = m.page.channels[at]
+    if at < 0 or at >= page.channels.Count() then return
+    channel = page.channels[at]
+    ' Chosen in another category (or a search): up and down go through
+    ' that one from now on.
+    if m.listCategory <> m.category
+        m.category = m.listCategory
+        m.categoryName = m.listName
+        m.page = page
+        m.pageContent = m.channelList.content
+        m.pageAsked = m.listAsked
+    end if
     closeList()
     if m.channel <> invalid and channel.id = m.channel.id and not m.notice.visible then return
     tune(channel)
 end sub
 
+' --- Another category, or a search, in the list ---
+
+' What a category is called in the list.
+function listNameOf(category as string) as string
+    if category = m.category then return m.categoryName
+    return liveCategoryName(category, m.groups)
+end function
+
+' The list shows category's channels, from the channel playing when it is
+' among them; up and down keep theirs until a channel is chosen there.
+sub showListCategory(category as string)
+    m.listSearched = false
+    m.listName = listNameOf(category)
+    closeCategories()
+    m.listTitle.text = m.listName
+    if category = m.listCategory and m.listPage <> invalid then return
+    m.listCategory = category
+    m.listPage = invalid
+    m.channelList.content = invalid
+    if category = m.category and m.page <> invalid
+        m.listAsked = m.pageAsked
+        showListPage(m.page, m.pageContent, "")
+        return
+    end if
+    m.listRange.text = t("common.states.loading")
+    ' Chosen: asked for at once, whatever failed before.
+    m.failedAt = -1
+    m.failedCategory = ""
+    askPage(category, 0, aroundIn(category, m.channel), "")
+end sub
+
+' Left in the list: the categories as Live TV's rail lists them (GET
+' /api/live/groups, the first time), the one the list shows in focus.
+sub openCategories()
+    m.channelList.visible = false
+    m.categoryList.visible = true
+    m.listTitle.text = t("livetv.categories.title")
+    m.listRange.text = ""
+    m.listHint.text = t("livetv.player.categoriesHint")
+    m.categoryList.setFocus(true)
+    if m.summary = invalid
+        m.listRange.text = t("common.states.loading")
+        uiRequest({ method: "GET", path: "/api/live/groups" }, "onGroups")
+        return
+    end if
+    buildCategories(false)
+end sub
+
+sub onGroups(event as object)
+    answer = event.getData()
+    if not answer.ok
+        if m.categoryList.visible then m.listRange.text = answer.message
+        return
+    end if
+    m.summary = liveSummary(answer.data)
+    m.groups = liveGroups(answer.data)
+    region = liveRegionOf(m.listCategory, m.groups)
+    if region <> "" then m.open = region
+    if m.categoryList.visible then buildCategories(false)
+end sub
+
+' The categories, focus on the one the list shows (or, with keep, on the
+' one in focus).
+sub buildCategories(keep as boolean)
+    m.listRange.text = ""
+    wanted = m.listCategory
+    at = m.categoryList.itemFocused
+    if keep and at >= 0 and at < m.railEntries.Count() then wanted = m.railEntries[at].key
+    m.railEntries = liveRail(m.summary, m.groups, m.open, "")
+    at = 0
+    for i = 0 to m.railEntries.Count() - 1
+        if m.railEntries[i].kind <> "heading" and m.railEntries[i].key = wanted then at = i
+    end for
+    m.railFocused = at
+    m.categoryList.content = nodesContent(liveRailItems(m.railEntries, m.open, m.listCategory))
+    m.categoryList.jumpToItem = at
+end sub
+
+sub onCategoryFocused(event as object)
+    at = event.getData()
+    target = liveRailPast(m.railEntries, at, m.railFocused)
+    m.railFocused = target
+    if target <> at then m.categoryList.jumpToItem = target
+end sub
+
+' OK on a category shows its channels; on a region, its groups open (and
+' another's close) or close.
+sub onCategorySelected(event as object)
+    at = event.getData()
+    if at < 0 or at >= m.railEntries.Count() then return
+    entry = m.railEntries[at]
+    if entry.kind = "heading" then return
+    if entry.kind = "region"
+        if m.open = entry.key
+            m.open = ""
+        else
+            m.open = entry.key
+        end if
+        buildCategories(true)
+        return
+    end if
+    showListCategory(entry.key)
+end sub
+
+' Back from the categories: the list's channels again.
+sub closeCategories()
+    if not m.categoryList.visible then return
+    m.categoryList.visible = false
+    m.channelList.visible = true
+    m.listTitle.text = m.listName
+    m.listHint.text = listHintText()
+    m.listRange.text = ""
+    if m.listPage <> invalid then m.listRange.text = liveRange(m.listPage.offset, m.listPage.channels.Count(), m.listPage.total)
+    if m.list.visible then m.channelList.setFocus(true)
+end sub
+
+function listHintText() as string
+    return t("livetv.player.listHint") + Chr(10) + t("livetv.player.listMoreHint")
+end function
+
+' Replay in the list: Roku's keyboard, every channel whose name, number or
+' programme on now has the words in it.
+sub askListSearch()
+    dialog = CreateObject("roSGNode", "StandardKeyboardDialog")
+    dialog.title = t("livetv.search.channelsTitle")
+    dialog.message = [t("livetv.search.channelsPrompt")]
+    if Left(m.listCategory, 7) = "search:" then dialog.text = Mid(m.listCategory, 8)
+    dialog.buttons = [t("livetv.search.search"), t("common.actions.cancel")]
+    dialog.observeField("buttonSelected", "onListSearch")
+    m.top.getScene().dialog = dialog
+end sub
+
+' The first button searches, the other cancels.
+sub onListSearch(event as object)
+    dialog = m.top.getScene().dialog
+    text = ""
+    if dialog <> invalid then text = dialog.text.Trim()
+    uiCloseDialog()
+    if event.getData() <> 0 then return
+    query = httpSentence(text)
+    if query = "" then return
+    ' The category shown as the first of the searches made here began.
+    if not m.listSearched then m.listBefore = m.listCategory
+    showListCategory("search:" + query)
+    m.listSearched = true
+end sub
+
 ' The Options key in the list: the channel in focus in or out of the
-' favourites (PUT or DELETE /api/live/channels/{id}/favorite).
-sub toggleFavorite()
-    if m.page = invalid then return
+' favourites.
+sub toggleListed()
+    if m.listPage = invalid then return
     at = m.channelList.itemFocused
-    if at < 0 or at >= m.page.channels.Count() then return
-    channel = m.page.channels[at]
+    if at < 0 or at >= m.listPage.channels.Count() then return
+    toggleFavorite(m.listPage.channels[at])
+end sub
+
+' A channel in or out of the favourites (PUT or DELETE
+' /api/live/channels/{id}/favorite): its star changes at once wherever it
+' shows, and goes back if the server refuses.
+sub toggleFavorite(channel as object)
     favorite = not channel.favorite
+    markFavorite(channel.id, favorite)
     method = "DELETE"
     if favorite then method = "PUT"
-    channel.favorite = favorite
-    item = m.channelList.content.getChild(at)
-    if item <> invalid then item.favorite = favorite
-    uiRequest({ method: method, path: "/api/live/channels/" + urlValue(channel.id) + "/favorite", favorite: favorite, name: channel.name }, "onFavorite")
+    uiRequest({ method: method, path: "/api/live/channels/" + urlValue(channel.id) + "/favorite", channelId: channel.id, favorite: favorite, name: channel.name }, "onFavorite")
+end sub
+
+' The channel's star: on the channel playing (or the one Up or Down leads
+' to), in the pages held and their rows, and on the banner.
+sub markFavorite(id as integer, favorite as boolean)
+    for each channel in [m.channel, m.zapTo]
+        if channel <> invalid and channel.id = id then channel.favorite = favorite
+    end for
+    for each held in [{ page: m.page, rows: m.pageContent }, { page: m.listPage, rows: m.channelList.content }]
+        if held.page <> invalid
+            at = liveIndexOf(held.page.channels, id)
+            if at >= 0
+                held.page.channels[at].favorite = favorite
+                item = invalid
+                if held.rows <> invalid then item = held.rows.getChild(at)
+                if item <> invalid then item.favorite = favorite
+            end if
+        end if
+    end for
+    if m.banner.visible then showBanner(false)
 end sub
 
 sub onFavorite(event as object)
     answer = event.getData()
     spec = event.getRoSGNode().spec
     if not answer.ok
+        markFavorite(spec.channelId, not spec.favorite)
         if not uiFailed(answer) then showToast(answer.message)
         return
     end if
     if spec.favorite
-        showToast(spec.name + " is in your favourites")
+        showToast(t("livetv.favourites.added", { name: spec.name }))
     else
-        showToast(spec.name + " is out of your favourites")
+        showToast(t("livetv.favourites.removed", { name: spec.name }))
     end if
-    if m.channel <> invalid and m.channel.name = spec.name then m.channel.favorite = spec.favorite
 end sub
 
 ' --- Tuning ---
@@ -259,6 +571,7 @@ end sub
 sub zap(by as integer)
     from = m.zapTo
     if from = invalid then from = m.channel
+    if m.page = invalid then askAgain(m.category)
     if from = invalid or m.page = invalid then return
     move = liveZap(m.page, from.id, by)
     if move = invalid then return
@@ -268,7 +581,7 @@ sub zap(by as integer)
     end if
     which = "first"
     if move.last then which = "last"
-    askPage(move.offset, 0, which)
+    askPage(m.category, move.offset, 0, which, from.id)
 end sub
 
 ' The channel's logo and name show at once, and it is tuned once the
@@ -291,18 +604,28 @@ sub onZapTimer()
         if m.played then m.card.visible = false
         return
     end if
-    tune(target)
+    tune(target, 0, false, true)
 end sub
 
 ' Watches channel: the session before it ends (the server ends it too,
-' by the client_id), its logo shows while it starts.
-sub tune(channel as object, takeOver = 0 as integer)
+' by the client_id), its logo shows while it starts. again: tuned again
+' after a failure, which counts against the retries. stepped: led to by up
+' and down, which a step still waiting goes on from. Neither is a pick.
+sub tune(channel as object, takeOver = 0 as integer, again = false as boolean, stepped = false as boolean)
     m.attempt = m.attempt + 1
+    m.picks = liveTunePicks(m.picks, again, stepped)
     abandonWatch()
     leave()
+    if not again then m.retries = 0
+    m.retryTimer.control = "stop"
     m.zapTo = invalid
     m.zapTimer.control = "stop"
     m.channel = channel
+    m.watched = ""
+    ' Kept for the server and profile: Live TV opens at it, after a
+    ' restart too.
+    session = m.global.session
+    liveSaveChannel(CreateObject("roRegistrySection", "liveViews"), liveViewKey(session.server, session.profileId), channel.id)
     m.played = false
     m.trouble = invalid
     m.pictureTimer.control = "stop"
@@ -313,7 +636,9 @@ sub tune(channel as object, takeOver = 0 as integer)
     hideBanner()
     markCurrent()
     if not m.list.visible then m.top.setFocus(true)
-    m.watchRequest = uiRequest({ op: "liveWatch", channelId: channel.id, takeOver: takeOver, attempt: m.attempt }, "onWatch")
+    ' The user's remote changes channel through the category, as up and
+    ' down do.
+    m.watchRequest = uiRequest({ op: "liveWatch", channelId: channel.id, takeOver: takeOver, attempt: m.attempt, controls: remoteLiveControls(true) }, "onWatch")
 end sub
 
 ' The watch asked for isn't wanted any more: the API task ends it if it
@@ -350,6 +675,7 @@ sub onWatch(event as object)
         return
     end if
     m.sessionId = httpString(answer.data.session_id)
+    m.watched = m.sessionId
     m.playlist = httpString(answer.data.url)
     fresh = liveChannel(answer.data.channel, m.global.session.server, liveLogoWidth(), m.category)
     if fresh <> invalid and fresh.id = m.channel.id then m.channel = fresh
@@ -369,8 +695,7 @@ sub onPlaylist(event as object)
             uiUnreachable({ to: "livePlayer", params: { channel: m.channel, category: m.category } })
             return
         end if
-        leave()
-        trouble(liveTrouble(answer, m.channel.name))
+        failed(liveTrouble(answer, m.channel.name))
         return
     end if
     play()
@@ -422,6 +747,70 @@ sub onStall()
     if m.stalling then showWaiting(true)
 end sub
 
+' Someone took over the connection of the channel playing (the server's
+' live_taken_over, sent before the stream breaks off, one for each viewer
+' of the channel; matched on the channel): it stops at once with the
+' server's words, said once, and isn't tuned again by itself. Said already
+' from the playlist's 410 without words, the event's words show instead.
+' Changing channel already (Up or Down pressed), the change goes on to the
+' channel chosen, with no notice of the one left.
+sub onTakenOver(event as object)
+    data = event.getData()
+    if m.channel = invalid or not m.started then return
+    if Int(httpNumber(data.channel_id, 0)) <> m.channel.id then return
+    stopped = liveStopped(data.message)
+    if m.trouble <> invalid
+        if m.trouble.kind = "stopped" and httpSentence(data.message) <> "" and m.trouble.message <> stopped.message then trouble(stopped)
+        return
+    end if
+    endWatching(stopped)
+end sub
+
+' The watching's session stopped from another device or by the server's
+' administrator (session_stopped): it stops as for a connection taken
+' over, saying who stopped it and their message. Said already from the
+' playlist's 410, these words show instead. Unlike a connection taken
+' over, a channel change on its way (Up or Down pressed) ends too: the
+' person stopped watching, not one channel.
+sub onServerStopped(event as object)
+    data = event.getData()
+    session = httpString(data.session_id)
+    if not m.started or session = "" or (session <> m.sessionId and session <> m.watched) then return
+    stopped = liveStoppedBy(data)
+    m.zapTo = invalid
+    m.zapTimer.control = "stop"
+    if m.trouble <> invalid
+        if m.trouble.kind = "stopped" and m.trouble.message <> stopped.message then trouble(stopped)
+        return
+    end if
+    endWatching(stopped)
+end sub
+
+' A command of the user's remote, on another device, for the watching's
+' session (Remote.brs has the rule): next and previous are channel up and
+' down, through the same category, the new channel's watch telling the
+' server. Watching that stopped, or says what went wrong, obeys nothing.
+sub onPlayerCommand(event as object)
+    if not m.top.active or m.sessionId = "" or m.trouble <> invalid or m.notice.visible then return
+    action = remoteAction({ kind: "live", session: m.sessionId, hasOrder: true }, event.getData())
+    if action.act = "channel" then zap(action.by)
+end sub
+
+' Watching ended on the server: what is on its way belongs to it, and its
+' session is gone there, so nothing is left; changing channel already (Up
+' or Down pressed), the change goes on to the channel chosen.
+sub endWatching(stopped as object)
+    m.attempt = m.attempt + 1
+    abandonWatch()
+    m.sessionId = ""
+    m.playlist = ""
+    if m.zapTo <> invalid
+        m.video.control = "stop"
+        return
+    end if
+    trouble(stopped)
+end sub
+
 sub showWaiting(shown as boolean)
     if shown = m.waiting.visible then return
     m.waiting.visible = shown
@@ -441,7 +830,7 @@ end sub
 
 ' The stream broke: what the server says of its playlist says what to do.
 ' Gone or refused, the player says so; otherwise the channel is tuned
-' again, a few times at most.
+' again (failed).
 sub broken()
     if m.sessionId = "" or m.trouble <> invalid then return
     m.video.control = "stop"
@@ -457,20 +846,39 @@ sub onChecked(event as object)
         uiUnreachable({ to: "livePlayer", params: { channel: m.channel, category: m.category } })
         return
     end if
-    if answer.status = 410 or answer.status = 403 or answer.status = 503
-        leave()
-        trouble(liveTrouble(answer, m.channel.name))
+    if not answer.ok
+        failed(liveTrouble(answer, m.channel.name))
         return
     end if
-    nowMs = m.span.TotalMilliseconds()
-    if not playerMayRestart(m.restarts, nowMs)
-        leave()
-        message = "It stopped and couldn't get going again."
-        trouble({ kind: "other", title: m.channel.name + " stopped", message: message, lines: message, retry: true, connections: [] })
+    ' Its playlist is there: the stream itself broke off.
+    message = t("livetv.player.stalled")
+    failed({ kind: "other", title: t("livetv.player.channelStopped", { channel: m.channel.name }), message: message, lines: message, retry: true, connections: [] })
+end sub
+
+' Watching failed: the channel is tuned again where that may help (the
+' server let it go, it wasn't ready, the stream broke), twice at most,
+' after 1 s and then 3 s; after that, or when the server refused it, the
+' player says why.
+sub failed(problem as object)
+    leave()
+    delayMs = -1
+    if liveRetried(problem) then delayMs = liveRetryDelay(m.retries)
+    if delayMs < 0
+        trouble(problem)
         return
     end if
-    m.restarts.Push(nowMs)
-    tune(m.channel)
+    m.retries = m.retries + 1
+    m.played = false
+    m.video.control = "stop"
+    showCard(m.channel, "")
+    m.retryAttempt = m.attempt
+    m.retryTimer.duration = delayMs / 1000
+    m.retryTimer.control = "start"
+end sub
+
+sub onRetryTimer()
+    if m.retryAttempt <> m.attempt or m.trouble <> invalid or m.channel = invalid then return
+    tune(m.channel, 0, true)
 end sub
 
 ' --- What shows ---
@@ -481,14 +889,13 @@ end sub
 sub showCard(channel as object, kind as string)
     m.cardTitle.text = liveTitle(channel)
     on = liveOnNow(channel, nowSeconds())
-    line = "Tuning…"
-    if kind = "radio"
-        line = "Radio"
-        if on <> invalid then line = on.title
-    else if on <> invalid
-        line = on.title
+    if on <> invalid
+        m.cardLine.text = on.title
+    else if kind = "radio"
+        m.cardLine.text = t("livetv.player.radio")
+    else
+        m.cardLine.text = t("livetv.player.tuning")
     end if
-    m.cardLine.text = line
     m.cardInitials.text = channel.name
     ' The scene's agent carries the token; it changes with each refresh.
     m.cardLogo.setHttpAgent(m.top.getScene().getHttpAgent())
@@ -535,16 +942,19 @@ sub showBanner(hides as boolean)
         m.bannerFill.visible = true
     else
         m.bannerTitle.text = channel.name
-        m.bannerMeta.text = "Nothing in the guide now"
-        if not channel.hasGuide then m.bannerMeta.text = "No guide for this channel"
+        if channel.hasGuide
+            m.bannerMeta.text = t("livetv.nothingNow")
+        else
+            m.bannerMeta.text = t("livetv.noGuideHere")
+        end if
         m.bannerTrack.visible = false
         m.bannerFill.visible = false
     end if
     m.bannerNext.text = ""
-    if coming <> invalid then m.bannerNext.text = "Next   " + liveClock(coming.start, m.twelve) + "   " + coming.title
+    if coming <> invalid then m.bannerNext.text = t("livetv.player.next", { time: liveClock(coming.start, m.twelve), title: coming.title })
     m.star.text = ""
-    if channel.favorite then m.star.text = "★ Favourite"
-    m.bannerHint.text = "Up and down: channels   ·   Left: " + m.categoryName + "   ·   OK: close"
+    if channel.favorite then m.star.text = "★ " + t("livetv.favourites.mark")
+    m.bannerHint.text = t("livetv.player.bannerHint", { category: m.categoryName })
     if m.list.visible or m.notice.visible then return
     m.banner.visible = true
     m.bannerTimer.control = "stop"
@@ -560,9 +970,50 @@ sub onBannerTimer()
     if m.zapTo = invalid then hideBanner()
 end sub
 
-' Each 15 s: what's on moves on.
+' Each 15 s: what's on moves on, on the banner and in the list; once the
+' programme listed as on now has ended, the channel playing is asked for
+' again (GET /api/live/channels/{id}), at most once a minute.
 sub onClock()
     if m.banner.visible then showBanner(false)
+    if m.list.visible then redrawList()
+    if m.channel = invalid or not liveNowEnded([m.channel], 0, 1, nowSeconds()) then return
+    ms = m.span.TotalMilliseconds()
+    if not liveMayRefresh(m.refreshedAt, ms) then return
+    m.refreshedAt = ms
+    uiRequest({ method: "GET", path: "/api/live/channels/" + urlValue(m.channel.id), channelId: m.channel.id }, "onChannelFresh")
+end sub
+
+sub onChannelFresh(event as object)
+    answer = event.getData()
+    if not answer.ok or m.channel = invalid then return
+    fresh = liveChannel(answer.data, m.global.session.server, liveLogoWidth(), m.category)
+    if fresh = invalid or fresh.id <> m.channel.id then return
+    m.channel = fresh
+    for each page in [m.page, m.listPage]
+        if page <> invalid
+            at = liveIndexOf(page.channels, fresh.id)
+            if at >= 0 then page.channels[at] = fresh
+        end if
+    end for
+    if m.banner.visible then showBanner(false)
+    if m.list.visible then redrawList()
+    ' Radio shows what's on in its card.
+    if m.played and m.card.visible and m.zapTo = invalid then showCard(m.channel, "radio")
+end sub
+
+' The list's channels, what's on each and how far along.
+sub redrawList()
+    content = m.channelList.content
+    if m.listPage = invalid or content = invalid then return
+    now = nowSeconds()
+    for i = 0 to m.listPage.channels.Count() - 1
+        item = content.getChild(i)
+        if item <> invalid
+            row = liveListItem(m.listPage.channels[i], now, m.twelve)
+            if item.line <> row.line then item.line = row.line
+            if Abs(item.progress - row.progress) > 0.001 then item.progress = row.progress
+        end if
+    end for
 end sub
 
 sub showToast(text as string)
@@ -577,9 +1028,11 @@ sub onToastTimer()
 end sub
 
 ' A watching that didn't start or stopped: what the server said, with Try
-' again where it may help, Other channels, and Back.
+' again where it may help (Watch again when it stopped), Other channels,
+' and Back.
 sub trouble(problem as object)
     m.trouble = problem
+    m.retryTimer.control = "stop"
     m.video.control = "stop"
     m.card.visible = false
     m.tuning.control = "stop"
@@ -621,10 +1074,8 @@ sub onNoticeButton(event as object)
     if m.noticeActions = invalid or at < 0 or at >= m.noticeActions.Count() then return
     button = m.noticeActions[at]
     if button.action = "takeOver"
-        m.restarts = []
         tune(m.channel, button.channelId)
     else if button.action = "retry"
-        m.restarts = []
         tune(m.channel)
     else if button.action = "list"
         openList()
@@ -640,7 +1091,7 @@ sub finish()
     abandonWatch()
     leave()
     m.video.control = "stop"
-    for each timer in [m.bannerTimer, m.zapTimer, m.clock, m.pictureTimer, m.toastTimer, m.stallTimer]
+    for each timer in [m.bannerTimer, m.zapTimer, m.clock, m.pictureTimer, m.toastTimer, m.stallTimer, m.retryTimer]
         timer.control = "stop"
     end for
     if m.channel <> invalid then m.top.getScene().liveChannel = m.channel.id
@@ -648,21 +1099,40 @@ sub finish()
 end sub
 
 ' Up and down change channel (Up: the next number); Left opens the
-' category's channels, Right, OK and the Options key (*) show what's on
-' (it never shows by itself as a channel starts); play, rewind, fast
-' forward and Replay do nothing. In the list:
+' category's channels, Right and OK show what's on (it never shows by
+' itself as a channel starts), and the Options key (*) puts the channel in
+' the favourites or takes it out, the banner showing its star; play,
+' rewind, fast forward and Replay do nothing. In the list:
 ' the Options key adds to or takes out of the favourites, up and down past
-' its ends go to the page before or after, Back and Right close it. Back
-' with the banner showing hides it; otherwise it leaves (the scene).
+' its ends go to the page before or after, Left opens the categories
+' (Back and Right close them), Replay searches, Back leaves a search for
+' the category before, and Back and Right close it. Back with the banner
+' showing hides it; otherwise it leaves (the scene).
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
+    if m.list.visible and m.categoryList.visible
+        if key = "back" or key = "right" then closeCategories()
+        return true
+    end if
     if m.list.visible
+        if key = "back" and m.listSearched
+            showListCategory(m.listBefore)
+            return true
+        end if
         if key = "back" or key = "right"
             closeList()
             return true
         end if
+        if key = "left"
+            openCategories()
+            return true
+        end if
+        if key = "replay"
+            askListSearch()
+            return true
+        end if
         if key = "options"
-            toggleFavorite()
+            toggleListed()
             return true
         end if
         if key = "up" and m.channelList.itemFocused = 0
@@ -690,7 +1160,16 @@ function onKeyEvent(key as string, press as boolean) as boolean
     end if
     ' Live is live: no pause, rewind or skip.
     if key = "play" or key = "rewind" or key = "fastforward" or key = "replay" then return true
-    if key = "right" or key = "OK" or key = "options"
+    if key = "options"
+        channel = m.zapTo
+        if channel = invalid then channel = m.channel
+        if channel <> invalid
+            toggleFavorite(channel)
+            showBanner(true)
+        end if
+        return true
+    end if
+    if key = "right" or key = "OK"
         if m.banner.visible
             hideBanner()
         else

@@ -1,12 +1,14 @@
 import { useState, type FormEvent } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router";
+import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { errorMessage, isApiError } from "@/api/client";
 import { fetchProfiles, useLogin, useMe, useServer } from "@/api/hooks";
-import type { TwoStepSetup } from "@/api/types";
+import type { TwoStepSetup, User } from "@/api/types";
 import { Splash } from "@/auth";
 import { Button, Field, TextInput } from "@/components/ui";
 import { useDocumentTitle } from "@/lib/hooks";
+import { asksWhoIsWatching, lastProfile } from "@/lib/lastProfile";
 import { appShell, SWITCH_SERVER_PATH } from "@/lib/shell";
 import { codeKind, isTwoStepError, twoStepSetupOf } from "@/lib/twoStep";
 import { AuthLayout } from "./AuthLayout";
@@ -22,10 +24,11 @@ type Step =
   | { kind: "password" }
   | { kind: "code" }
   | { kind: "setup"; setup: TwoStepSetup }
-  | { kind: "codes"; codes: string[]; username: string };
+  | { kind: "codes"; codes: string[]; user: User };
 
 export function LoginPage() {
-  useDocumentTitle("Sign in");
+  const { t } = useTranslation(["pages", "common"]);
+  useDocumentTitle(t("login.signIn"));
   const [params] = useSearchParams();
   const next = safeNext(params.get("next"));
   /** Signing in to allow an app (the OAuth authorize page). */
@@ -49,11 +52,16 @@ export function LoginPage() {
   if (me.data && !signingIn) return <Navigate to={next} replace />;
   if (server.isPending || (me.isPending && me.fetchStatus === "fetching")) return <Splash />;
 
-  // A household with several profiles picks one first.
-  const goOn = () => {
+  // A household with several profiles picks one first, unless this browser
+  // was last used as the profile signed in to and it has no PIN.
+  const goOn = (user: User) => {
     void fetchProfiles(qc)
       .catch(() => [])
-      .then((profiles) => navigate(profiles.length > 1 ? `/profiles?next=${encodeURIComponent(next)}` : next, { replace: true }));
+      .then((profiles) =>
+        navigate(asksWhoIsWatching(user, profiles.length, lastProfile()) ? `/profiles?next=${encodeURIComponent(next)}` : next, {
+          replace: true,
+        }),
+      );
   };
 
   const signIn = (withCode?: string, setupId?: string) => {
@@ -63,8 +71,8 @@ export function LoginPage() {
       {
         onSuccess: (res) => {
           // Set up on the way in: its recovery codes are shown once, first.
-          if (res.recovery_codes?.length) setStep({ kind: "codes", codes: res.recovery_codes, username: res.user.username });
-          else goOn();
+          if (res.recovery_codes?.length) setStep({ kind: "codes", codes: res.recovery_codes, user: res.user });
+          else goOn(res.user);
         },
         onError: (err) => {
           setSigningIn(false);
@@ -115,13 +123,18 @@ export function LoginPage() {
         ? errorMessage(login.error)
         : null
       : isApiError(login.error, 401)
-        ? "Wrong username or password."
+        ? t("login.wrongPassword")
         : errorMessage(login.error);
 
   if (step.kind === "codes") {
     return (
-      <AuthLayout title="Save your recovery codes" subtitle="Two-step sign-in is on.">
-        <RecoveryCodesView codes={step.codes} username={step.username} serverName={server.data?.name} onDone={goOn} />
+      <AuthLayout title={t("twoStepSetup.saveYourCodes")} subtitle={t("login.codesSubtitle")}>
+        <RecoveryCodesView
+          codes={step.codes}
+          username={step.user.username}
+          serverName={server.data?.name}
+          onDone={() => goOn(step.user)}
+        />
       </AuthLayout>
     );
   }
@@ -129,8 +142,8 @@ export function LoginPage() {
   if (step.kind === "setup") {
     return (
       <AuthLayout
-        title="Set up two-step sign-in"
-        subtitle={`${server.data?.name ?? "This server"} asks everyone for a code from an authenticator app after their password. It takes a minute.`}
+        title={t("twoStepSetup.setUpTitle")}
+        subtitle={t("login.setupSubtitle", { server: server.data?.name ?? t("twoStepSetup.thisServer") })}
       >
         <ScanSetup
           // A new secret (the last one expired) starts the code over.
@@ -140,10 +153,10 @@ export function LoginPage() {
           setup={step.setup}
           busy={login.isPending || (signingIn && !login.isError)}
           error={error}
-          submitLabel="Turn on and sign in"
+          submitLabel={t("twoStepSetup.turnOnAndSignIn")}
           onCode={(value) => signIn(value, step.setup.id)}
           onCancel={back}
-          cancelLabel="Back"
+          cancelLabel={t("common:actions.back")}
         />
       </AuthLayout>
     );
@@ -151,16 +164,9 @@ export function LoginPage() {
 
   if (step.kind === "code") {
     return (
-      <AuthLayout
-        title="Two-step sign-in"
-        subtitle={
-          recovery
-            ? "Enter one of the recovery codes you saved when you turned it on. Each works once."
-            : "Enter the 6-digit code from your authenticator app."
-        }
-      >
+      <AuthLayout title={t("login.codeTitle")} subtitle={recovery ? t("login.recoveryHint") : t("login.codeHint")}>
         <form onSubmit={onSubmitCode} className="space-y-4">
-          <Field label={recovery ? "Recovery code" : "Code"} htmlFor="code">
+          <Field label={recovery ? t("login.recoveryCode") : t("fields.code")} htmlFor="code">
             <TextInput
               key={recovery ? "recovery" : "app"}
               id="code"
@@ -193,14 +199,14 @@ export function LoginPage() {
             loading={login.isPending || (signingIn && !login.isError)}
             disabled={!codeKind(code)}
           >
-            Sign in
+            {t("login.signIn")}
           </Button>
           <div className="flex items-center justify-between gap-3 text-sm">
             <button type="button" className="font-medium text-accent hover:text-accent-hover" onClick={() => chooseRecovery(!recovery)}>
-              {recovery ? "Use your authenticator app" : "Use a recovery code"}
+              {recovery ? t("login.useApp") : t("login.useRecoveryCode")}
             </button>
             <button type="button" className="text-muted hover:text-fg" onClick={back}>
-              Back
+              {t("common:actions.back")}
             </button>
           </div>
         </form>
@@ -210,19 +216,15 @@ export function LoginPage() {
 
   return (
     <AuthLayout
-      title="Sign in"
+      title={t("login.signIn")}
       subtitle={
         server.data
-          ? forApp
-            ? `to let an app use ${server.data.name}`
-            : forTv
-              ? `to let your TV use ${server.data.name}`
-              : `to ${server.data.name}`
+          ? t(forApp ? "login.toServerForApp" : forTv ? "login.toServerForTv" : "login.toServer", { server: server.data.name })
           : undefined
       }
     >
       <form onSubmit={onSubmit} className="space-y-4">
-        <Field label="Username" htmlFor="username">
+        <Field label={t("fields.username")} htmlFor="username">
           <TextInput
             id="username"
             autoComplete="username"
@@ -232,7 +234,7 @@ export function LoginPage() {
             required
           />
         </Field>
-        <Field label="Password" htmlFor="password">
+        <Field label={t("fields.password")} htmlFor="password">
           <TextInput
             id="password"
             type="password"
@@ -248,12 +250,12 @@ export function LoginPage() {
           </p>
         ) : null}
         <Button type="submit" variant="primary" size="lg" className="w-full" loading={login.isPending || (signingIn && !login.isError)}>
-          Sign in
+          {t("login.signIn")}
         </Button>
         {appShell() ? (
           <p className="text-center text-xs text-subtle">
             <a href={SWITCH_SERVER_PATH} className="font-medium text-accent hover:text-accent-hover">
-              Use another server
+              {t("login.otherServer")}
             </a>
           </p>
         ) : null}

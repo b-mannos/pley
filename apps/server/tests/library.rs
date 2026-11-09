@@ -194,7 +194,7 @@ async fn each_profile_may_list_its_libraries_in_its_own_order() {
     let (kid, kid_id) = app.user(&admin, "kid", json!({"all_libraries": false, "library_ids": [movies, music]})).await;
 
     // An app with the play scope sorts its profile's libraries: theirs
-    // alone, on every list (the libraries, Home's rows, Plex's sections).
+    // alone, on every list (the libraries, Home's rows, Jellyfin's views).
     let (app_token, _) = app.app_token(bob_id, "library play").await;
     let mut events = app.state.events.subscribe();
     let mine = app.put("/api/me/libraries/order", &app_token, json!({"ids": [music, movies, tv]})).await;
@@ -941,7 +941,7 @@ async fn administration_endpoints() {
         (Method::GET, "/api/transcoder"),
         (Method::GET, "/api/settings"),
         (Method::PUT, "/api/settings"),
-        (Method::GET, "/api/fs"),
+        (Method::POST, "/api/fs"),
     ] {
         let reply = app.call(method.clone(), uri, Some(&bob), Some(json!({})), &[]).await;
         assert_eq!(reply.status, StatusCode::FORBIDDEN, "{method} {uri}");
@@ -980,14 +980,14 @@ async fn administration_endpoints() {
     }
     std::fs::write(root.join("notes.txt"), b"x").unwrap();
     let path = root.to_string_lossy().into_owned();
-    let listing = app.get(&format!("/api/fs?path={}", common::encode(&path)), &admin).await;
+    let listing = app.post("/api/fs", &admin, json!({ "path": path })).await;
     let names: Vec<&str> =
         listing.body["entries"].as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap()).collect();
     assert_eq!(names, ["Films", "series"]);
     assert_eq!(listing.body["parent"], json!(root.parent().unwrap().to_string_lossy()));
-    let missing = app.get(&format!("/api/fs?path={}", common::encode(&format!("{path}/nope"))), &admin).await;
+    let missing = app.post("/api/fs", &admin, json!({ "path": format!("{path}/nope") })).await;
     assert_eq!(missing.status, StatusCode::BAD_REQUEST);
-    assert_eq!(app.get("/api/fs?path=relative", &admin).await.status, StatusCode::BAD_REQUEST);
+    assert_eq!(app.post("/api/fs", &admin, json!({ "path": "relative" })).await.status, StatusCode::BAD_REQUEST);
 }
 
 /// A conditional GET of `uri` with the tag of an earlier answer.
@@ -1110,10 +1110,12 @@ async fn editions_are_versions_of_one_movie_with_their_names() {
     editions.sort();
     assert_eq!(editions, ["Final Cut", "Theatrical Cut"]);
 
-    // The Plex API names the edition of the version played by default.
-    let plex = app.plex_json(&format!("/library/metadata/{film}"), &token).await;
-    let edition = plex["Metadata"][0]["editionTitle"].as_str().unwrap().to_owned();
-    assert!(editions.contains(&edition), "{edition}");
+    // Jellyfin's apps list the versions by their editions.
+    let jellyfin = app.jf_json(&format!("/Items/{}", app.jf_item(film)), &token).await;
+    let mut versions: Vec<String> =
+        jellyfin["MediaSources"].as_array().unwrap().iter().map(|s| s["Name"].as_str().unwrap().to_owned()).collect();
+    versions.sort();
+    assert_eq!(versions, editions);
 }
 
 #[tokio::test]
@@ -1164,10 +1166,149 @@ async fn libraries_sort_by_bitrate_and_say_what_the_files_are_like() {
     // Every sort says it: the posters' badges show whatever the order.
     let by_title = app.get(&format!("/api/libraries/{lib}/items?sort=title"), &admin).await;
     assert_eq!(by_title.body["items"][1]["media"]["dynamic_range"], "dolby_vision");
-    // The Plex-compatible API (and smart collections) sort the same way.
-    let plex = app.plex_json(&format!("/library/sections/{lib}/all?sort=mediaBitrate:desc"), &admin).await;
-    let titles: Vec<&str> = plex["Metadata"].as_array().unwrap().iter().map(|m| m["title"].as_str().unwrap()).collect();
-    assert_eq!(titles, ["Brazil", "Alien", "Casablanca"]);
+    // Smart collections sort the same way.
+    let smart = json!({"title": "By bitrate", "smart_filter": "type=1&sort=mediaBitrate:desc"});
+    let created = app.post(&format!("/api/libraries/{lib}/collections"), &admin, smart).await;
+    assert_eq!(created.status, StatusCode::CREATED, "{:?}", created.body);
+    let collection = app.get(&format!("/api/collections/{}", created.body["id"]), &admin).await;
+    assert_eq!(titles(&collection.body["items"]), ["Brazil", "Alien", "Casablanca"]);
+}
+
+/// What a probe would have found in the files whose path has `name`.
+async fn probed(app: &TestApp, name: &str, width: i64, height: i64, range: &str) {
+    sqlx::query("UPDATE media_files SET width = ?, height = ?, dynamic_range = ? WHERE path LIKE '%' || ? || '%'")
+        .bind(width)
+        .bind(height)
+        .bind(range)
+        .bind(name)
+        .execute(&app.state.db.write)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn libraries_filter_by_resolution_and_dynamic_range() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    for name in ["Brazil (1985)", "Casablanca (1942)", "Dune (2021)"] {
+        app.media_file(&format!("movies/{name}.mkv"), 1024);
+    }
+    // Two versions of Alien, the second in 4K and HDR10: a title is its best file.
+    app.media_file("movies/Alien (1979)/Alien (1979).mkv", 1024);
+    app.media_file("movies/Alien (1979) {edition-Final Cut}/Alien (1979) {edition-Final Cut}.mkv", 1024);
+    app.media_file("tv/Lost (2004)/Season 1/Lost - S01E01.mkv", 2048);
+    app.media_file("tv/Lost (2004)/Season 1/Lost - S01E02.mkv", 2048);
+    app.media_file("tv/Heroes (2006)/Season 1/Heroes - S01E01.mkv", 2048);
+    let movies = app.library(&admin, "Movies", "movies", "movies").await;
+    let shows = app.library(&admin, "Shows", "shows", "tv").await;
+    probed(&app, "Alien (1979).mkv", 1920, 1080, "sdr").await;
+    probed(&app, "Final Cut}.mkv", 3840, 2160, "hdr10").await;
+    // Cropped wider than 16:9: 4K by its width.
+    probed(&app, "Brazil", 3840, 1600, "dolby_vision").await;
+    probed(&app, "Casablanca", 720, 480, "sdr").await;
+    probed(&app, "Dune", 1920, 800, "sdr").await;
+    probed(&app, "Lost - S01E01", 1920, 1080, "sdr").await;
+    probed(&app, "Lost - S01E02", 3840, 2160, "dolby_vision").await;
+
+    let listed = |query: &str| {
+        let app = &app;
+        let admin = admin.clone();
+        let query = query.to_owned();
+        async move {
+            let reply = app.get(&format!("/api/libraries/{movies}/items?{query}"), &admin).await;
+            assert_eq!(reply.status, StatusCode::OK, "{query}: {}", reply.text());
+            titles(&reply.body["items"])
+        }
+    };
+    assert_eq!(listed("resolution=4k").await, ["Alien", "Brazil"]);
+    assert_eq!(listed("resolution=1080").await, ["Dune"], "Alien's best is 4K");
+    assert_eq!(listed("resolution=sd").await, ["Casablanca"]);
+    assert_eq!(listed("dynamic_range=hdr").await, ["Alien", "Brazil"]);
+    assert_eq!(listed("dynamic_range=dolby_vision").await, ["Brazil"]);
+    assert_eq!(listed("dynamic_range=sdr").await, ["Casablanca", "Dune"]);
+    // HDR takes in Dolby Vision (and HDR10+); Dolby Vision is Dolby Vision alone.
+    assert_eq!(listed("dynamic_range=hdr10").await, ["Alien", "Brazil"]);
+    assert_eq!(listed("resolution=1080&dynamic_range=hdr10").await, [] as [&str; 0]);
+    assert_eq!(listed("resolution=&dynamic_range=").await.len(), 4, "empty is no filter");
+    for bad in ["resolution=8k", "dynamic_range=hdr12"] {
+        let reply = app.get(&format!("/api/libraries/{movies}/items?{bad}"), &admin).await;
+        assert_eq!(reply.status, StatusCode::BAD_REQUEST, "{bad}");
+    }
+
+    // What the library has to filter by: resolutions best first, ranges
+    // broadest first, Any HDR left out as it would keep what HDR keeps.
+    let filters = app.get(&format!("/api/libraries/{movies}/filters"), &admin).await.body;
+    assert_eq!(filters["resolutions"], json!(["4k", "1080", "sd"]));
+    assert_eq!(filters["dynamic_ranges"], json!(["hdr10", "dolby_vision", "sdr"]));
+
+    // Filtered, a title is described and sorted by the version that
+    // matches: Alien's 4K HDR10 file, not its higher-bitrate 1080p one.
+    for (name, bitrate) in [("Alien (1979).mkv", 40_000_000), ("Final Cut}.mkv", 20_000_000), ("Brazil", 30_000_000)] {
+        sqlx::query("UPDATE media_files SET bitrate = ? WHERE path LIKE '%' || ? || '%'")
+            .bind(bitrate)
+            .bind(name)
+            .execute(&app.state.db.write)
+            .await
+            .unwrap();
+    }
+    let media = |reply: &Value, title: &str| {
+        let items = reply["items"].as_array().unwrap();
+        items.iter().find(|i| i["title"] == title).map(|i| i["media"].clone()).unwrap()
+    };
+    let all = app.get(&format!("/api/libraries/{movies}/items?sort=bitrate"), &admin).await.body;
+    assert_eq!(titles(&all["items"])[..2], ["Alien", "Brazil"]);
+    assert_eq!(
+        (media(&all, "Alien")["height"].clone(), media(&all, "Alien")["dynamic_range"].clone()),
+        (json!(1080), json!("sdr"))
+    );
+    for (filter, found) in [
+        ("resolution=4k", vec!["Brazil", "Alien"]),
+        ("dynamic_range=hdr", vec!["Brazil", "Alien"]),
+        ("dynamic_range=hdr10", vec!["Brazil", "Alien"]),
+    ] {
+        let reply = app.get(&format!("/api/libraries/{movies}/items?sort=bitrate&{filter}"), &admin).await.body;
+        assert_eq!(titles(&reply["items"]), found, "{filter}: by the matching version's bitrate");
+        let alien = media(&reply, "Alien");
+        assert_eq!(
+            (alien["height"].clone(), alien["dynamic_range"].clone()),
+            (json!(2160), json!("hdr10")),
+            "{filter}"
+        );
+        assert_eq!(alien["bitrate"], json!(20_000_000), "{filter}");
+    }
+
+    // A show is its best episode, and filtered, its episodes that match.
+    let reply = app.get(&format!("/api/libraries/{shows}/items?resolution=4k"), &admin).await;
+    assert_eq!(titles(&reply.body["items"]), ["Lost"]);
+    assert_eq!(reply.body["items"][0]["media"]["dynamic_range"], "dolby_vision");
+    assert_eq!(reply.body["items"][0]["media"]["size"], json!(2048), "the 4K episode alone");
+    let reply = app.get(&format!("/api/libraries/{shows}/items"), &admin).await;
+    assert_eq!(media(&reply.body, "Lost")["size"], json!(4096), "every episode");
+    let filters = app.get(&format!("/api/libraries/{shows}/filters"), &admin).await.body;
+    assert_eq!(filters["resolutions"], json!([]), "Heroes has no probed file: only Lost's 4K");
+    assert_eq!(filters["dynamic_ranges"], json!([]), "one value keeps everything");
+
+    // Smart collections filter the same way, in SQL and in memory (a
+    // filter on a non-ASCII title is checked there).
+    for (filter, found) in [
+        ("type=1&resolution=4k", vec!["Alien", "Brazil"]),
+        ("type=1&resolution=1080p", vec!["Dune"]),
+        ("type=1&resolution=480", vec!["Casablanca"]),
+        ("type=1&resolution!=4k", vec!["Casablanca", "Dune"]),
+        ("type=1&dynamicRange=hdr", vec!["Alien", "Brazil"]),
+        ("type=1&dynamicRange=hdr10", vec!["Alien", "Brazil"]),
+        ("type=1&dynamicRange=dolby_vision", vec!["Brazil"]),
+        ("type=1&dynamicRange=hdr10&title!=é", vec!["Alien", "Brazil"]),
+        ("type=1&dynamicRange=sdr&resolution=1080", vec!["Dune"]),
+        ("type=1&dynamicRange=hdr&title!=é", vec!["Alien", "Brazil"]),
+        ("type=1&resolution=sd&title!=é", vec!["Casablanca"]),
+    ] {
+        let smart = json!({"title": filter, "smart_filter": filter});
+        let created = app.post(&format!("/api/libraries/{movies}/collections"), &admin, smart).await;
+        assert_eq!(created.status, StatusCode::CREATED, "{filter}: {:?}", created.body);
+        let collection = app.get(&format!("/api/collections/{}", created.body["id"]), &admin).await;
+        assert_eq!(titles(&collection.body["items"]), found, "{filter}");
+    }
 }
 
 #[tokio::test]

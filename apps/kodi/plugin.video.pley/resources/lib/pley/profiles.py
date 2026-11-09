@@ -7,7 +7,9 @@ picked on the phone that approves it."""
 
 from __future__ import annotations
 
-from . import api
+import xbmc
+
+from . import api, kodi
 
 # PINs are 4 to 8 digits.
 PIN_MIN, PIN_MAX = 4, 8
@@ -15,7 +17,11 @@ PIN_MIN, PIN_MAX = 4, 8
 # was answered (a profile picked, a PIN checked, a sign-in approved), so a
 # start asks it again only after Kodi starts over.
 GATE = "pley.gate"
-# What the plugin tells pley's window when it switched over it.
+# Set while that "Who's watching?" is on screen: the service plays no cast
+# from the user's remote past it and its PINs (casting.py).
+PICKING = "pley.picking"
+# What the plugin, or the service for a cast, tells pley's window when it
+# switched over it.
 SWITCHED = "pley.switched"
 
 
@@ -40,8 +46,27 @@ def switch(client: api.Client, profile_id: int, pin=None) -> None:
     """Acts as `profile_id` from now on (with the current profile and its
     PIN: checks the PIN). Raises api.ApiError, its code the server's reason
     ("wrong_pin", "throttled", "pin_locked", "browser", "not_allowed"), else
-    its OAuth error, "signed_out" or "unreachable"."""
+    its OAuth error, "signed_out", "unreachable" or "another_device"."""
     client.json("POST", "/switch-profile", json_body={"profile": profile_id, "pin": pin})
+
+
+def tell_switched() -> None:
+    """The add-on acts as another profile now (the plugin's switch, or the
+    service's for a cast): "Who's watching?" is answered, and Pley's window,
+    when open, shows the new profile (window.Monitor hears SWITCHED)."""
+    kodi.set_property(GATE, "1")
+    if kodi.get_property(kodi.WINDOW_OPEN):
+        xbmc.executebuiltin("NotifyAll(%s,%s)" % (kodi.ADDON_ID, SWITCHED))
+
+
+def asks_at_start(household, me: dict, answered: bool) -> bool:
+    """Whether Kodi's start asks "Who's watching?": in a household of more
+    than one profile, when the profile in use has a PIN (GET /api/auth/me's
+    has_pin), or the server didn't say, until it is answered once Kodi
+    started. Without a PIN it goes straight in, as the TV apps do."""
+    if answered or not household or len(household) < 2:
+        return False
+    return me.get("has_pin") is not False
 
 
 def needs_pin(profile: dict, me: dict) -> bool:
@@ -70,6 +95,8 @@ def refusal(error: api.ApiError, text, server: str) -> str:
         return text("cant_switch")
     if code in ("unreachable", "service_off"):
         return text("cant_reach") % server
+    if code == "another_device":
+        return text("another_device") % server
     return text("server_error") % error.message
 
 

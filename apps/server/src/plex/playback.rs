@@ -8,21 +8,20 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use axum::Json;
 use axum::extract::{Path, Request, State};
-use axum::http::{HeaderValue, header};
+use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use parking_lot::Mutex;
 use pley_transcoder_api::{JobStatus, VideoMode};
-use tower::ServiceExt;
-use tower_http::services::ServeFile;
 
 use super::meta::{self, Detail, Sections};
-use super::{ClientInfo, Node, Params, PlexError, PlexResult, PlexUser};
-use crate::auth::AuthUser;
+use super::{ClientInfo, Node, Params, PlexAdmin, PlexError, PlexResult, PlexUser};
+use crate::auth::{AuthUser, CurrentToken, SourceIp, compatibility};
 use crate::catalog::{self, ItemRow};
 use crate::events::ServerEvent;
 use crate::library::list_libraries;
 use crate::library::sidecar::EXTERNAL_INDEX_BASE;
-use crate::playback::{Caps, Method, PlaybackMode, PlaybackRequest, Session};
+use crate::oauth::clients::clean_name;
+use crate::playback::{Caps, Controls, Method, PlaybackMode, PlaybackRequest, Session};
 use crate::state::AppState;
 
 /// Plex client details of a server's sessions (by pley session id) and the
@@ -133,15 +132,9 @@ pub async fn part_file(
 ) -> PlexResult<Response> {
     let file = catalog::file(&state.db, id).await?.ok_or(PlexError::NotFound)?;
     catalog::item(&state.db, user.id, file.item_id).await?.ok_or(PlexError::NotFound)?;
-    if !crate::library::walk::leads_to_its_kind(std::path::Path::new(&file.path)) {
-        return Err(PlexError::NotFound);
-    }
-    let response = ServeFile::new(&file.path)
-        .oneshot(request)
+    let mut response = crate::api::playback::serve_library_file(&file.path, request.method(), request.headers())
         .await
-        .map_err(|e| PlexError::Internal(anyhow::anyhow!("{e}")))?
-        .map(axum::body::Body::new);
-    let mut response = response;
+        .map_err(PlexError::from)?;
     if params.flag("download") {
         let name = std::path::Path::new(&file.path)
             .file_name()
@@ -177,18 +170,23 @@ pub async fn stream_file(
     }
     if index >= EXTERNAL_INDEX_BASE {
         // Only a subtitle file (not a link swapped in since the scan, to
-        // pley's database or /dev/zero), and only one of subtitle size.
-        let sub = file
-            .external_subs()
-            .into_iter()
-            .find(|s| s.index == index)
-            .filter(|s| crate::library::walk::leads_to_its_kind(std::path::Path::new(&s.path)))
-            .ok_or(PlexError::NotFound)?;
-        let meta = tokio::fs::metadata(&sub.path).await.map_err(|_| PlexError::NotFound)?;
-        if !meta.is_file() || meta.len() > MAX_SIDECAR_BYTES {
-            return Err(PlexError::NotFound);
-        }
-        let bytes = tokio::fs::read(&sub.path).await.map_err(|_| PlexError::NotFound)?;
+        // pley's database or /dev/zero), read from the file checked, and
+        // only one of subtitle size.
+        let sub = file.external_subs().into_iter().find(|s| s.index == index).ok_or(PlexError::NotFound)?;
+        let path = std::path::PathBuf::from(sub.path);
+        let bytes = tokio::task::spawn_blocking(move || {
+            let (file, meta) = crate::library::walk::open_of_its_kind(&path)?;
+            if meta.len() > MAX_SIDECAR_BYTES {
+                return None;
+            }
+            let mut bytes = Vec::new();
+            std::io::Read::read_to_end(&mut std::io::Read::take(file, MAX_SIDECAR_BYTES), &mut bytes).ok()?;
+            Some(bytes)
+        })
+        .await
+        .ok()
+        .flatten()
+        .ok_or(PlexError::NotFound)?;
         return Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], bytes).into_response());
     }
     let text = state
@@ -256,7 +254,7 @@ async fn report(
                 });
             }
             if changed {
-                state.events.send(ServerEvent::SessionsChanged);
+                state.events.send(ServerEvent::SessionsChanged { user_id: session.user_id });
             }
         }
         None if play_state != "stopped" && !stopped => {
@@ -264,7 +262,7 @@ async fn report(
                 end_sessions(state, state.sessions.take_client_sessions(user.id, client_id));
             }
             if let Some(file) = catalog::files_for_item(&state.db, row.id).await?.into_iter().next() {
-                let session = state.sessions.insert(Session::new(
+                let mut session = Session::new(
                     user.id,
                     user.username.clone(),
                     client.identifier.clone(),
@@ -275,10 +273,16 @@ async fn report(
                     None,
                     None,
                     time_ms,
-                ));
+                );
+                session.device = device.and_then(clean_name);
+                session.on_device(
+                    crate::api::remote::device_id_of(user, None),
+                    crate::api::remote::device_kind_of(None, user, None),
+                );
+                let session = state.sessions.insert(session);
                 session.update(time_ms, play_state);
                 remember(state, &session.id, client);
-                state.events.send(ServerEvent::SessionsChanged);
+                state.events.send(ServerEvent::SessionsChanged { user_id: session.user_id });
             }
         }
         // Its player has stopped as well: a play after this shows up again.
@@ -306,7 +310,7 @@ fn end_sessions(state: &AppState, sessions: Vec<Arc<Session>>) {
             }
         });
     }
-    state.events.send(ServerEvent::SessionsChanged);
+    state.events.sessions_changed(sessions.iter().map(|s| s.user_id));
 }
 
 fn play_state(params: &Params) -> &'static str {
@@ -450,13 +454,15 @@ fn transcode_node(session: &Session, job: &JobStatus) -> Node {
         .attr("maxOffsetAvailable", (done_ms as f64 / 1000.0 * 10.0).round() / 10.0)
 }
 
-/// `/status/sessions`: what is playing now (admins see every user).
+/// `/status/sessions`: what is playing now (an administrator's token with
+/// `activity` sees every user's).
 pub async fn sessions(State(state): State<AppState>, PlexUser(user): PlexUser) -> PlexResult<Node> {
     let all = state.sessions.list();
     forget_ended(&state, &all);
     let now = crate::util::now();
+    let everyone = super::sees_everyone(&user);
     let sessions: Vec<Arc<Session>> =
-        all.into_iter().filter(|s| (user.is_admin || s.user_id == user.id) && s.is_active(now)).collect();
+        all.into_iter().filter(|s| (everyone || s.user_id == user.id) && s.is_active(now)).collect();
     let jobs: HashMap<String, JobStatus> = if sessions.iter().any(|s| s.job_id().is_some()) {
         match state.transcoder.status().await {
             Ok(status) => status.jobs.into_iter().map(|j| (j.id.clone(), j)).collect(),
@@ -479,7 +485,7 @@ pub async fn sessions(State(state): State<AppState>, PlexUser(user): PlexUser) -
             extras.get(&row.id),
             &files,
             &sections,
-            Detail { guids: true, full: true, media: true, markers: false },
+            Detail { guids: true, full: true, media: true, markers: false, labels: false },
         );
         let (key, client) = session_key(&state, &session.id);
         let play = session.play.lock().clone();
@@ -534,12 +540,10 @@ pub async fn sessions(State(state): State<AppState>, PlexUser(user): PlexUser) -
 }
 
 /// `/status/sessions/terminate?sessionId=…&reason=…` (Tautulli's "kill
-/// stream"): an administrator stops a session (its `Session` `id`), as
-/// `DELETE /api/sessions/{id}` does, with the reason as its message.
-pub async fn terminate(State(state): State<AppState>, PlexUser(user): PlexUser, params: Params) -> PlexResult<Node> {
-    if !user.is_admin {
-        return Err(PlexError::Forbidden);
-    }
+/// stream"): an administrator's token with `manage` stops a session (its
+/// `Session` `id`), as `DELETE /api/sessions/{id}` does, with the reason as
+/// its message.
+pub async fn terminate(State(state): State<AppState>, PlexAdmin(user): PlexAdmin, params: Params) -> PlexResult<Node> {
     let id = params
         .get("sessionId")
         .filter(|id| !id.is_empty())
@@ -562,8 +566,9 @@ fn mark_decision(node: &mut Node, method: Method) {
 
 /// `/transcode/sessions`
 pub async fn transcode_sessions(State(state): State<AppState>, PlexUser(user): PlexUser) -> PlexResult<Node> {
+    let everyone = super::sees_everyone(&user);
     let sessions: Vec<Arc<Session>> =
-        state.sessions.active().into_iter().filter(|s| user.is_admin || s.user_id == user.id).collect();
+        state.sessions.active().into_iter().filter(|s| everyone || s.user_id == user.id).collect();
     let jobs: HashMap<String, JobStatus> = match state.transcoder.status().await {
         Ok(status) => status.jobs.into_iter().map(|j| (j.id.clone(), j)).collect(),
         Err(_) => HashMap::new(),
@@ -638,11 +643,18 @@ pub async fn universal_start(
         client_id,
         keep_previous: false,
         keyed_urls: false,
+        // Plex clients only ever hear of a stop.
+        controls: Controls::new(),
+        device_name: client.device_name.clone().or_else(|| client.product.clone()),
+        device_kind: None,
         hdr_transcodes: false,
+        fmp4_segments: false,
         download: false,
     };
     let Json(info) =
-        crate::api::playback::start(State(state.clone()), user, Json(request)).await.map_err(PlexError::from)?;
+        crate::api::playback::start(State(state.clone()), user, HeaderMap::new(), CurrentToken(None), Json(request))
+            .await
+            .map_err(PlexError::from)?;
     remember(&state, &info.session_id, &client);
 
     let audio_only = row.kind == "track";
@@ -651,7 +663,8 @@ pub async fn universal_start(
         .and_then(|r| r.split_once('x'))
         .and_then(|(w, h)| Some((w.parse::<i64>().ok()?, h.parse::<i64>().ok()?)))
         .or(file.width.zip(file.height));
-    let bandwidth = params.parse::<i64>("maxVideoBitrate").map(|k| k * 1000).or(file.bitrate).unwrap_or(8_000_000);
+    let bandwidth =
+        params.parse::<i64>("maxVideoBitrate").map(|k| k.saturating_mul(1000)).or(file.bitrate).unwrap_or(8_000_000);
     let mut playlist = String::from("#EXTM3U\n#EXT-X-VERSION:3\n");
     if audio_only {
         playlist.push_str(&format!("#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},CODECS=\"mp4a.40.2\"\n"));
@@ -673,21 +686,30 @@ pub async fn universal_start(
 /// two-step sign-in and they don't use it.
 pub async fn universal_file(
     State(state): State<AppState>,
+    SourceIp(from): SourceIp,
     Path((session_id, file)): Path<(String, String)>,
 ) -> PlexResult<Response> {
     let session = state.sessions.get(&session_id).ok_or(PlexError::NotFound)?;
-    if session.app_grant.is_some() {
-        return Err(PlexError::NotFound);
-    }
-    let user = AuthUser::load(&state.db, session.user_id).await?.ok_or(PlexError::NotFound)?;
-    if state.auth.lacks_two_step(user.id).await? {
-        return Err(PlexError::NotFound);
-    }
+    // Players fetch these without a token: the session's id (128 random
+    // bits) stands for the token that started it through this API, while
+    // that token works and from where it may be used. Not for Pley's own
+    // players' sessions, nor apps'.
+    let token = session.compatibility_token.ok_or(PlexError::NotFound)?;
+    let user = state
+        .auth
+        .compatibility_user(token, from)
+        .await
+        .filter(|user| user.id == session.user_id)
+        .ok_or(PlexError::NotFound)?;
     crate::api::playback::hls_file(State(state), user, Path((session_id, file))).await.map_err(PlexError::from)
 }
 
-pub async fn universal_file_flat(state: State<AppState>, path: Path<(String, String)>) -> PlexResult<Response> {
-    universal_file(state, path).await
+pub async fn universal_file_flat(
+    state: State<AppState>,
+    from: SourceIp,
+    path: Path<(String, String)>,
+) -> PlexResult<Response> {
+    universal_file(state, from, path).await
 }
 
 /// `decision`: what `start.m3u8` would do — always an HLS stream here.
@@ -705,7 +727,7 @@ pub async fn universal_decision(
         extras.get(&row.id),
         &files[..files.len().min(1)],
         &Sections::new(&libraries),
-        Detail { guids: false, full: true, media: true, markers: false },
+        Detail { guids: false, full: true, media: true, markers: false, labels: false },
     );
     mark_decision(&mut node, Method::Transcode);
     Ok(Node::container()
@@ -720,7 +742,8 @@ pub async fn universal_decision(
         .child(node))
 }
 
-/// `stop?session=<client>`: ends the client's sessions.
+/// `stop?session=<client>`: ends the client's sessions. Someone else's only
+/// with `manage`, which stops sessions.
 pub async fn universal_stop(
     State(state): State<AppState>,
     PlexUser(user): PlexUser,
@@ -729,7 +752,8 @@ pub async fn universal_stop(
 ) -> PlexResult<Node> {
     let mut ended = Vec::new();
     if let Some(id) = params.get_ci("session") {
-        if let Some(session) = state.sessions.get(id).filter(|s| s.user_id == user.id || user.is_admin) {
+        let anyones = user.compatibility_allows(compatibility::Scope::Manage);
+        if let Some(session) = state.sessions.get(id).filter(|s| s.user_id == user.id || anyones) {
             ended.extend(state.sessions.remove(&session.id));
         }
         ended.extend(state.sessions.take_client_sessions(user.id, id));

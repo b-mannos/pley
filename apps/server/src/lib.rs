@@ -9,6 +9,7 @@ pub mod api;
 pub mod auth;
 pub mod backup;
 pub mod bandwidth;
+pub mod bonjour;
 pub mod catalog;
 pub mod collections;
 pub mod config;
@@ -21,13 +22,19 @@ pub mod error;
 pub mod events;
 pub mod history;
 pub mod http;
+pub mod i18n;
+pub mod identity;
 pub mod images;
 pub mod instance;
+pub mod jellyfin;
 pub mod labels;
+pub mod languages;
 pub mod library;
+pub mod listing;
 pub mod livetv;
 pub mod logging;
 pub mod markers;
+pub mod mdns;
 pub mod metadata;
 pub mod network;
 pub mod oauth;
@@ -43,6 +50,7 @@ pub mod related;
 pub mod requests;
 pub mod resources;
 pub mod schedule;
+pub mod search;
 #[cfg(windows)]
 pub mod service;
 pub mod settings;
@@ -51,6 +59,8 @@ pub mod state;
 pub mod store;
 pub mod streams;
 pub mod subtitles;
+#[cfg(test)]
+mod testing;
 pub mod transcoder;
 pub mod trickplay;
 pub mod two_step;
@@ -208,8 +218,8 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
 /// Before the database is opened, the data directory is locked (one server
 /// per data directory, see [`instance`]) and the first address is bound: a
 /// second copy, or one whose port is taken, stops without touching anything.
-/// The other addresses, the Plex-compatible API and discovery follow (see
-/// [`network`]).
+/// The other addresses, the compatibility APIs and discovery follow (see
+/// [`network`]), and the Bonjour announcement (see [`bonjour`]).
 ///
 /// On shutdown the listeners close, the event streams end, and requests in
 /// progress get [`Config::shutdown_grace`] to finish; connections still open
@@ -232,6 +242,12 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
     if state.network.plex_on_web() {
         tracing::info!("the Plex-compatible API answers on Pley's port, to its clients");
     }
+    if state.network.jellyfin_on_web() {
+        tracing::info!("the Jellyfin-compatible API answers on Pley's port, to its clients");
+    }
+    for warning in &state.config.file_warnings {
+        tracing::warn!("pley.toml: {warning}");
+    }
     LISTENING.store(true, std::sync::atomic::Ordering::SeqCst);
     if let Some(code) = state.auth.setup.shown() {
         tracing::warn!(
@@ -245,6 +261,8 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
     let stopping = state.stopping.clone();
     let listeners = tokio_util::task::TaskTracker::new();
     let network = tokio::spawn(network::run(state.clone(), app, listener, retry, listeners.clone()));
+    // On the tracker: the goodbye goes out before pley stops.
+    listeners.spawn(bonjour::run(state.clone()));
     shutdown_signal(&stopping).await;
     tracing::info!("shutting down");
     LISTENING.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -381,15 +399,21 @@ pub async fn reset_password(config: Config, username: &str, password: &str, admi
                 .await?
                 .rows_affected();
             sqlx::query("DELETE FROM recovery_codes WHERE user_id = ?").bind(id).execute(&db.write).await?;
-            // Apps using the account or allowed by it end too. A server running
-            // meanwhile reads tokens from its cache for up to a minute, as it
-            // does sessions: its apps stop within that minute.
+            // Apps using the account or allowed by it end too, and its tokens
+            // for other apps. A server running meanwhile reads tokens from its
+            // cache for up to a minute, as it does sessions: its apps stop
+            // within that minute.
             let apps = sqlx::query("DELETE FROM app_grants WHERE user_id = ? OR approved_by = ?")
                 .bind(id)
                 .bind(id)
                 .execute(&db.write)
                 .await?
-                .rows_affected();
+                .rows_affected()
+                + sqlx::query("DELETE FROM compatibility_tokens WHERE user_id = ?")
+                    .bind(id)
+                    .execute(&db.write)
+                    .await?
+                    .rows_affected();
             let required = settings::SettingsStore::load(&db).await?.get().require_two_step;
             let off = match (two_step > 0, required) {
                 (true, true) => {

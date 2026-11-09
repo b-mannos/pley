@@ -1,7 +1,7 @@
 import unittest
 
 import support  # noqa: F401
-from pley import words
+from pley import kodi, words
 
 FILE = {
     "id": 7,
@@ -37,7 +37,7 @@ class WordsTest(unittest.TestCase):
         self.assertEqual(words.card_subtitle({"kind": "album", "parent_title": "Daft Punk", "year": 2001}), "Daft Punk · 2001")
         self.assertEqual(words.episode_long_label(0, 3), "Specials · Episode 3")
         self.assertEqual(words.season_title(None, 2), "Season 2")
-        self.assertEqual(words.plural(12345, "movie"), "12,345 movies")
+        self.assertEqual(kodi.count("movies", 12345), "12,345 movies")
 
     def test_progress_and_counts(self):
         playing = {"kind": "movie", "duration_ms": 100, "user_state": {"position_ms": 25, "watched": False}}
@@ -53,6 +53,29 @@ class WordsTest(unittest.TestCase):
         stereo = {"width": 1280, "height": 720, "streams": [{"kind": "video"}, {"kind": "audio", "channels": 6}]}
         self.assertEqual(words.quality_badges(stereo), ["720p", "5.1"])
         self.assertEqual(words.quality_badges(None), [])
+
+    def test_a_library_posters_badges(self):
+        # The web's mediaBadges: "4K" of the resolutions only, the dynamic range short, no codec.
+        uhd = {"width": 3840, "height": 1608, "video_codec": "hevc", "dynamic_range": "dolby_vision"}
+        self.assertEqual(words.media_badges(uhd), ["4K", "DV"])
+        self.assertEqual(words.media_badges(dict(uhd, width=1920, height=1080, dynamic_range="hdr10plus")), ["HDR+"])
+        self.assertEqual(words.media_badges(dict(uhd, dynamic_range="hlg")), ["4K", "HLG"])
+        self.assertEqual(words.media_badges(dict(uhd, dynamic_range="sdr")), ["4K"])
+        self.assertEqual(words.media_badges({"width": 1280, "height": 720, "dynamic_range": None}), [])
+        self.assertEqual(words.media_badges(None), [])
+
+    def test_bitrate_and_size_under_a_poster(self):
+        # As the web's mediaLine, formatBitrate and formatBytes write them.
+        self.assertEqual(words.media_line({"bitrate": 42_000_000, "size": 25_125_558_682}), "42 Mbps · 23.4 GB")
+        self.assertEqual(words.media_line({"bitrate": 8_200_000, "size": None}), "8.2 Mbps")
+        self.assertEqual(words.media_line({"bitrate": None, "size": 157_286_400}), "150 MB")
+        self.assertEqual(words.media_line({"bitrate": None, "size": None}), "Bitrate unknown")
+        self.assertEqual(words.media_line(None), "")
+        self.assertEqual(words.bitrate(320_400), "320 kbps")
+        self.assertEqual(words.bitrate(12_400_000), "12 Mbps")
+        self.assertEqual(words.size(1536), "1.5 KB")
+        self.assertEqual(words.size(512), "512 B")
+        self.assertEqual(words.size(3 * 1024 ** 4), "3.0 TB")
 
     def test_dolby_vision_as_the_server_names_it(self):
         dv = {"kind": "video", "dynamic_range": "dolby_vision"}

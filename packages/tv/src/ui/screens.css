@@ -85,6 +85,15 @@
 .status-line { display: flex; align-items: center; min-height: 20px; }
 .status-line .breathing-dot { margin-right: 12px; }
 
+/* The globe before signing in: small, "FR" at the screen's right edge (48 less its own 10). At the
+   bottom right of Choose your server and the address screen, centred on the forget hint's line (17
+   tall, 27 from the bottom); on the sign-in code at the top right, centred on the logo's line (40
+   tall from 56). */
+.globe-btn { height: 32px; min-width: 0; padding: 0 10px; }
+.globe-btn .icon { margin-right: 6px; }
+.globe-corner { position: absolute; right: 38px; bottom: 20px; }
+.link-globe { position: absolute; right: 38px; top: 60px; }
+
 /* Servers */
 .servers { position: absolute; left: 96px; top: 27px; right: 48px; bottom: 27px; }
 .servers-header { display: flex; align-items: center; height: 38px; }
@@ -276,6 +285,18 @@
 .hero-title { height: 72px; display: flex; flex-direction: column; justify-content: flex-end; }
 .hero-summary { margin-top: 10px; color: rgba(233, 235, 239, 0.85); }
 .hero-buttons { margin-top: 20px; }
+/* A featured title: why it is there, over its name. */
+.hero-label {
+  margin-bottom: 12px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: rgba(233, 235, 239, 0.85);
+}
+/* Taking turns, the summary keeps its three lines' room: the buttons stay where they are. */
+.hero.turns .hero-summary { min-height: 66px; }
+.hero-turns { display: flex; gap: 8px; margin: 18px 0 0 24px; height: 4px; }
+.hero-turns span { width: 14px; height: 4px; border-radius: 2px; background: rgba(233, 235, 239, 0.3); }
+.hero-turns span.on { width: 36px; background: var(--fg); }
 .info-block {
   position: absolute;
   left: 96px;
@@ -323,6 +344,7 @@
 }
 .library-tabs { display: flex; flex: none; }
 .library-tabs > * + * { margin-left: 8px; }
+/* The chips between the gutter and the safe area's edge; wider than that, they slide to keep the focused one in view. */
 .library-chips {
   position: absolute;
   left: 96px;
@@ -332,9 +354,12 @@
   display: flex;
   align-items: center;
   z-index: 3;
+  transition: transform 220ms cubic-bezier(0.2, 0, 0, 1);
 }
+.reduced .library-chips { transition: none; }
 .library-chips > * + * { margin-left: 10px; }
-.chips-count { padding-left: 8px; white-space: nowrap; }
+/* The count gives way to the chips rather than run past the row's end: a library's tab hides it when it doesn't fit whole. */
+.chips-count { padding-left: 8px; white-space: nowrap; min-width: 0; overflow: hidden; }
 .library-rows { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
 .collections-count { position: absolute; left: 96px; top: 80px; height: 40px; display: flex; align-items: center; }
 
@@ -1128,9 +1153,6 @@ html.avplay .engine-host { background: transparent; }
 .pbtn.big { width: 44px; height: 44px; }
 .pbtn[data-focused] { background: var(--accent); color: var(--on-accent); transform: scale(1.08); transition: transform 150ms var(--focus-ease); }
 .pbtn[data-pressed] { background: var(--accent-bright); }
-/* −10 s and +10 s: the turning arrow with the number inside, 0.36 of the icon. */
-.skip-glyph { position: relative; width: 24px; height: 24px; }
-.skip-glyph > span { position: absolute; left: 0; top: 0; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 8.64px; line-height: 1; font-weight: 700; letter-spacing: -0.02em; }
 .pbtn-label {
   position: absolute;
   left: 50%;
@@ -1346,6 +1368,7 @@ html.avplay .engine-host { background: transparent; }
 .live-panel-facts > * + * { margin-left: 8px; }
 .live-panel-facts .live-mark { margin-right: 0; }
 .live-panel-progress { display: flex; align-items: center; margin-top: 10px; }
+.live-panel-buttons { padding: 0 16px; }
 
 /* The search at the head of the categories: the field, a line's height. */
 .live-cats-search { position: absolute; left: 12px; right: 16px; }

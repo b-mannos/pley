@@ -16,7 +16,7 @@ function memoryStore(): KeyValue {
 
 /** An AppState with an API that only answers Home, and a way to hand it the server's events. */
 function setup() {
-  const platform = { name: "webos", clientId: "test", storage: memoryStore() } as unknown as Platform;
+  const platform = { name: "tizen", clientId: "test", storage: memoryStore() } as unknown as Platform;
   const app = new AppState(platform, () => Promise.reject(new Error("no network in tests")));
   let homes = 0;
   (app.api as { value: unknown }).value = {
@@ -138,7 +138,7 @@ describe("who is watching and the libraries", () => {
   const me = { id: 1, name: "Ana" };
   const libraries = [{ id: 1, name: "Movies", kind: "movies" }];
   function signedIn(store: KeyValue, answer: () => Promise<unknown>) {
-    const platform = { name: "webos", clientId: "test", storage: store } as unknown as Platform;
+    const platform = { name: "tizen", clientId: "test", storage: store } as unknown as Platform;
     const app = new AppState(platform, () => Promise.reject(new Error("no network in tests")));
     (app.api as { value: unknown }).value = {
       me: () => answer().then(() => me),
@@ -167,7 +167,7 @@ describe("who is watching and the libraries", () => {
     expect(app.libraries.value).toEqual(libraries);
   });
 
-  it("start as the profile the TV was left on with Always start as, its PIN first when it has one", () => {
+  it("start as the profile the TV was left on, never past its PIN", () => {
     const store = memoryStore();
     const server = "http://a.local:7539";
     store.set("pley.server", server);
@@ -181,7 +181,12 @@ describe("who is watching and the libraries", () => {
     expect(start()).toEqual({ page: "pin" });
     store.set("pley.me", JSON.stringify({ ...me, has_pin: false }));
     expect(start()).toEqual({ page: "home" });
+    // Without Always start as: straight in without a PIN, "Who's watching?" with one or while not known.
     store.remove(`pley.alwaysStartAs.${server}`);
+    expect(start()).toEqual({ page: "home" });
+    store.set("pley.me", JSON.stringify({ ...me, has_pin: true }));
+    expect(start()).toEqual({ page: "profiles" });
+    store.remove("pley.me");
     expect(start()).toEqual({ page: "profiles" });
   });
 
@@ -233,7 +238,7 @@ describe("who is watching and the libraries", () => {
 });
 
 describe("the quality setting", () => {
-  const open = (store: KeyValue) => new AppState({ name: "webos", clientId: "test", storage: store } as unknown as Platform, () => Promise.reject(new Error("no network in tests")));
+  const open = (store: KeyValue) => new AppState({ name: "tizen", clientId: "test", storage: store } as unknown as Platform, () => Promise.reject(new Error("no network in tests")));
 
   it("is Automatic on a TV where none was picked", () => {
     expect(open(memoryStore()).settings.value.quality).toBe("auto");
@@ -260,7 +265,7 @@ describe("the quality setting", () => {
 });
 
 describe("Live TV", () => {
-  const platform = (store: KeyValue) => ({ name: "webos", clientId: "test", storage: store }) as unknown as Platform;
+  const platform = (store: KeyValue) => ({ name: "tizen", clientId: "test", storage: store }) as unknown as Platform;
   const summary = { available: true, allowed: true, channels: 5, sources: 1, recent: [3] };
 
   it("shows where the server says so, kept for the next launch, and goes on a server without it", async () => {

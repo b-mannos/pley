@@ -2,7 +2,7 @@
 //! each size is only computed once) and generates missing artwork on demand
 //! through the transcoder (video frame grabs, embedded cover art).
 
-use std::io::{BufRead, Cursor, Seek};
+use std::io::{BufRead, BufReader, Cursor, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -42,6 +42,74 @@ pub fn decode(bytes: &[u8]) -> ImageResult<DynamicImage> {
 /// may upload one, so it may take a fraction of what artwork may.
 pub fn decode_avatar(bytes: &[u8]) -> ImageResult<DynamicImage> {
     limited(ImageReader::new(Cursor::new(bytes)).with_guessed_format()?, 4096, 96 << 20)
+}
+
+/// The EXIF tag Kometa marks a poster with once it has drawn its overlay on
+/// it (`"overlay"`): that poster is never taken for an original again.
+const OVERLAY_TAG: u16 = 0x04BC;
+const OVERLAY: &[u8] = b"overlay";
+
+/// Whether a picture carries Kometa's overlay mark.
+pub fn has_overlay_mark(bytes: &[u8]) -> bool {
+    use image::ImageDecoder;
+    let exif = ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()
+        .and_then(|reader| reader.into_decoder().ok())
+        .and_then(|mut decoder| decoder.exif_metadata().ok().flatten());
+    exif.is_some_and(|chunk| exif_text(&chunk, OVERLAY_TAG).is_some_and(|text| text == OVERLAY))
+}
+
+/// An EXIF chunk with Kometa's overlay mark alone, for a picture that had it.
+pub fn overlay_exif() -> Vec<u8> {
+    let value = [OVERLAY, b"\0"].concat();
+    let mut chunk = Vec::with_capacity(26 + value.len());
+    chunk.extend_from_slice(b"II*\0");
+    chunk.extend_from_slice(&8u32.to_le_bytes()); // the first directory, right after
+    chunk.extend_from_slice(&1u16.to_le_bytes()); // of one entry:
+    chunk.extend_from_slice(&OVERLAY_TAG.to_le_bytes());
+    chunk.extend_from_slice(&2u16.to_le_bytes()); // text
+    chunk.extend_from_slice(&(value.len() as u32).to_le_bytes());
+    chunk.extend_from_slice(&26u32.to_le_bytes()); // after the directory
+    chunk.extend_from_slice(&0u32.to_le_bytes()); // and no other directory
+    chunk.extend_from_slice(&value);
+    chunk
+}
+
+/// The text (or bytes) of `tag` in the first directory of an EXIF chunk,
+/// without its trailing NULs.
+fn exif_text(chunk: &[u8], tag: u16) -> Option<&[u8]> {
+    let chunk = chunk.strip_prefix(b"Exif\0\0").unwrap_or(chunk);
+    let little = match chunk.get(..4)? {
+        b"II*\0" => true,
+        b"MM\0*" => false,
+        _ => return None,
+    };
+    let u16_at = |at: usize| -> Option<u16> {
+        let b: [u8; 2] = chunk.get(at..at.checked_add(2)?)?.try_into().ok()?;
+        Some(if little { u16::from_le_bytes(b) } else { u16::from_be_bytes(b) })
+    };
+    let u32_at = |at: usize| -> Option<usize> {
+        let b: [u8; 4] = chunk.get(at..at.checked_add(4)?)?.try_into().ok()?;
+        usize::try_from(if little { u32::from_le_bytes(b) } else { u32::from_be_bytes(b) }).ok()
+    };
+    let directory = u32_at(4)?;
+    for n in 0..usize::from(u16_at(directory)?) {
+        let entry = directory.checked_add(2 + n * 12)?;
+        if u16_at(entry)? != tag {
+            continue;
+        }
+        // One byte a value: bytes, text or undefined.
+        if !matches!(u16_at(entry + 2)?, 1 | 2 | 7) {
+            return None;
+        }
+        let count = u32_at(entry + 4)?;
+        let at = if count <= 4 { entry + 8 } else { u32_at(entry + 8)? };
+        let value = chunk.get(at..at.checked_add(count)?)?;
+        let end = value.iter().rposition(|b| *b != 0).map_or(0, |last| last + 1);
+        return Some(&value[..end]);
+    }
+    None
 }
 
 const BUCKETS: [u32; 8] = [160, 240, 320, 480, 640, 960, 1280, 1920];
@@ -93,9 +161,19 @@ impl Images {
     }
 
     /// Serve `source`, resized to the bucket at or above `width` when smaller
-    /// than the original.
+    /// than the original. Read from the file opened and checked
+    /// ([`crate::library::walk::open_of_its_kind`]), not by its name again:
+    /// a library's `poster.jpg` swapped for a link meanwhile hands out no
+    /// other file.
     pub async fn load(&self, source: &Path, width: Option<u32>) -> Result<ImageBytes, AppError> {
-        let meta = tokio::fs::metadata(source).await.map_err(|_| AppError::not_found("image not found"))?;
+        let named = source.to_path_buf();
+        let (file, meta) = tokio::task::spawn_blocking(move || crate::library::walk::open_of_its_kind(&named))
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?
+            .ok_or_else(|| AppError::not_found("image not found"))?;
+        if meta.len() > MAX_PICTURE_BYTES {
+            return Err(AppError::not_found("image not found"));
+        }
         let mtime = meta.modified().ok().map(crate::util::system_time_secs).unwrap_or(0);
         let bucket = width.map(|w| *BUCKETS.iter().find(|b| **b >= w).unwrap_or(&BUCKETS[BUCKETS.len() - 1]));
         let mut hasher = Sha256::new();
@@ -107,7 +185,7 @@ impl Images {
         let etag = format!("\"{key}\"");
 
         let Some(bucket) = bucket else {
-            let bytes = tokio::fs::read(source).await?;
+            let bytes = crate::util::blocking(move || Ok(whole(file)?)).await.map_err(AppError::Internal)?;
             return Ok(ImageBytes { content_type: content_type_of(source, &bytes), bytes: bytes.into(), etag });
         };
 
@@ -120,30 +198,52 @@ impl Images {
         }
 
         let _permit = self.limiter.acquire().await.map_err(|e| AppError::Internal(e.into()))?;
-        let src = source.to_path_buf();
         let out = dir.join(&key);
-        let result = crate::util::blocking(move || resize_to_file(&src, bucket, &out)).await;
-        match result {
-            Ok(Some((bytes, content_type))) => Ok(ImageBytes { bytes: bytes.into(), content_type, etag }),
-            // Already small enough (or not decodable): serve the original.
-            Ok(None) | Err(_) => {
-                let bytes = tokio::fs::read(source).await?;
-                Ok(ImageBytes { content_type: content_type_of(source, &bytes), bytes: bytes.into(), etag })
-            }
-        }
+        let (bytes, made) =
+            crate::util::blocking(move || resized_or_whole(file, bucket, &out)).await.map_err(AppError::Internal)?;
+        // Already small enough (or not decodable): the original.
+        let content_type = made.unwrap_or_else(|| content_type_of(source, &bytes));
+        Ok(ImageBytes { bytes: bytes.into(), content_type, etag })
     }
 }
 
-/// Resize to `width` (keeping aspect ratio) and write it beside `out` (its
-/// extension added): a JPEG, or a PNG when the picture is see-through.
-/// Returns `None` when the source is not wider than the target.
-fn resize_to_file(source: &Path, width: u32, out: &Path) -> anyhow::Result<Option<(Vec<u8>, &'static str)>> {
-    let reader = ImageReader::open(source)?.with_guessed_format()?;
-    let (w, h) = reader.into_dimensions()?;
+/// The largest picture file read here (artwork is a few MB): a file of a
+/// library named like a picture is read into memory whole only up to this.
+const MAX_PICTURE_BYTES: u64 = 64 << 20;
+
+/// All of `file`, from its start, up to [`MAX_PICTURE_BYTES`].
+fn whole(mut file: std::fs::File) -> std::io::Result<Vec<u8>> {
+    file.seek(SeekFrom::Start(0))?;
+    let mut bytes = Vec::new();
+    file.take(MAX_PICTURE_BYTES).read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
+/// `file` resized to `width` and kept beside `out` ([`resize_to_file`]), or
+/// all of it as it is when it isn't wider or can't be decoded: its bytes,
+/// and their type when they were made here.
+fn resized_or_whole(
+    mut file: std::fs::File,
+    width: u32,
+    out: &Path,
+) -> anyhow::Result<(Vec<u8>, Option<&'static str>)> {
+    if let Ok(Some((bytes, content_type))) = resize_to_file(&mut file, width, out) {
+        return Ok((bytes, Some(content_type)));
+    }
+    Ok((whole(file)?, None))
+}
+
+/// Resize `file`, a picture, to `width` (keeping aspect ratio) and write it
+/// beside `out` (its extension added): a JPEG, or a PNG when the picture is
+/// see-through. Returns `None` when the picture is not wider than the target.
+fn resize_to_file(file: &mut std::fs::File, width: u32, out: &Path) -> anyhow::Result<Option<(Vec<u8>, &'static str)>> {
+    let (w, h) = ImageReader::new(BufReader::new(&mut *file)).with_guessed_format()?.into_dimensions()?;
     if w <= width {
         return Ok(None);
     }
-    let img = limited(ImageReader::open(source)?.with_guessed_format()?, MAX_DIMENSION, MAX_DECODE_BYTES)?;
+    file.seek(SeekFrom::Start(0))?;
+    let img =
+        limited(ImageReader::new(BufReader::new(&mut *file)).with_guessed_format()?, MAX_DIMENSION, MAX_DECODE_BYTES)?;
     let height = ((h as f64) * (width as f64) / (w as f64)).round().max(1.0) as u32;
     let resized = img.resize_exact(width, height, image::imageops::FilterType::Triangle);
     let mut buf = Vec::with_capacity((width * height / 4) as usize);
@@ -229,5 +329,28 @@ mod tests {
             let decoded = image::load_from_memory(&small.bytes).unwrap().to_rgba8();
             assert_eq!((decoded.width(), decoded[(0, 0)][3]), (240, 0), "no black box behind it");
         }
+    }
+
+    fn jpeg(exif: Option<Vec<u8>>) -> Vec<u8> {
+        use image::ImageEncoder;
+        let mut out = Vec::new();
+        let mut encoder = JpegEncoder::new_with_quality(&mut out, 80);
+        if let Some(exif) = exif {
+            encoder.set_exif_metadata(exif).unwrap();
+        }
+        encoder.encode_image(&image::RgbImage::from_pixel(8, 8, image::Rgb([1, 2, 3]))).unwrap();
+        out
+    }
+
+    #[test]
+    fn kometas_overlay_mark_is_read() {
+        assert!(has_overlay_mark(&jpeg(Some(overlay_exif()))));
+        assert!(!has_overlay_mark(&jpeg(None)));
+        // Big-endian, as other writers make it, and another tag.
+        let mut chunk = b"MM\0*\0\0\0\x08\0\x01\x04\xBC\0\x02\0\0\0\x04ovl\0\0\0\0\0".to_vec();
+        assert_eq!(exif_text(&chunk, OVERLAY_TAG), Some(&b"ovl"[..]));
+        chunk[11] = 0xBD;
+        assert_eq!(exif_text(&chunk, OVERLAY_TAG), None);
+        assert_eq!(exif_text(b"II*\0\xff\xff\xff\xff", OVERLAY_TAG), None, "a directory past the end");
     }
 }

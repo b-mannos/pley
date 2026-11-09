@@ -1,4 +1,5 @@
 import json
+import threading
 import time
 import unittest
 import urllib.parse
@@ -32,11 +33,11 @@ NEWS = {
     "favorite": False, "has_guide": True,
     "now": program(1, NOW - 900, NOW + 2700, "Morning Briefing", subtitle="Part 7", description="Everything you need to know.",
                    categories=["News"], season=1, episode=7, is_live=True, image="/api/live/channels/1/programs/1/image"),
-    "next": program(1, NOW + 2700, NOW + 5400, "World at One"),
+    "next": program(1, NOW + 2700, NOW + 5400, "Midday Bulletin"),
 }
 SPORT = {
     "id": 2, "source_id": 1, "name": "Sport 1080i", "number": "102", "group": "Sport", "logo": None, "favorite": True,
-    "has_guide": True, "now": program(2, NOW - 900, NOW + 2700, "Match of the Day"), "next": None,
+    "has_guide": True, "now": program(2, NOW - 900, NOW + 2700, "Weekend Highlights"), "next": None,
 }
 RADIO = {"id": 4, "source_id": 1, "name": "Radio Jazz", "number": "104", "group": "Radio", "logo": None, "favorite": False,
          "has_guide": False, "now": None, "next": None}
@@ -143,13 +144,13 @@ class WhatsOnTest(unittest.TestCase):
                     self.assertNotIn(livetv.day(at(days + 2, 0, 1), now), ("Today", "Tomorrow"))
                     self.assertNotIn(livetv.day(at(days - 2, 23, 59), now), ("Today", "Yesterday"))
         later = time.localtime(at(3, 0, 1))
-        self.assertEqual(livetv.day(at(3, 0, 1), NOW), "%s %d %s" % (livetv.ENGLISH_DAYS[later.tm_wday], later.tm_mday, livetv.ENGLISH_MONTHS[later.tm_mon - 1]))
+        self.assertEqual(livetv.day(at(3, 0, 1), NOW), "%s %d %s" % (time.strftime("%a", later), later.tm_mday, time.strftime("%b", later)))
 
     def test_what_kodis_info_says(self):
         text = livetv.plot(NEWS, NOW)
         self.assertTrue(text.startswith("[B]%s – %s[/B]  45 min left · S1 · E7 · Live" % (clock(NOW - 900), clock(NOW + 2700))), text)
         self.assertIn("Everything you need to know.", text)
-        self.assertIn("[B]Next[/B]  %s  World at One" % clock(NOW + 2700), text)
+        self.assertIn("[B]Next[/B]  %s  Midday Bulletin" % clock(NOW + 2700), text)
         self.assertEqual(livetv.plot(RADIO, NOW), "No guide")
         self.assertEqual(livetv.plot(dict(RADIO, has_guide=True), NOW), "Nothing in the guide now")
 
@@ -210,7 +211,8 @@ class ItemsTest(unittest.TestCase):
 
     def test_a_channel_plays_as_the_provider_sends_it(self):
         li = livetv.play_item(BASE, NEWS, "kodi-1", NOW)
-        self.assertEqual(li.path, BASE + "/api/live/channels/1/stream.ts?client_id=kodi-1")
+        # Read for the device's watch session, which the remote reaches.
+        self.assertEqual(li.path, BASE + "/api/live/channels/1/stream.ts?client_id=kodi-1-stream&device_kind=tv")
         self.assertEqual((li.mime, li.lookup), ("video/mp2t", False))
 
     def test_the_queue_holds_the_channels_around_the_one_played(self):
@@ -242,17 +244,107 @@ class ServiceTest(unittest.TestCase):
     def setUp(self):
         from pley import service
 
+        self.service = service
         xbmc.PlayList.entries.clear()
         del xbmcgui.notified[:]
         del xbmcgui.boxes[:]
         del xbmcgui.picks[:]
+        del xbmcgui.questions[:]
+        del xbmcgui.answers[:]
         self.player = service.Player(None, "pleyKodi/test", None)
+        self.stopped, self.played = [], []
+        self.player.stop = lambda: self.stopped.append(1)
+        self.player.play = self.played.append
+        self.playing = ""
+        self.player.playing_file = lambda: self.playing
+
+    def wait(self, check, seconds=1.0):
+        for _ in range(int(seconds / 0.02)):
+            if check():
+                return
+            time.sleep(0.02)
+
+    def taken(self, channel, message="Alex is watching Two now, on the connection this channel used."):
+        self.player.heard({"type": "live_taken_over", "session_id": "s1", "channel_id": channel, "message": message})
 
     def test_a_channel_the_server_ended_doesnt_tune_the_next(self):
         livetv.queue(BASE, CHANNELS, 0, NOW)
-        self.player.live_ended()
-        self.assertEqual(xbmc.PlayList(xbmc.PLAYLIST_VIDEO).size(), 0)
+        with mock.patch.object(self.service, "TAKEN_GRACE", 0.05):
+            self.player.live_ended("/api/live/channels/1/stream.ts?client_id=kodi-1")
+            self.assertEqual(xbmc.PlayList(xbmc.PLAYLIST_VIDEO).size(), 0)
+            # Said once no take-over's event came for it.
+            self.wait(lambda: xbmcgui.notified)
         self.assertEqual(xbmcgui.notified, [("Pley", "The server stopped this stream.")])
+
+    def test_a_channel_taken_over_stops_at_once_and_says_why_once(self):
+        livetv.queue(BASE, CHANNELS, 0, NOW)
+        self.playing = "http://127.0.0.1:5000/s3cret/api/live/channels/1/stream.ts?client_id=kodi-1"
+        self.taken(1)
+        # Its HLS session and its stream's reader each have an event, as other devices' do.
+        self.taken(1)
+        self.wait(lambda: xbmcgui.questions)
+        time.sleep(0.1)
+        self.assertEqual(self.stopped, [1])
+        self.assertEqual(xbmc.PlayList(xbmc.PLAYLIST_VIDEO).size(), 0, "Kodi tunes nothing after it")
+        self.assertEqual(xbmcgui.questions, [("Live TV stopped", "Alex is watching Two now, on the connection this channel used.", "OK", "Watch again")])
+        self.assertEqual(self.played, [], "OK leaves it stopped")
+
+    def test_watch_again_plays_the_channel_as_any_is_played(self):
+        self.playing = "http://127.0.0.1:5000/s3cret/api/live/channels/1/stream.ts?client_id=kodi-1"
+        xbmcgui.answers.append(True)
+        self.taken(1, None)
+        self.wait(lambda: self.played)
+        self.assertEqual(xbmcgui.questions[0][1], "This channel isn't being watched any more.")
+        # Never taking a connection over by itself: every connection in use says so.
+        self.assertEqual(self.played, ["plugin://plugin.video.pley/?route=live_play&id=1"])
+
+    def test_a_channel_watched_again_and_taken_over_again_says_so_again(self):
+        self.playing = "http://127.0.0.1:5000/s3cret/api/live/channels/1/stream.ts?client_id=kodi-1"
+        asked = livetv.taken_over
+        picked = threading.Event()
+
+        def answered(message):
+            picked.wait(1)
+            return asked(message)
+
+        xbmcgui.answers.extend([True, False])
+        with mock.patch.object(self.service, "TAKEN_GRACE", 0.1), mock.patch.object(livetv, "taken_over", answered):
+            self.taken(1, "Alex is watching Two now, on the connection this channel used.")
+            # Its stream ends, then Watch again is picked within the end's wait: the end says nothing.
+            self.player.live_ended("/api/live/channels/1/stream.ts?client_id=kodi-1")
+            picked.set()
+            self.wait(lambda: self.played)
+            time.sleep(0.2)
+            self.assertEqual(xbmcgui.notified, [])
+            # Playing again, the channel is taken over again within seconds.
+            self.taken(1, "Sam is watching Three now, on the connection this channel used.")
+            self.wait(lambda: len(xbmcgui.questions) == 2)
+            self.player.live_ended("/api/live/channels/1/stream.ts?client_id=kodi-1")
+            time.sleep(0.2)
+        self.assertEqual(self.stopped, [1, 1])
+        self.assertEqual(
+            [q[1] for q in xbmcgui.questions],
+            ["Alex is watching Two now, on the connection this channel used.", "Sam is watching Three now, on the connection this channel used."],
+        )
+        self.assertEqual(self.played, ["plugin://plugin.video.pley/?route=live_play&id=1"], "OK leaves it stopped")
+        self.assertEqual(xbmcgui.notified, [], "the take-overs say why, not the ends")
+
+    def test_another_channels_take_over_changes_nothing(self):
+        self.playing = "http://127.0.0.1:5000/s3cret/api/live/channels/1/stream.ts?client_id=kodi-1"
+        self.taken(2)
+        time.sleep(0.1)
+        self.assertEqual((self.stopped, xbmcgui.questions), ([], []))
+
+    def test_a_take_over_heard_after_its_stream_ended_is_said_and_the_end_says_nothing(self):
+        with mock.patch.object(self.service, "TAKEN_GRACE", 0.2):
+            self.player.live_ended("/api/live/channels/1/stream.ts?client_id=kodi-1")
+            # Kodi read the end already: nothing plays.
+            self.taken(1)
+            self.wait(lambda: xbmcgui.questions)
+            time.sleep(0.4)
+        self.assertEqual(len(xbmcgui.questions), 1)
+        self.assertEqual(self.stopped, [], "nothing plays to stop")
+        self.assertEqual(xbmcgui.notified, [], "the take-over says why, not the end")
 
     def test_a_channel_refused_on_its_way_to_kodi_can_be_watched_here_instead(self):
         played = []
@@ -277,6 +369,93 @@ class ServiceTest(unittest.TestCase):
         time.sleep(0.1)
         self.assertEqual(xbmcgui.boxes, [("All connections are in use", "The one connection is in use.")])
         self.assertEqual(xbmc.PlayList(xbmc.PLAYLIST_VIDEO).size(), 0)
+
+
+class LeavingTest(unittest.TestCase):
+    """The service leaves the watch session of a channel Kodi stops reading,
+    rather than the server keeping it 45 s; not one the server ended."""
+
+    def setUp(self):
+        from pley import service
+
+        class Now:
+            def put(self, job):
+                job()
+
+        xbmc.PlayList.entries.clear()
+        del xbmcgui.questions[:]
+        self.player = service.Player(None, "pleyKodi/test", Now())
+        self.deleted = []
+        self.player.call = lambda method, path, body=None, timeout=0, fine=(): self.deleted.append((method, path, fine))
+        self.player.stop = lambda: None
+        self.playing = ""
+        self.player.playing_file = lambda: self.playing
+        self.addCleanup(kodi.clear_property, kodi.LIVE)
+        # The TAKEN_ONCE window would keep a take-over of one test from the next.
+        self.player.taken = (None, float("-inf"))
+
+    def plays(self, channel, session):
+        """The plugin watched `channel` (kodi.LIVE), then Kodi plays its stream."""
+        kodi.set_property(kodi.LIVE, json.dumps({"session_id": session, "channel_id": channel}))
+        self.playing = "http://127.0.0.1:5000/s3cret/api/live/channels/%d/stream.ts?client_id=kodi-1-stream" % channel
+        self.player.onAVStarted()
+
+    def test_stopping_leaves_the_session_at_once(self):
+        self.plays(1, "live-1")
+        self.assertEqual(self.deleted, [])
+        self.playing = ""
+        self.player.onPlayBackStopped()
+        self.player.onPlayBackStopped()
+        self.assertEqual(self.deleted, [("DELETE", "/api/live/sessions/live-1", (404, 410))])
+
+    def test_a_stop_told_late_leaves_nothing_still_playing(self):
+        self.plays(1, "live-1")
+        self.player.onPlayBackStopped()
+        self.assertEqual(self.deleted, [])
+
+    def test_another_channel_leaves_the_one_before(self):
+        self.plays(1, "live-1")
+        self.plays(2, "live-2")
+        self.assertEqual([d[1] for d in self.deleted], ["/api/live/sessions/live-1"])
+        self.playing = ""
+        self.player.onPlayBackEnded()
+        self.assertEqual([d[1] for d in self.deleted], ["/api/live/sessions/live-1", "/api/live/sessions/live-2"])
+
+    def test_a_title_after_a_channel_leaves_it(self):
+        self.plays(1, "live-1")
+        self.playing = "http://127.0.0.1:5000/s3cret/api/playback/s/index.m3u8"
+        self.player.onAVStarted()
+        self.assertEqual([d[1] for d in self.deleted], ["/api/live/sessions/live-1"])
+
+    def test_kodi_exiting_leaves_it(self):
+        self.plays(1, "live-1")
+        self.player.closing()
+        self.player.closing()
+        self.assertEqual([d[1] for d in self.deleted], ["/api/live/sessions/live-1"])
+
+    def test_a_session_the_server_ended_isnt_left(self):
+        self.plays(1, "live-1")
+        with mock.patch("threading.Thread"):
+            self.player.heard({"type": "live_taken_over", "session_id": "s9", "channel_id": 1, "message": None})
+        self.playing = ""
+        self.player.onPlayBackStopped()
+        self.plays(1, "live-2")
+        with mock.patch("threading.Thread"):
+            self.player.heard({"type": "session_stopped", "session_id": "live-2", "by_admin": True, "message": None})
+        self.playing = ""
+        self.player.onPlayBackStopped()
+        self.plays(1, "live-3")
+        with mock.patch("threading.Timer"):
+            self.player.live_ended("/api/live/channels/1/stream.ts?client_id=kodi-1-stream")
+        self.playing = ""
+        self.player.onPlayBackEnded()
+        self.assertEqual(self.deleted, [])
+
+    def test_a_channel_kodi_never_played_isnt_held(self):
+        kodi.set_property(kodi.LIVE, json.dumps({"session_id": "live-1", "channel_id": 1}))
+        self.player.onPlayBackError()
+        self.player.closing()
+        self.assertEqual(self.deleted, [])
 
 
 class RoutesTest(unittest.TestCase):
@@ -370,7 +549,7 @@ class RoutesTest(unittest.TestCase):
         self.assertEqual(on[2].label, "On now  Morning Briefing: Part 7")
         self.assertEqual((on[1], on[3]), ("plugin://plugin.video.pley/?route=live_play&id=1", False))
         # "Today", or "Tomorrow" run in the hour before midnight.
-        self.assertEqual(later[2].label, "%s %s  World at One" % (livetv.day(NOW + 2700, NOW), clock(NOW + 2700)))
+        self.assertEqual(later[2].label, "%s %s  Midday Bulletin" % (livetv.day(NOW + 2700, NOW), clock(NOW + 2700)))
         self.assertNotIn("IsPlayable", later[2].properties)
         self.assertEqual(more[2].label, "Later")
         self.assertIn("from=%d" % (NOW + 5400), more[1])
@@ -385,7 +564,8 @@ class RoutesTest(unittest.TestCase):
         self.assertTrue(ok)
         self.assertTrue(li.path.startswith(self.server.url + "/s3cret/api/live/channels/1/stream.ts?client_id=kodi-"))
         watch = next(r for r in self.server.requests if r.path.endswith("/watch"))
-        self.assertEqual(watch.json()["client_id"], li.path.rsplit("=", 1)[1], "the same device for both")
+        reader = urllib.parse.parse_qs(urllib.parse.urlsplit(li.path).query)["client_id"][0]
+        self.assertEqual(reader, watch.json()["client_id"] + "-stream", "the stream is read for the device's session")
         self.assertNotIn(("end", False), xbmcplugin.calls, "nothing listed: Kodi plays")
 
     def test_every_connection_in_use_is_said_and_the_queue_let_go(self):
@@ -508,7 +688,7 @@ class LiveScreenTest(unittest.TestCase):
         self.assertEqual(news.label2, "Morning Briefing: Part 7")
         self.assertEqual(news.properties["when"].split(" · ")[1], "45 min left")
         self.assertEqual(news.properties["airs"], "Today · %s – %s · S1 · E7 · Live" % (clock(NOW - 900), clock(NOW + 2700)))
-        self.assertEqual(news.properties["next"], "%s  World at One" % clock(NOW + 2700))
+        self.assertEqual(news.properties["next"], "%s  Midday Bulletin" % clock(NOW + 2700))
         self.assertTrue(news.properties["picture"].endswith("/image?w=640"))
         # How far into it: the progress bar, as a tile's.
         self.assertEqual(news.video.values["setResumePoint"][1], 3600.0)
@@ -604,10 +784,10 @@ class LiveScreenTest(unittest.TestCase):
         with test_window.Dialogs(picks=[1, -1]) as asked:
             self.screen.info(L.LIVE_LIST)
         labels, preselect = asked.shown[0]
-        upcoming = "%s %s  ·  World at One" % (livetv.day(NOW + 2700, NOW), clock(NOW + 2700))
+        upcoming = "%s %s  ·  Midday Bulletin" % (livetv.day(NOW + 2700, NOW), clock(NOW + 2700))
         self.assertEqual(labels, ["On now  ·  Morning Briefing: Part 7", upcoming, "Later"])
         self.assertEqual(asked.shown[1][1], 1)
-        self.assertEqual(asked.asked[0][0], "World at One")
+        self.assertEqual(asked.asked[0][0], "Midday Bulletin")
         self.assertIn("101 Pley News HD", asked.asked[0][1])
         guides = [q for p, q in self.asked if p == "/api/live/guide"]
         self.assertEqual(guides, [{"from": NOW, "to": NOW + 6 * HOUR, "ids": 1}])
@@ -658,7 +838,7 @@ class LiveScreenTest(unittest.TestCase):
         row = screen.rows.rows[-1]
         self.assertEqual((row["title"], row["shape"]), ("Live TV", "channel"))
         tiles = self.win.made[L.slot_list(L.SEARCH_ROWS, 0, "channel")].items
-        self.assertEqual([(t.label, t.label2) for t in tiles], [("101 Pley News HD", "Morning Briefing: Part 7"), ("102 Sport 1080i", "Match of the Day")])
+        self.assertEqual([(t.label, t.label2) for t in tiles], [("101 Pley News HD", "Morning Briefing: Part 7"), ("102 Sport 1080i", "Weekend Highlights")])
         self.assertEqual(tiles[0].art["tile"], self.win.session.base + "/api/live/channels/1/logo?w=320")
         # Chosen, it plays, the others found queued.
         list_id = L.slot_list(L.SEARCH_ROWS, 0, "channel")

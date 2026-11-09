@@ -4,6 +4,7 @@ import app.pley.android.model.AppProfile
 import app.pley.android.model.ApiErrorBody
 import app.pley.android.model.Added
 import app.pley.android.model.ArrService
+import app.pley.android.model.DeviceProfileName
 import app.pley.android.model.DiscoverDetail
 import app.pley.android.model.DiscoverPage
 import app.pley.android.model.DownloadState
@@ -24,6 +25,7 @@ import app.pley.android.model.CollectionSort
 import app.pley.android.model.ConversionInfo
 import app.pley.android.model.CreditRole
 import app.pley.android.model.DynamicRange
+import app.pley.android.model.DynamicRangeFilter
 import app.pley.android.model.EntryIds
 import app.pley.android.model.ExtraType
 import app.pley.android.model.Health
@@ -55,6 +57,8 @@ import app.pley.android.model.PersonDetail
 import app.pley.android.model.PlaybackInfo
 import app.pley.android.model.PlaybackMethod
 import app.pley.android.model.PlaybackRequest
+import app.pley.android.model.PlayerCommandRequest
+import app.pley.android.model.PlayingSession
 import app.pley.android.model.PlaylistDetail
 import app.pley.android.model.PlaylistList
 import app.pley.android.model.PlaylistPatch
@@ -63,6 +67,8 @@ import app.pley.android.model.ProfileNeeds
 import app.pley.android.model.ProgressReport
 import app.pley.android.model.ProgressState
 import app.pley.android.model.RatingRequest
+import app.pley.android.model.RemoteDevice
+import app.pley.android.model.ResolutionFilter
 import app.pley.android.model.ScanPhase
 import app.pley.android.model.SearchResults
 import app.pley.android.model.ServerEvent
@@ -143,6 +149,10 @@ class FixturesTest {
         "playback/progress_request.json" to ProgressReport.serializer(),
         "playback/streams_request.json" to StreamChoice.serializer(),
         "playback/rating_request.json" to RatingRequest.serializer(),
+        "sessions/list.json" to ListSerializer(PlayingSession.serializer()),
+        "sessions/command_request.json" to PlayerCommandRequest.serializer(),
+        "remote/devices.json" to ListSerializer(RemoteDevice.serializer()),
+        "remote/devices_household.json" to ListSerializer(RemoteDevice.serializer()),
         "conversions/direct.json" to ConversionInfo.serializer(),
         "conversions/running.json" to ConversionInfo.serializer(),
         "trickplay/info.json" to TrickplayInfo.serializer(),
@@ -154,6 +164,9 @@ class FixturesTest {
         "events/library_changed.json" to ServerEvent.Serializer,
         "events/libraries_changed.json" to ServerEvent.Serializer,
         "events/sessions_changed.json" to ServerEvent.Serializer,
+        "events/player_command.json" to ServerEvent.Serializer,
+        "events/cast.json" to ServerEvent.Serializer,
+        "events/cast_switch.json" to ServerEvent.Serializer,
         "events/unknown_type.json" to ServerEvent.Serializer,
         "live/summary.json" to LiveSummary.serializer(),
         "live/channels.json" to ListSerializer(LiveChannel.serializer()),
@@ -182,6 +195,7 @@ class FixturesTest {
         "errors/tmdb_down.json" to ApiErrorBody.serializer(),
         "errors/declined.json" to ApiErrorBody.serializer(),
         "errors/conflict_request.json" to ApiErrorBody.serializer(),
+        "errors/not_controllable.json" to ApiErrorBody.serializer(),
     )
 
     @Test
@@ -198,7 +212,7 @@ class FixturesTest {
         assertTrue("no fixtures found on the classpath", files.isNotEmpty())
         assertEquals("fixtures missing from the table", emptyList<String>(), files - table.keys)
         assertEquals("table entries without a file", emptyList<String>(), (table.keys - files.toSet()).toList())
-        assertEquals(92, files.size)
+        assertEquals(100, files.size)
     }
 
     @Test
@@ -360,9 +374,24 @@ class FixturesTest {
 
     @Test
     fun listingsAndRows() {
-        assertEquals(412, Fixtures.decode<ItemsPage>("libraries/items.json").total)
+        val listing = Fixtures.decode<ItemsPage>("libraries/items.json")
+        assertEquals(412, listing.total)
+        // Every listing carries what the files are like, whatever its sort.
+        assertTrue(listing.items.all { it.media?.dynamicRange != null })
         val byBitrate = Fixtures.decode<ItemsPage>("libraries/items_by_bitrate.json")
         assertTrue(byBitrate.items.all { it.media?.bitrate != null })
+        val filters = Fixtures.decode<LibraryFilters>("libraries/filters.json")
+        assertEquals(listOf(ResolutionFilter.Uhd, ResolutionFilter.FullHd), filters.resolutionChoices)
+        assertEquals(
+            listOf(DynamicRangeFilter.Hdr10, DynamicRangeFilter.DolbyVision, DynamicRangeFilter.Sdr),
+            filters.dynamicRangeChoices,
+        )
+        // An older server's answer has neither, and a token this app doesn't know is left out.
+        assertEquals(LibraryFilters(listOf("Drama"), listOf(1999)), PleyJson.decodeFromString(LibraryFilters.serializer(), """{"genres":["Drama"],"years":[1999]}"""))
+        assertEquals(
+            listOf(ResolutionFilter.Sd),
+            PleyJson.decodeFromString(LibraryFilters.serializer(), """{"resolutions":["8k","sd"]}""").resolutionChoices,
+        )
         val home = Fixtures.decode<Hubs>("hubs/home.json").hubs
         assertNull(home.first().libraryId)
         assertEquals("continue_watching", home.first().key)
@@ -397,6 +426,11 @@ class FixturesTest {
         assertEquals(ServerEvent.ScanProgress(1, ScanPhase.Probing, 118, 412), Fixtures.decode<ServerEvent>("events/scan_progress.json"))
         assertEquals(ServerEvent.LibrariesChanged, Fixtures.decode<ServerEvent>("events/libraries_changed.json"))
         assertEquals(ServerEvent.LibraryChanged(2), ServerEvent.parse(Fixtures.text("events/library_changed.json")))
+        // A cast from another profile of the household: the caster's profile, and the ticket to switch to it with.
+        val switch = Fixtures.decode<ServerEvent>("events/cast_switch.json") as ServerEvent.Cast
+        assertEquals(2L to "pley_st_9Qe2vT4mXb7cLp1R", switch.profileId to switch.switchTicket)
+        val (own, theirs) = Fixtures.decode<List<RemoteDevice>>("remote/devices_household.json")
+        assertEquals(null to DeviceProfileName(3, "Sam"), own.profile to theirs.profile)
     }
 
     @Test
