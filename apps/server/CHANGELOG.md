@@ -31,8 +31,15 @@ describes how they are made.
 - Intel graphics on Windows: picture subtitles (PGS, VobSub, DVB) burned
   into SDR video are overlaid by Quick Sync on the GPU. These transcodes use
   a quarter to a sixth of the CPU they did, and run faster.
+- Intel graphics on Linux and in Docker: Quick Sync does what it does on
+  Windows, where its startup checks pass: it decodes and scales HDR before
+  tone mapping, tone maps with Intel's VAAPI driver when several HDR
+  transcodes would fall behind, and overlays picture subtitles on the GPU.
 
 ### Fixed
+
+- Intel graphics on Linux: Quick Sync uses the Intel GPU when an NVIDIA or
+  AMD card comes first, instead of trying that one and failing.
 
 - Intel graphics: transcodes no longer fail when the CPU encoder takes over
   (all Quick Sync sessions busy, or the Quick Sync encoder failing to

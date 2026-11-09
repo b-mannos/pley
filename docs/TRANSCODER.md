@@ -203,7 +203,7 @@ before using what it names:
 | `vulkan_decode` | codecs the GPU decodes straight into Vulkan memory, for libplacebo |
 | `vulkan_encode` | `h264_vulkan` encodes libplacebo's output on the GPU |
 | `gpu_pipelines` | GPU-only decode → scale → encode pipelines, with the codecs each passed for, and `main10`: those Quick Sync's keeps in 10 bits into its HEVC Main 10 encoder (HDR kept) |
-| `qsv_tonemap` | Quick Sync's scaler tone maps HDR10 its decoder decoded into `h264_qsv` (Windows; [Sharing the GPU](#sharing-the-gpu)) |
+| `qsv_tonemap` | Quick Sync's scaler (VAAPI's `tonemap_vaapi` on Linux) tone maps HDR10 its decoder decoded into `h264_qsv` ([Sharing the GPU](#sharing-the-gpu)) |
 | `qsv_opencl_tonemap` | OpenCL tone maps HDR10 between Quick Sync's decoder and `h264_qsv` with BT.2390's curve, the frames mapped rather than copied (Windows; [Tone mapping](#tone-mapping)) |
 | `vaapi_tonemappers` | tone mappers whose frames reach a VAAPI encoder ([VAAPI encoders](#vaapi-encoders)) |
 | `vaapi_vulkan_decode` | `vulkan_decode` on the Vulkan device made from the VAAPI one |
@@ -211,7 +211,7 @@ before using what it names:
 | `amf_upload` | FFmpeg uploads AMF's frames to the AMD GPU ([AMF on Windows](#amf-on-windows)) |
 | `h264_metadata` | FFmpeg has the `h264_metadata` bitstream filter, which writes the colour primaries `h264_amf` leaves out |
 | `subtitle_burn_image`, `subtitle_burn_text` | picture and text subtitles can be burned in |
-| `qsv_overlay` | Quick Sync lays picture subtitles on frames it decoded (Windows; [Subtitle burn-in](#subtitle-burn-in)) |
+| `qsv_overlay` | Quick Sync lays picture subtitles on frames it decoded ([Subtitle burn-in](#subtitle-burn-in)) |
 | `readrate`, `readrate_catchup` | `-readrate` and `-readrate_catchup` work ([Throttling](#throttling)) |
 | `chromaprint` | `POST /v1/fingerprint` works |
 | `hls_master_playlist` | jobs have `master.m3u8`, and remuxes honour `dolby_vision` and `strip_hdr10plus` |
@@ -795,6 +795,25 @@ Each candidate encoder is test-encoded at start, not just listed:
 |---|---|
 | NVENC, QSV (Quick Sync), AMF | Windows and Linux |
 | VAAPI | Linux, on the first Intel or AMD render node (`PLEY_VAAPI_DEVICE` names another) |
+
+#### Quick Sync on Linux
+
+Quick Sync's device is made from VAAPI's on the first Intel render node
+(`PLEY_VAAPI_DEVICE` names another), in jobs and their start-up tests alike:
+
+```
+-init_hw_device vaapi=va:<render node>,driver=iHD -init_hw_device qsv=qs@va
+```
+
+- FFmpeg's own Quick Sync device is on the first render node, which is
+  another GPU's on a computer with an NVIDIA or AMD card beside Intel's
+  graphics. Its decoder, filters and encoder then use `qs`, and VAAPI's
+  decoder `va`.
+- Quick Sync needs Intel's runtime besides the VAAPI driver: `libmfx-gen1.2`
+  for 11th-generation Core (Tiger Lake) and later, `libmfx1` for older. The
+  Docker image has only the first (Debian 13 dropped `libmfx1`), so older
+  Intel graphics fail Quick Sync's encoder test there and transcode with
+  VAAPI.
 | VideoToolbox | macOS |
 | libx264, libx265 | everywhere (software fallback) |
 
@@ -847,10 +866,10 @@ the VPS, SPS and PPS with every forced keyframe.
 ### Hardware decoding
 
 - The decoder is paired with the encoder: `cuda` with NVENC, `d3d11va` with
-  QSV or AMF on Windows, `vaapi` with VAAPI, `videotoolbox` with
-  VideoToolbox. FFmpeg falls back to software decoding when the GPU doesn't
-  decode the codec. Quick Sync's own decoders (`qsv`) decode for its
-  zero-copy pipeline, and on Windows for some frames that go to memory
+  QSV or AMF on Windows, `vaapi` with VAAPI (and QSV on Linux),
+  `videotoolbox` with VideoToolbox. FFmpeg falls back to software decoding
+  when the GPU doesn't decode the codec. Quick Sync's own decoders (`qsv`)
+  decode for its zero-copy pipeline, and for some frames that go to memory
   (below); they have no software fallback, so they decode only what their
   pipeline's start-up test passed.
 - A job whose hardware decoder failed to start shows `cpu` as its decoder,
@@ -864,16 +883,17 @@ the VPS, SPS and PPS with every forced keyframe.
   (`gpu_pipelines`); not for interlaced video, nor for libplacebo, which
   scales as it tone maps, except after Quick Sync's decoder. Mesa's D3D12
   VAAPI driver (WSL) crashes in `scale_vaapi`, so it fails the test.
-- **Quick Sync on Windows.** A Quick Sync job whose frames go to memory
+- **Quick Sync into memory.** A Quick Sync job whose frames go to memory
   decodes with `qsv` where its pipeline passed for the codec, and
   `vpp_qsv` scales the frames on the way, libplacebo's too, which then
   tone maps at the output's size. Direct3D 11's decoder copies them whole
   (25 MB a frame of 4K HDR), and some Intel drivers give it no HEVC at
-  all. Direct3D 11 still decodes 8-bit video kept at its size (its copy to
-  memory costs the CPU less), interlaced and turned video, and Dolby Vision
-  and HDR10+ that libplacebo tone maps: Quick Sync's decoder reads neither's
-  metadata, and Dolby Vision profile 5's colours are in it. A software
-  encoder standing in for Quick Sync's gets its frames through `vpp_qsv`.
+  all; VAAPI's scaler makes no 10 bits. Direct3D 11 (VAAPI on Linux) still
+  decodes 8-bit video kept at its size (its copy to memory costs the CPU
+  less), interlaced and turned video, and Dolby Vision and HDR10+ that
+  libplacebo tone maps: Quick Sync's decoder reads neither's metadata, and
+  Dolby Vision profile 5's colours are in it. A software encoder standing in
+  for Quick Sync's gets its frames through `vpp_qsv`.
 - **Chroma and depth.** The start-up tests decode 8- and 10-bit 4:2:0
   video, and 10-bit 4:2:2 HEVC (what cameras record). Other video (4:2:2
   H.264, 4:4:4, 12 bits) stays off the GPU pipelines and Vulkan decoding,
@@ -963,8 +983,7 @@ Several jobs tone mapping with libplacebo share the GPU (`src/share.rs`):
   when all of these hold:
   - its GPU would decode into memory for libplacebo and encode on the same
     video engine (AMF, VAAPI, Quick Sync; not NVIDIA), and wouldn't scale
-    the frames first (Quick Sync on Windows does: those jobs stay on the
-    GPU);
+    the frames first (Quick Sync does: those jobs stay on the GPU);
   - the GPU falls behind: no quality measured fast enough for the jobs, or
     they fell behind even at `fast`;
   - the CPU keeps 2 cores free after its decoders (4 cores for 4K at 24 fps,
@@ -985,18 +1004,26 @@ Several jobs tone mapping with libplacebo share the GPU (`src/share.rs`):
   stays at least 0.9 of what it was; then the start-up measurement is tried
   again. Each is logged once, at `info`.
 - **Tone mapping on Quick Sync.** Where the GPU falls behind (as for decoding
-  on the CPU), HDR10 made SDR that Quick Sync decodes and scales (Windows) is
-  tone mapped by its scaler instead (status `tonemap_quick_sync: true`),
-  where that passed a start-up test (`qsv_tonemap`) and libplacebo isn't
-  asked for (`tonemap=libplacebo`): scaled in 10 bits, then brightness 16 up
-  and tone mapped to NV12 at the output's size, each in a pass of its
-  own (Quick Sync does each at the size it is given), into `h264_qsv`
-  without leaving the GPU (to memory for x264 standing in, or for burned-in
-  subtitles). It costs the GPU a fraction of libplacebo's work: a 4K60 film
-  made 1080p went at about 225 frames a second rather than 99 to 127 on an
-  Iris Xe, and two at once at 120 each. The picture is as bright, with
-  highlights clipped sooner and skin a little pinker than libplacebo's, so
-  it is only for when libplacebo can't keep up.
+  on the CPU), HDR10 made SDR that Quick Sync decodes and scales is tone
+  mapped by its scaler instead (status `tonemap_quick_sync: true`), where
+  that passed a start-up test (`qsv_tonemap`) and libplacebo isn't asked for
+  (`tonemap=libplacebo`): scaled in 10 bits, then brightness 16 up and tone
+  mapped to NV12 at the output's size, each in a pass of its own (Quick Sync
+  does each at the size it is given), into `h264_qsv` without leaving the
+  GPU (to memory for x264 standing in, or for burned-in subtitles). It costs
+  the GPU a fraction of libplacebo's work: a 4K60 film made 1080p went at
+  about 225 frames a second rather than 99 to 127 on an Iris Xe on Windows,
+  and two at once at 120 each. The picture is as bright, with highlights
+  clipped sooner and skin a little pinker than libplacebo's, so it is only
+  for when libplacebo can't keep up. On Linux the curve is VAAPI's, the
+  Intel driver's own, the frames mapped to VAAPI's device and back rather
+  than copied, as Jellyfin does there:
+
+  ```
+  vpp_qsv=…:format=p010le,vpp_qsv=procamp=1:brightness=16,
+  hwmap=derive_device=vaapi,format=vaapi,tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,
+  hwmap=derive_device=qsv,format=qsv
+  ```
 - **Moving running jobs.** A running job moves to the quality and decoding
   the load calls for: at once when another job starts using the GPU
   (checked every 5 s), when a lesson calls for less GPU work (a cheaper
@@ -1053,8 +1080,8 @@ video is encoded in HEVC Main 10 instead of being tone mapped.
 - Quick Sync keeps HDR on the GPU where its start-up test passed in 10 bits
   too (`gpu_pipelines[].main10`, 10-bit HEVC and AV1): decoded by Quick
   Sync, scaled into P010 by `vpp_qsv`, encoded by `hevc_qsv` in Main 10,
-  the HDR10 metadata going with the frames. Where it didn't, Windows still
-  decodes and scales it with Quick Sync before the copy to memory
+  the HDR10 metadata going with the frames. Where it didn't, Quick Sync
+  still decodes and scales it before the copy to memory
   ([Hardware decoding](#hardware-decoding)). Hardware encoders other than
   NVENC and Quick Sync stay off the zero-copy GPU paths for HDR.
 
@@ -1068,12 +1095,14 @@ that went away, say), the frame is grabbed as it is.
 
 - **Picture subtitles** (PGS, VobSub, DVB, `.sup` files) are overlaid on the
   scaled, tone-mapped frame, their canvas fitted to its width, blended on the
-  CPU. On Windows, Quick Sync lays them on 8-bit SDR itself (`overlay_qsv`),
-  where its start-up test passed (`qsv_overlay`): over the frame at the
-  source's size, then scaled, without the frames leaving the GPU. Its device
-  is made from Direct3D 11's (`d3d11va=dx:,vendor_id=0x8086`, `qsv=qs@dx`):
-  on the one FFmpeg makes itself, uploading the subtitles fails. A 1080p film
-  took a sixth of the CPU it took blended in memory, a 720p one a quarter.
+  CPU. Quick Sync lays them on 8-bit SDR itself (`overlay_qsv`), where its
+  start-up test passed (`qsv_overlay`): over the frame at the source's size,
+  then scaled, without the frames leaving the GPU. On Windows its device is
+  made from Direct3D 11's (`d3d11va=dx:,vendor_id=0x8086`, `qsv=qs@dx`): on
+  the one FFmpeg makes itself, uploading the subtitles fails. On Linux it is
+  made from VAAPI's, as for every Quick Sync job there
+  ([Quick Sync on Linux](#quick-sync-on-linux)). A 1080p film took a sixth of
+  the CPU it took blended in memory on Windows, a 720p one a quarter.
   The last subtitle picture is kept to the end (`eof_action=repeat`): with
   `pass`, Quick Sync drops the video's last frame.
 - **Text subtitles** (SRT, ASS) are rendered by libass from an `.ass` file

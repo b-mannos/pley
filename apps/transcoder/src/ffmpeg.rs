@@ -23,7 +23,7 @@ use crate::devices;
 use crate::util::{configure_child, resolve_executable};
 
 /// Bump when detection logic changes so stale caches are ignored.
-const DETECTION_REVISION: u32 = 19;
+const DETECTION_REVISION: u32 = 20;
 
 pub struct Ffmpeg {
     pub ffmpeg: PathBuf,
@@ -287,6 +287,11 @@ async fn test_encoder(ffmpeg: &Path, name: &str, accel: HwAccel, main10: bool) -
     let mut args: Vec<&str> = vec!["-hide_banner", "-nostdin", "-loglevel", "error"];
     if accel == HwAccel::Vaapi {
         args.extend(["-vaapi_device", devices::vaapi_device()]);
+    }
+    // On Intel's GPU, as jobs encode.
+    let qsv = crate::plan::qsv_vaapi_devices(devices::qsv_device());
+    if accel == HwAccel::Qsv && crate::plan::QSV_ON_VAAPI {
+        args.extend(qsv.iter().map(String::as_str));
     }
     args.extend(["-f", "lavfi", "-i", "color=black:s=320x240:r=25:d=0.2", "-frames:v", "3"]);
     match (accel, main10) {
@@ -836,6 +841,12 @@ async fn detect_gpu_pipelines(
 ) -> GpuDetection {
     let working = |name: &str| caps.encoders.iter().any(|e| e.name == name);
     let hwaccel = |name: &str| caps.hwaccels.iter().any(|h| h == name);
+    // Quick Sync's frames on the GPU: on Linux on Intel's render node, its
+    // device made from VAAPI's, as jobs make it.
+    let qsv_gpu = crate::plan::qsv_gpu_devices(&crate::plan::QSV_DECODE, devices::qsv_device());
+    let qsv_gpu: Vec<&str> = qsv_gpu.iter().map(String::as_str).collect();
+    let qsv_overlay_devices = crate::plan::qsv_gpu_devices(&crate::plan::QSV_D3D11_DEVICES, devices::qsv_device());
+    let qsv_overlay_devices: Vec<&str> = qsv_overlay_devices.iter().map(String::as_str).collect();
     let mut candidates: Vec<(HwAccel, Vec<&str>, &str, Vec<&str>)> = Vec::new();
     if working("h264_nvenc") && hwaccel("cuda") && filters.contains("scale_cuda") {
         candidates.push((
@@ -854,12 +865,7 @@ async fn detect_gpu_pipelines(
         ));
     }
     if working("h264_qsv") && hwaccel("qsv") && filters.contains("vpp_qsv") {
-        candidates.push((
-            HwAccel::Qsv,
-            vec!["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"],
-            "vpp_qsv=w=160:h=120:format=nv12",
-            vec!["-c:v", "h264_qsv"],
-        ));
+        candidates.push((HwAccel::Qsv, qsv_gpu.clone(), "vpp_qsv=w=160:h=120:format=nv12", vec!["-c:v", "h264_qsv"]));
     }
     if cfg!(target_os = "macos")
         && working("h264_videotoolbox")
@@ -1044,7 +1050,7 @@ async fn detect_gpu_pipelines(
         && caps.encoders.iter().any(|e| e.name == "hevc_qsv" && e.main10);
     let main10_tests = futures::future::join_all(
         clips.iter().filter(|(key, _)| qsv_main10 && MAIN10_KEYS.contains(key)).map(|(key, clip)| {
-            let mut args = base("error", &["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"], clip);
+            let mut args = base("error", &qsv_gpu, clip);
             args.extend(
                 [
                     "-vf",
@@ -1063,30 +1069,29 @@ async fn detect_gpu_pipelines(
             async move { (key.to_string(), test.await) }
         }),
     );
-    // Quick Sync on Windows into its H.264 encoder: what the next three tests
-    // need (only Windows scales with Quick Sync on the way to memory).
-    let qsv_h264 = cfg!(windows) && candidates.iter().any(|(accel, ..)| *accel == HwAccel::Qsv) && working("h264_qsv");
-    // HDR10 tone mapped by Quick Sync's scaler, from its decoder into its
-    // H.264 encoder (see `Tonemapper::QuickSync`).
+    // Quick Sync into its H.264 encoder: what the next three tests need.
+    let qsv_h264 = candidates.iter().any(|(accel, ..)| *accel == HwAccel::Qsv) && working("h264_qsv");
+    // HDR10 tone mapped by Quick Sync's scaler (VAAPI's on Linux), from its
+    // decoder into its H.264 encoder (see `Tonemapper::QuickSync`).
     let qsv_tonemap_test = async {
         let Some((_, clip)) = clips.iter().find(|(k, _)| *k == "hevc10") else { return false };
         if !qsv_h264 {
             return false;
         }
-        let mut args = base("error", &["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"], clip);
+        let mut args = base("error", &qsv_gpu, clip);
         let vf = format!("{HDR_TAGS},{}", crate::plan::qsv_tonemap(160, 120));
         args.extend(["-vf".to_string(), vf]);
         args.extend(["-c:v", "h264_qsv", "-f", "null", "-"].map(String::from));
         run_test(args).await
     };
-    // Picture subtitles laid on by Quick Sync (Windows): a translucent
-    // picture uploaded to its device, made from Direct3D 11's.
+    // Picture subtitles laid on by Quick Sync: a translucent picture
+    // uploaded to its device, made from Direct3D 11's (VAAPI's on Linux).
     let qsv_overlay_test = async {
         let Some((_, clip)) = clips.iter().find(|(k, _)| *k == "h264") else { return false };
         if !qsv_h264 {
             return false;
         }
-        let mut args = base("error", &crate::plan::QSV_D3D11_DEVICES, clip);
+        let mut args = base("error", &qsv_overlay_devices, clip);
         args.extend(
             [
                 "-f",
@@ -1113,7 +1118,7 @@ async fn detect_gpu_pipelines(
     // 10-bit Quick Sync frames to OpenCL and have no BT.2390 there.
     let qsv_opencl_test = async {
         let Some((_, clip)) = clips.iter().find(|(k, _)| *k == "hevc10") else { return false };
-        if !(qsv_h264 && filters.contains("tonemap_opencl")) {
+        if !(cfg!(windows) && qsv_h264 && filters.contains("tonemap_opencl")) {
             return false;
         }
         let mut args = base("error", &crate::plan::QSV_OPENCL_DEVICES, clip);
