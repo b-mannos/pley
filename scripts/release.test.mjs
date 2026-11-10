@@ -318,9 +318,10 @@ describe("releases", () => {
     addEntry(dir, "kodi", "Kodi's fix");
     bumped(f, "kodi", "patch");
     const one = pending(dir);
-    expect(one).toMatchObject({ tag: "release-2026-11-01", title: "Pley for Kodi 0.0.2", problems: [] });
+    // A release of one unit is named after its day as any other, its notes open under the unit's name.
+    expect(one).toMatchObject({ tag: "release-2026-11-01", title: "Pley 2026-11-01", problems: [] });
     expect(one.units.map((u) => [u.unit, u.from, u.to, u.later])).toEqual([["kodi", "0.0.1", "0.0.2", []]]);
-    expect(one.notes).toBe("### Fixed\n\n- Kodi's fix");
+    expect(one.notes).toBe("<details open>\n<summary><strong>Pley for Kodi 0.0.2</strong></summary>\n\n### Fixed\n\n- Kodi's fix\n\n</details>");
 
     // Another unit joins the release, with its own version.
     addEntry(dir, "roku", "Roku's fix");
