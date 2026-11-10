@@ -8,6 +8,8 @@ describes how they are made.
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-11-10
+
 ### Added
 
 - On Android TV, a show whose seasons have posters of their own shows
@@ -793,7 +795,8 @@ describes how they are made.
 - First release with a version of its own (builds before it carried 0.2.0,
   the version every app shared).
 
-[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-08...HEAD
+[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-10...HEAD
+[0.1.10]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-10
 [0.1.9]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-08
 [0.1.8]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-06
 [0.1.7]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-05
