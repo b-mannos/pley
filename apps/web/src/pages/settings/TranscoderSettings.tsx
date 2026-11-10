@@ -3,7 +3,7 @@ import { Trans, useTranslation } from "react-i18next";
 import { CircleAlert, FolderOpen } from "lucide-react";
 import { errorMessage } from "@/api/client";
 import { useSaveTranscodeDir, useSystemInfo } from "@/api/hooks";
-import type { HwAccel, Settings, ToneMapping, TranscodeDir, TranscodePreset } from "@/api/types";
+import type { DolbyVisionFel, HwAccel, Settings, ToneMapping, TranscodeDir, TranscodePreset } from "@/api/types";
 import { FolderPicker } from "@/components/FolderPicker";
 import { useToast } from "@/components/Toast";
 import { Button, Select, TextInput, Toggle } from "@/components/ui";
@@ -33,6 +33,7 @@ const KEYS = [
   "hwaccel",
   "hardware_decoding",
   "tonemapping",
+  "dolby_vision_fel",
   "transcode_preset",
   "max_transcodes",
   "throttle_transcodes",
@@ -164,6 +165,9 @@ export function TranscoderSettings() {
         const fittedNote = (key: keyof AccelFit["notes"]) => (draft.dirty ? fitted[key] : undefined);
         const noThrottling = known?.throttling === false;
         const memoryProblem = memoryReason(system.data, form.throttle_transcodes);
+        const fel = form.dolby_vision_fel ?? "base_layer";
+        // A transcoder from before the choice tone maps by the metadata, whatever is saved.
+        const felTooOld = tc?.available === true && tc.dolby_vision_fel === false;
         const memoryBudget = tc?.memory?.available ? tc.memory.budget_bytes : 0;
 
         return (
@@ -282,6 +286,23 @@ export function TranscoderSettings() {
                 ) : fittedNote("tonemapping") ? (
                   <Note>{fittedNote("tonemapping")}</Note>
                 ) : null}
+              </Row>
+              <Row label={t("transcoder.video.fel")} htmlFor="dolby-vision-fel" hint={t("transcoder.video.felHint")}>
+                <Select
+                  id="dolby-vision-fel"
+                  value={fel}
+                  disabled={felTooOld}
+                  onChange={(e) => set("dolby_vision_fel", e.target.value as DolbyVisionFel)}
+                  className="w-full"
+                >
+                  <option value="base_layer">{t("transcoder.video.felBaseLayer")}</option>
+                  <option value="metadata">{t("transcoder.video.felMetadata")}</option>
+                </Select>
+                {felTooOld ? (
+                  <Note notice>{t("transcoder.video.felOlderTranscoder")}</Note>
+                ) : (
+                  <Note>{t(fel === "metadata" ? "transcoder.video.felMetadataNote" : "transcoder.video.felBaseLayerNote")}</Note>
+                )}
               </Row>
             </Group>
 

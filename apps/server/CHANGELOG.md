@@ -9,6 +9,15 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Added
+
+- Settings → Transcoder has a Dolby Vision FEL choice. Dolby Vision profile
+  7 with a full enhancement layer (many UHD Blu-rays) is now transcoded
+  from its HDR10 base layer alone, since no transcoder can read that layer:
+  the right picture for every title, where the Dolby Vision brightness made
+  some too dark or too bright. On Intel graphics it then stays on the GPU.
+  The choice brings the Dolby Vision brightness back.
+
 ### Changed
 
 - Intel graphics on Windows: HDR10 is tone mapped with OpenCL on the GPU,

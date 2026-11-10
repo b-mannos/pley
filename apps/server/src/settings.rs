@@ -4,7 +4,8 @@
 use std::sync::Arc;
 
 use pley_transcoder_api::{
-    Capabilities, EncoderInfo, HwAccel, TonemapMode, Tonemapper, TranscodeOptions, TranscoderInfo, VideoCodec,
+    Capabilities, DolbyVisionFel, EncoderInfo, HwAccel, TonemapMode, Tonemapper, TranscodeOptions, TranscoderInfo,
+    VideoCodec,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
@@ -72,6 +73,10 @@ pub struct Settings {
     /// Keep transcodes' segments in memory where the transcoder can (a
     /// folder in RAM with room: Linux's `/dev/shm`), else on disk.
     pub transcode_in_memory: bool,
+    /// What transcodes make of Dolby Vision profile 7 with a full
+    /// enhancement layer (FEL): its HDR10 base layer alone, or that with
+    /// its Dolby Vision metadata ([`DolbyVisionFel`]).
+    pub dolby_vision_fel: DolbyVisionFel,
     pub scan_interval_minutes: u32,
     pub watch_libraries: bool,
     /// Find intros and credits (Skip Intro / Skip Credits) in the background.
@@ -209,6 +214,7 @@ impl Default for Settings {
             transcode_preset: "auto".into(),
             throttle_transcodes: true,
             transcode_in_memory: true,
+            dolby_vision_fel: DolbyVisionFel::BaseLayer,
             scan_interval_minutes: 360,
             watch_libraries: true,
             detect_markers: true,
@@ -316,6 +322,7 @@ impl Settings {
             preset: Some(self.transcode_preset.clone()),
             throttle: self.throttle_transcodes,
             in_memory: self.transcode_in_memory,
+            dolby_vision_fel: self.dolby_vision_fel,
         }
     }
 }
@@ -568,6 +575,7 @@ pub struct SettingsPatch {
     pub transcode_preset: Option<String>,
     pub throttle_transcodes: Option<bool>,
     pub transcode_in_memory: Option<bool>,
+    pub dolby_vision_fel: Option<DolbyVisionFel>,
     pub scan_interval_minutes: Option<u32>,
     pub watch_libraries: Option<bool>,
     pub detect_markers: Option<bool>,
@@ -712,6 +720,9 @@ impl SettingsStore {
         }
         if let Some(v) = patch.transcode_in_memory {
             next.transcode_in_memory = v;
+        }
+        if let Some(v) = patch.dolby_vision_fel {
+            next.dolby_vision_fel = v;
         }
         if let Some(v) = patch.scan_interval_minutes {
             next.scan_interval_minutes = v.min(7 * 24 * 60);
@@ -1157,6 +1168,24 @@ mod tests {
         assert!(Settings::default().transcode_in_memory && Settings::default().transcode_options().in_memory);
         let off = Settings { transcode_in_memory: false, ..Settings::default() };
         assert!(!off.transcode_options().in_memory);
+    }
+
+    /// Dolby Vision profile 7's full enhancement layer: transcoded from its
+    /// base layer unless the setting asks for its metadata, which every
+    /// job's request then says. Settings saved before it read as the base
+    /// layer.
+    #[test]
+    fn transcodes_are_told_what_to_make_of_a_full_enhancement_layer() {
+        assert_eq!(Settings::default().transcode_options().dolby_vision_fel, DolbyVisionFel::BaseLayer);
+        let metadata = Settings { dolby_vision_fel: DolbyVisionFel::Metadata, ..Settings::default() };
+        assert_eq!(metadata.transcode_options().dolby_vision_fel, DolbyVisionFel::Metadata);
+        let json = serde_json::to_value(&metadata).unwrap();
+        assert_eq!(json["dolby_vision_fel"], "metadata");
+        let before: Settings = serde_json::from_str(r#"{"server_name":"Home"}"#).unwrap();
+        assert_eq!(before.dolby_vision_fel, DolbyVisionFel::BaseLayer);
+        let patch: SettingsPatch = serde_json::from_str(r#"{"dolby_vision_fel":"metadata"}"#).unwrap();
+        assert_eq!(patch.dolby_vision_fel, Some(DolbyVisionFel::Metadata));
+        assert!(serde_json::from_str::<SettingsPatch>(r#"{"dolby_vision_fel":"enhanced"}"#).is_err());
     }
 
     #[test]

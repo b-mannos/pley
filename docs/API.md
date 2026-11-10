@@ -4376,6 +4376,10 @@ interface Settings {
                                     // (Linux's /dev/shm, within a budget), else on disk (default true).
                                     // Turning it on where `transcoder.memory.available` is false: 400;
                                     // saved on before, it stays
+  dolby_vision_fel: "base_layer" | "metadata"; // transcodes of Dolby Vision profile 7 with a full enhancement
+                                    // layer (FEL), which no FFmpeg reads: from its HDR10 base layer alone
+                                    // (default), or that tone mapped by the Dolby Vision metadata's
+                                    // brightness (TRANSCODER.md)
   scan_interval_minutes: number;    // 0 disables periodic scans
   watch_libraries: boolean;         // pick up file changes automatically
   detect_markers: boolean;          // find intros and credits in the background (default true)
@@ -4480,6 +4484,7 @@ interface SystemInfo {
     dolby_vision: boolean;          // Dolby Vision profile 5 can be tone-mapped correctly
     chromaprint: boolean;           // audio fingerprints find intros and credits; without, only chapters
     throttling: boolean;            // FFmpeg can throttle transcodes (6.1 and newer)
+    dolby_vision_fel: boolean;      // transcodes do what the `dolby_vision_fel` setting asks
     memory: { available: boolean; reason?: string; path?: string; budget_bytes: number } | null;
                                     // segments can be kept in RAM (`transcode_in_memory`), and at most how
                                     // much; reason: why not ("works on Linux only"); null while unavailable

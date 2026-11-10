@@ -223,6 +223,7 @@ before using what it names:
 | `live_bitrate` | `POST /v1/jobs/{id}/bitrate` works |
 | `live` | `/v1/live` works |
 | `fmp4_segments` | jobs make fMP4 segments when `segment_format` asks for them, except jobs without video ([fMP4 segments](#fmp4-segments)) |
+| `dolby_vision_fel` | transcodes do what `TranscodeOptions.dolby_vision_fel` asks ([Profile 7's full enhancement layer](#profile-7s-full-enhancement-layer)) |
 | `trickplay_version` | the version of the seek previews it makes (`TrickplayInfo.version`); `0` from older transcoders |
 | `trickplay_runs` | how many seek-preview sets it makes at once; `0` from older transcoders, which make one at a time and give a set up after an hour of running |
 
@@ -427,6 +428,7 @@ variants, segment_format}`. See [How HLS jobs work](#how-hls-jobs-work).
 | `preset` | `veryfast` | x264 preset for software encodes, or `auto`: chosen and changed by the transcoder from its load and its lead on the player |
 | `throttle` | on | hold FFmpeg to real time after a burst ([Throttling](#throttling)) |
 | `in_memory` | on | keep segments in memory when possible ([Segments in memory](#segments-in-memory)) |
+| `dolby_vision_fel` | `base_layer` | what a transcode makes of Dolby Vision profile 7 with a full enhancement layer: `base_layer` or `metadata` ([Profile 7's full enhancement layer](#profile-7s-full-enhancement-layer)) |
 
 Playlists and segments:
 
@@ -952,12 +954,52 @@ available tone mapper:
   HLG, burned-in subtitles and `tonemap=libplacebo`.
 - Dolby Vision profiles 7 and 8 have an HDR10- or HLG-compatible base layer
   and work with any tone mapper. Profile 5 without libplacebo plays with off
-  colours, with a warning.
+  colours, with a warning. Profile 7 with a full enhancement layer is tone
+  mapped from its base layer alone unless asked otherwise
+  ([Profile 7's full enhancement layer](#profile-7s-full-enhancement-layer)).
 - libplacebo caches compiled shaders in `libplacebo/` (saving about 0.2 s at
   every start, seek and quality switch) with FFmpeg 8 and later, whose
   libplacebo filter lists `shader_cache` (`ffmpeg -h filter=libplacebo`,
   checked at start-up). It doesn't when the folder's path holds a character
   FFmpeg's filter syntax reads (`, ; [ ] ' :`, other than a drive's colon).
+
+#### Profile 7's full enhancement layer
+
+Dolby Vision profile 7 carries a second layer over its HDR10 base layer. A
+minimal one (MEL) adds nothing to the picture; a full one (FEL) holds part
+of it, and on some titles part of its brightness. No FFmpeg reads that
+layer, so a transcode's picture is always the base layer's.
+`TranscodeOptions.dolby_vision_fel` says what a transcode makes of a stream
+the probe found a full layer in (`MediaStream.dv_el: fel`), where
+libplacebo tone maps or converts it:
+
+| Value | The picture |
+|---|---|
+| `base_layer` (default) | HDR10: the base layer by its own static metadata, the Dolby Vision metadata unread (`apply_dolbyvision=0`) |
+| `metadata` | the base layer, tone mapped by the brightness the Dolby Vision metadata gives each scene, as a minimal layer's and profile 8.1's are |
+
+- libplacebo applies no Dolby Vision mapping that needs an enhancement
+  layer, with either value. Built with libdovi, it still reads the
+  brightness profile 7's metadata gives each scene (level 1: its maximum
+  and its average) and tone maps by it. On most titles that brightness is
+  the base layer's too. On those whose full layer carries part of it, it
+  describes the picture with the layer, and the base layer alone comes out
+  too dark or too bright. `base_layer` leaves it unread, for the picture
+  the title's HDR10 grade gives.
+- As HDR10, the stream takes HDR10's paths: Quick Sync decodes and scales
+  it, OpenCL tone maps it between Quick Sync's decoder and encoder where
+  that passed its test, and Quick Sync's scaler does where the GPU falls
+  behind ([Sharing the GPU](#sharing-the-gpu)). With `metadata`, FFmpeg's
+  own decoder brings libplacebo the frames
+  ([Hardware decoding](#hardware-decoding)).
+- HDR10+ in the base layer is the base layer's own: still read.
+- A minimal layer, a layer not known (probed by an older transcoder) and
+  the other profiles aren't concerned: their metadata is read.
+- zimg and OpenCL never read profile 7's metadata, and HDR kept as HDR10
+  is the base layer already: both values give them the same picture.
+- Thumbnails and seek previews aren't concerned either: libplacebo reads
+  the metadata for them.
+- Capability `dolby_vision_fel`. A transcoder without it does `metadata`.
 
 #### libplacebo quality
 

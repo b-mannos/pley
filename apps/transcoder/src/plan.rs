@@ -15,9 +15,10 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use pley_transcoder_api::{
-    AudioCodec, AudioMode, AudioPlan, DolbyVisionMode, DynamicRange, EncoderInfo, FileContainer, HwAccel, JobRequest,
-    MediaInfo, MediaStream, SegmentFormat, StreamKind, TonemapMode, TonemapQuality, TonemapSpeed, Tonemapper,
-    VideoCodec, VideoMode, VideoPlan, VideoRequest, decode_key, default_video_kbps, is_text_subtitle_codec,
+    AudioCodec, AudioMode, AudioPlan, DolbyVisionFel, DolbyVisionLayer, DolbyVisionMode, DynamicRange, EncoderInfo,
+    FileContainer, HwAccel, JobRequest, MediaInfo, MediaStream, SegmentFormat, StreamKind, TonemapMode, TonemapQuality,
+    TonemapSpeed, Tonemapper, VideoCodec, VideoMode, VideoPlan, VideoRequest, decode_key, default_video_kbps,
+    is_text_subtitle_codec,
 };
 
 use crate::devices::{qsv_device, vaapi_device};
@@ -331,6 +332,11 @@ pub struct VideoOut {
     /// [`Plan::with_share`] does where that decoder's GPU decoding failed
     /// (the CPU would decode in its place), or the computer falls behind.
     pub qsv_base_layer: bool,
+    /// Dolby Vision profile 7 with a full enhancement layer, made from its
+    /// HDR10 base layer alone ([`DolbyVisionFel::BaseLayer`]): HDR10 to
+    /// every choice of decoder and tone mapper, and libplacebo leaves its
+    /// Dolby Vision metadata unread.
+    pub base_layer_only: bool,
     /// FFmpeg uploads the frames to the AMD GPU for AMF ([`AMF_D3D11_DEVICE`]),
     /// which copies them from memory itself several times slower.
     pub amf_upload: bool,
@@ -673,6 +679,7 @@ impl Plan {
                         tonemap_input: None,
                         libplacebo_asked: false,
                         qsv_base_layer: false,
+                        base_layer_only: false,
                         amf_upload: false,
                         vui_primaries: None,
                         hw_decode: None,
@@ -703,6 +710,15 @@ impl Plan {
                         }
                     };
                     let range = src.dynamic_range();
+                    // Profile 7's full enhancement layer, which no FFmpeg
+                    // reads: where its base layer alone is asked for (the
+                    // default), the video is HDR10 to every choice below,
+                    // its Dolby Vision metadata left unread. That metadata's
+                    // brightness is of the picture with the layer.
+                    let fel_base = range == DynamicRange::DolbyVision
+                        && src.dv_profile == Some(7)
+                        && src.dv_el == Some(DolbyVisionLayer::Fel)
+                        && req.options.dolby_vision_fel == DolbyVisionFel::BaseLayer;
                     let tonemap = match hdr {
                         // libplacebo converts between HDR formats; nothing
                         // is needed for frames in the output's already.
@@ -748,7 +764,7 @@ impl Plan {
                         && matches!(tonemap, Some(Tonemapper::Libplacebo | Tonemapper::Opencl))
                         && req.options.tonemap != TonemapMode::Libplacebo
                         && hdr.is_none()
-                        && range == DynamicRange::Hdr10
+                        && (range == DynamicRange::Hdr10 || fel_base)
                         && src.hdr10plus != Some(true)
                         && burn.is_none()
                         && encoder.accel == HwAccel::Qsv
@@ -827,7 +843,8 @@ impl Plan {
                     // profile 5's colours are only in it.
                     let resized = (width, height) != (src_width, src_height);
                     let scene_metadata = tonemap == Some(Tonemapper::Libplacebo)
-                        && (matches!(src.dynamic_range(), DynamicRange::DolbyVision | DynamicRange::Hdr10plus)
+                        && ((range == DynamicRange::DolbyVision && !fel_base)
+                            || range == DynamicRange::Hdr10plus
                             || src.hdr10plus == Some(true));
                     let qsv_first = qsv_decodes(encoder.accel)
                         && !deinterlace
@@ -895,6 +912,7 @@ impl Plan {
                         tonemap_input,
                         libplacebo_asked: req.options.tonemap == TonemapMode::Libplacebo,
                         qsv_base_layer,
+                        base_layer_only: fel_base,
                         amf_upload,
                         // BT.709 out of every tone mapper; the source's otherwise.
                         vui_primaries: (ff.caps.h264_metadata
@@ -1156,7 +1174,8 @@ impl Plan {
                     && v.hdr.is_none()
                     && src.hdr10_metadata == Some(true)
                     && (v.qsv_base_layer
-                        || (v.gpu_scale == Some(HwAccel::Qsv) && src.dynamic_range() == DynamicRange::Hdr10))
+                        || (v.gpu_scale == Some(HwAccel::Qsv)
+                            && (src.dynamic_range() == DynamicRange::Hdr10 || v.base_layer_only)))
             })
     }
 
@@ -1759,8 +1778,11 @@ impl Plan {
                 let size_in = if v.scales_on_gpu(pipeline).is_some() { (w, h) } else { (v.src_width, v.src_height) };
                 let quality = placebo_quality_options(v.tonemap_quality, size_in, (w, h), v.hdr.is_none());
                 let lift = if v.hdr.is_none() { format!(":{PLACEBO_SDR_LIFT}") } else { String::new() };
+                // The base layer alone: whichever decoder brings the frames,
+                // with their Dolby Vision metadata or without.
+                let unread = if v.base_layer_only { ":apply_dolbyvision=0" } else { "" };
                 pre.push(format!(
-                    "libplacebo=w={w}:h={h}:format={format}:{target}:range=tv:{PLACEBO_CURVE}:{PLACEBO_STATIC_PEAK}{lift}{quality}{cache}"
+                    "libplacebo=w={w}:h={h}:format={format}:{target}:range=tv:{PLACEBO_CURVE}:{PLACEBO_STATIC_PEAK}{lift}{unread}{quality}{cache}"
                 ));
                 match pipeline {
                     // Frames stay in Vulkan memory all the way into h264_vulkan.
@@ -3366,6 +3388,88 @@ mod tests {
             let plan = Plan::build(&request(), &bare, &ff, None).unwrap();
             assert!(!plan.quick_sync_could_tonemap(&bare, true), "{metadata:?}");
         }
+    }
+
+    /// Dolby Vision profile 7 with a full enhancement layer is made from its
+    /// HDR10 base layer alone unless its metadata is asked for: no FFmpeg
+    /// reads the layer, and the metadata's brightness is of the picture with
+    /// it. As HDR10, Quick Sync decodes it, and libplacebo is told to leave
+    /// the metadata unread whichever decoder brings the frames.
+    #[test]
+    fn profile_7s_full_enhancement_layer_is_made_from_its_base_layer_unless_its_metadata_is_asked_for() {
+        let mut ff = intel(HwAccel::Qsv, true);
+        ff.caps.vulkan_decode = vec!["h264".into(), "hevc".into()];
+        ff.caps.qsv_tonemap = true;
+        let p7 = |layer: Option<DolbyVisionLayer>| {
+            let mut m = ten_bit(media(DynamicRange::DolbyVision, Some(7)));
+            m.streams[0].dv_bl_compat = Some(6);
+            m.streams[0].dv_el = layer;
+            m.streams[0].hdr10_metadata = Some(true);
+            m
+        };
+        let fel = p7(Some(DolbyVisionLayer::Fel));
+        let own_decoder = if cfg!(windows) { "d3d11va" } else { "vaapi" };
+
+        // The base layer (the default): planned as HDR10 is.
+        let plan = Plan::build(&request(), &fel, &ff, None).unwrap();
+        let v = plan.video.as_ref().unwrap();
+        assert!(v.base_layer_only && !v.qsv_base_layer);
+        assert_eq!(
+            (v.tonemap, v.hw_decode.as_deref(), v.gpu_scale),
+            (Some(Tonemapper::Libplacebo), Some("qsv"), Some(HwAccel::Qsv))
+        );
+        let args = args_string(&plan, 0, 2);
+        assert!(args.contains(QSV_DECODE_ARGS), "{args}");
+        assert!(args.contains("tonemapping=bt.2390:peak_detect=0:brightness=0.03:apply_dolbyvision=0"), "{args}");
+        // And tone mapped by Quick Sync where the GPU falls behind.
+        assert!(plan.quick_sync_could_tonemap(&fel, true));
+
+        // Its metadata asked for: FFmpeg's own decoder brings libplacebo
+        // the frames with it, as for profile 8.1.
+        let mut req = request();
+        req.options.dolby_vision_fel = DolbyVisionFel::Metadata;
+        let plan = Plan::build(&req, &fel, &ff, None).unwrap();
+        let v = plan.video.as_ref().unwrap();
+        assert!(!v.base_layer_only && v.qsv_base_layer);
+        assert_eq!((v.hw_decode.as_deref(), v.gpu_scale), (Some(own_decoder), None));
+        assert!(!args_string(&plan, 0, 2).contains("apply_dolbyvision"));
+
+        // A minimal layer's metadata matches its base layer, and a layer
+        // not known isn't taken for a full one: read, whatever is asked.
+        // Profile 8.1 has no layer.
+        let p81 = ten_bit(media(DynamicRange::DolbyVision, Some(8)));
+        for other in [p7(Some(DolbyVisionLayer::Mel)), p7(None), p81] {
+            let plan = Plan::build(&request(), &other, &ff, None).unwrap();
+            let v = plan.video.as_ref().unwrap();
+            assert!(!v.base_layer_only);
+            assert_eq!((v.hw_decode.as_deref(), v.gpu_scale), (Some(own_decoder), None));
+            assert!(!args_string(&plan, 0, 2).contains("apply_dolbyvision"));
+        }
+
+        // HDR10+ in the base layer is the base layer's own: FFmpeg's decoder
+        // reads it for libplacebo, the Dolby Vision metadata still unread.
+        let mut hybrid = fel.clone();
+        hybrid.streams[0].hdr10plus = Some(true);
+        let plan = Plan::build(&request(), &hybrid, &ff, None).unwrap();
+        let v = plan.video.as_ref().unwrap();
+        assert!(v.base_layer_only);
+        assert_eq!((v.hw_decode.as_deref(), v.gpu_scale), (Some(own_decoder), None));
+        assert!(args_string(&plan, 0, 2).contains("brightness=0.03:apply_dolbyvision=0"));
+
+        // On other GPUs, whose decoders read the metadata, and on the CPU:
+        // libplacebo leaves it unread all the same.
+        let nvidia = ffmpeg_with(vec![nvenc(), x264()], vec![Tonemapper::Libplacebo, Tonemapper::Zscale]);
+        let software = ffmpeg_with(vec![x264()], vec![Tonemapper::Libplacebo, Tonemapper::Zscale]);
+        for ff in [&nvidia, &software] {
+            let plan = Plan::build(&request(), &fel, ff, None).unwrap();
+            assert!(args_string(&plan, 0, 2).contains("brightness=0.03:apply_dolbyvision=0"));
+            let plan = Plan::build(&req, &fel, ff, None).unwrap();
+            assert!(!args_string(&plan, 0, 2).contains("apply_dolbyvision"));
+        }
+
+        // HDR kept is the base layer already: nothing for libplacebo to read.
+        let kept = Plan::build(&hdr_request(pley_transcoder_api::OutputRange::Hdr10), &fel, &ff, None).unwrap();
+        assert_eq!(kept.video.as_ref().unwrap().tonemap, None);
     }
 
     /// Dolby Vision over an HDR10 base layer and HDR10+ keep FFmpeg's own

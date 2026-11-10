@@ -50,6 +50,37 @@ describe("TranscoderSettings' form", () => {
     expect(screen.getByRole("switch", { name: "Throttle transcodes" })).not.toBeChecked();
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
+
+  it("chooses what transcodes make of Dolby Vision's full enhancement layer", async () => {
+    const user = userEvent.setup();
+    const requests = mockApi({
+      "GET /api/settings": () => ({ ...SETTINGS, dolby_vision_fel: "base_layer" }),
+      "GET /api/system": () => ({ transcoder: { available: true, managed: true, encoders: [], hwaccels: [], tonemapping: [], dolby_vision_fel: true } }),
+      "PUT /api/settings": (req) => ({ ...SETTINGS, ...(req.body as Partial<Settings>) }),
+    });
+    renderWithProviders(<TranscoderSettings />);
+    const fel = await screen.findByLabelText("Dolby Vision FEL");
+    await waitFor(() => expect(fel).toBeEnabled());
+    expect(fel).toHaveValue("base_layer");
+    expect(screen.getByText(/the right picture for every title/)).toBeInTheDocument();
+
+    await user.selectOptions(fel, "Base layer with Dolby Vision brightness");
+    expect(screen.getByText(/too dark or too bright/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requests.find((r) => r.method === "PUT")?.body).toEqual({ dolby_vision_fel: "metadata" }));
+  });
+
+  it("says a transcoder from before the choice always uses the metadata", async () => {
+    mockApi({
+      // Settings saved before the choice read as the base layer.
+      "GET /api/settings": () => SETTINGS,
+      "GET /api/system": () => ({ transcoder: { available: true, managed: false, encoders: [], hwaccels: [], tonemapping: [], dolby_vision_fel: false } }),
+    });
+    renderWithProviders(<TranscoderSettings />);
+    expect(await screen.findByText(/too old to choose/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Dolby Vision FEL")).toBeDisabled();
+    expect(screen.getByLabelText("Dolby Vision FEL")).toHaveValue("base_layer");
+  });
 });
 
 describe("TranscoderSettings' folder", () => {

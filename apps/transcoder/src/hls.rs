@@ -406,6 +406,7 @@ mod tests {
             tonemap_input: None,
             libplacebo_asked: false,
             qsv_base_layer: false,
+            base_layer_only: false,
             amf_upload: false,
             vui_primaries: None,
             hw_decode: None,
