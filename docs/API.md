@@ -1272,7 +1272,7 @@ everyone, in 10 minutes, no code is looked up (`429`).
 | `requests` | ask for movies and shows the libraries don't have ([Requests](#requests)), and follow the profile's requests |
 | `approvals` | approve and decline what people ask for, where the account is an administrator. Pley's own apps only; it does nothing on other accounts |
 | `activity` | see what's playing and stop it: the profile's streams, and everyone's where the account is an administrator. Any app may be allowed it, but only Pley's own see and stop everyone's, and of those only Pley for Home Assistant asks for it |
-| `server` | see the server's dashboard and manage its libraries, accounts, invitations and Live TV lineup, where the account is an administrator: the `admin` routes listed below. Pley's own apps only, and never with a TV's code ([TVs](#tvs)); it does nothing on other accounts. Of Pley's apps, Android's phones ask for it |
+| `server` | see the server's dashboard and manage its libraries, accounts and invitations, where the account is an administrator: the `admin` routes listed below. Pley's own apps only, and never with a TV's code ([TVs](#tvs)); it does nothing on other accounts. Of Pley's apps, Android's phones ask for it |
 
 An app's token opens only the routes whose **Who** is `any app` or one of
 its scopes (`HEAD` as `GET`), and with `server` the `admin` routes listed
@@ -1313,19 +1313,18 @@ What apps see:
   `/api/fs`), accounts and invitations (`/api/users`, `/api/users/{id}`
   and its `devices`, `apps` and `two-step`, `/api/invites`, and what an
   age limit and its exceptions are picked from, `/api/ratings/systems` and
-  `/api/labels`), the dashboard
-  (`/api/system`, `/api/system/resources`, `/api/system/storage` and its
-  `clean`, `/api/transcoder`) and Live TV's lineup and tuners
-  (`/api/live/lineup`, its `groups` and `page`, `/api/live/tuners`). It
-  sees and stops everyone's streams as one allowed `activity` does, with
-  the dashboard's library work, everyone's history (`all`, `user_id`, and
+  `/api/labels`) and the dashboard (`/api/system`, `/api/system/resources`,
+  `/api/system/storage` and its `clean`, `/api/transcoder`). It sees and
+  stops everyone's streams as one allowed `activity` does, with the
+  dashboard's library work, everyone's history (`all`, `user_id`, and
   removing anyone's plays) and libraries' folders (`paths`).
   What holds the server's keys, passwords and providers' addresses stays
   with the web app and answers `403 insufficient_scope`: the server's
   settings and their tests (`/api/settings…`), the network, the transcode
   folder, backups, the library work's schedule, and Live TV's settings and
-  sources. Nothing it can reach carries a key or a password; in
-  `/api/system`, the transcoder's `url` comes without a user name or
+  sources, and with them its lineup and tuners (`/api/live/lineup`,
+  `/api/live/tuners`). Nothing it can reach carries a key or a password;
+  in `/api/system`, the transcoder's `url` comes without a user name or
   password. It may not change the account's own name, password, PIN or
   two-step sign-in, see or sign out its devices and apps, disable it or
   delete it, and its administration ends at once when the account stops

@@ -68,9 +68,9 @@ const FIRST_PARTY: &[(&str, &str)] = &[
 ];
 
 /// Administration no app reaches, not even with `server` (what it opens is
-/// in APP_ROUTES): collections, editing titles' details, and what holds the
+/// in APP_ROUTES): collections, editing titles' details, what holds the
 /// server's keys, passwords and providers' addresses, which stay with the
-/// web app.
+/// web app, and Live TV's lineup and tuners, managed there with its sources.
 const ADMIN: &[(&str, &str)] = &[
     ("POST", "/api/libraries/{id}/collections"),
     ("PATCH", "/api/collections/{id}"),
@@ -105,6 +105,12 @@ const ADMIN: &[(&str, &str)] = &[
     ("PUT", "/api/live/sources/{id}"),
     ("DELETE", "/api/live/sources/{id}"),
     ("POST", "/api/live/sources/{id}/refresh"),
+    ("GET", "/api/live/lineup"),
+    ("PATCH", "/api/live/lineup"),
+    ("GET", "/api/live/lineup/groups"),
+    ("GET", "/api/live/lineup/page"),
+    ("GET", "/api/live/tuners"),
+    ("DELETE", "/api/live/tuners/{channel}"),
 ];
 
 /// Routes that take pley's own page's cookie and nothing else: allowing
@@ -420,8 +426,8 @@ async fn each_scope_opens_only_its_routes() {
     let users = app.get("/api/users", &library).await;
     assert_eq!(
         users.body["message"],
-        "this app wasn't allowed to manage the server's libraries, accounts, invitations and Live TV channels, and \
-         see its dashboard, where the account is an administrator: sign in to it again to allow it"
+        "this app wasn't allowed to manage the server's libraries, accounts and invitations, and see its dashboard, \
+         where the account is an administrator: sign in to it again to allow it"
     );
 }
 
@@ -1299,7 +1305,9 @@ async fn no_answer_an_app_reaches_carries_the_servers_secrets() {
         read += 1;
     }
     assert!(read > 50, "{read} routes read");
-    // The lineup is read, with the channel, and without its address.
+    // The channel is read, without its address; the lineup isn't the app's.
+    let channels = app.get("/api/live/channels", &token).await;
+    assert!(channels.body.to_string().contains("\"News\""), "{:?}", channels.body);
     let lineup = app.get("/api/live/lineup/page", &token).await;
-    assert_eq!(lineup.body["total"], json!(1), "{:?}", lineup.body);
+    assert_eq!(lineup.status, StatusCode::FORBIDDEN, "{:?}", lineup.body);
 }

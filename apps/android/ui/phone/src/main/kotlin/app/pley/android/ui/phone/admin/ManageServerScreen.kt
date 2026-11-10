@@ -81,7 +81,7 @@ internal fun ManageServerScreen() {
 /** The parts, grouped as people look for them: what goes on, what is shared, and with whom. */
 private val GROUPS = listOf(
     listOf(AdminSection.Dashboard),
-    listOf(AdminSection.Libraries, AdminSection.LiveTv),
+    listOf(AdminSection.Libraries),
     listOf(AdminSection.Users, AdminSection.Invitations),
 )
 
@@ -89,7 +89,6 @@ private val GROUPS = listOf(
 internal fun titleOf(section: AdminSection): Int = when (section) {
     AdminSection.Dashboard -> R.string.admin_section_dashboard
     AdminSection.Libraries -> R.string.admin_section_libraries
-    AdminSection.LiveTv -> R.string.admin_section_livetv
     AdminSection.Users -> R.string.admin_section_users
     AdminSection.Invitations -> R.string.admin_section_invitations
 }
@@ -97,7 +96,6 @@ internal fun titleOf(section: AdminSection): Int = when (section) {
 private fun valueOf(section: AdminSection): Int = when (section) {
     AdminSection.Dashboard -> R.string.admin_section_dashboard_value
     AdminSection.Libraries -> R.string.admin_section_libraries_value
-    AdminSection.LiveTv -> R.string.admin_section_livetv_value
     AdminSection.Users -> R.string.admin_section_users_value
     AdminSection.Invitations -> R.string.admin_section_invitations_value
 }
@@ -106,7 +104,6 @@ private fun valueOf(section: AdminSection): Int = when (section) {
 internal fun iconOf(section: AdminSection): PleyIcon = when (section) {
     AdminSection.Dashboard -> PleyIcons.LayoutDashboard
     AdminSection.Libraries -> PleyIcons.LibraryBig
-    AdminSection.LiveTv -> PleyIcons.Tv
     AdminSection.Users -> PleyIcons.Users
     AdminSection.Invitations -> PleyIcons.MailPlus
 }

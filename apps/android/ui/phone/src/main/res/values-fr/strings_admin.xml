@@ -2,19 +2,17 @@
 <resources>
     <string name="admin_title">Gérer le serveur</string>
     <string name="admin_me_group">Serveur</string>
-    <string name="admin_me_value">Bibliothèques, comptes, chaînes de TV en direct et tableau de bord</string>
+    <string name="admin_me_value">Bibliothèques, comptes et tableau de bord</string>
     <string name="admin_me_sign_in">Reconnectez-vous pour le gérer depuis ce téléphone</string>
     <string name="admin_section_dashboard">Tableau de bord</string>
     <string name="admin_section_dashboard_value">Lectures en cours, charge du serveur et stockage</string>
     <string name="admin_section_libraries">Bibliothèques</string>
     <string name="admin_section_libraries_value">Dossiers, analyses et ordre</string>
-    <string name="admin_section_livetv">TV en direct</string>
-    <string name="admin_section_livetv_value">Chaînes, groupes et tuners</string>
     <string name="admin_section_users">Utilisateurs</string>
     <string name="admin_section_users_value">Comptes, profils et ce qu’ils voient</string>
     <string name="admin_section_invitations">Invitations</string>
     <string name="admin_section_invitations_value">Liens pour créer un compte</string>
-    <string name="admin_web_only">Les paramètres du serveur, le réseau, le transcodeur, les demandes et les sources de TV en direct se changent dans l\'application web de Pley.</string>
+    <string name="admin_web_only">Les paramètres du serveur, le réseau, le transcodeur, les demandes et la TV en direct se changent dans l\'application web de Pley.</string>
     <string name="admin_sign_in_title">Reconnectez-vous pour gérer le serveur</string>
     <string name="admin_sign_in_body">Ce téléphone s’est connecté avant que Pley puisse lui laisser gérer le serveur. Reconnectez-vous et autorisez-le.</string>
     <string name="admin_sign_in_action">Se reconnecter</string>

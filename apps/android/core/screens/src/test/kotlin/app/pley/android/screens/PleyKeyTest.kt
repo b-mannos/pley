@@ -43,7 +43,7 @@ class PleyKeyTest {
         PleyKey.ManageServer,
         PleyKey.Manage(AdminSection.Dashboard),
         PleyKey.Manage(AdminSection.Users, "7"),
-        PleyKey.Manage(AdminSection.LiveTv, PleyKey.Manage.NEW),
+        PleyKey.Manage(AdminSection.Libraries, PleyKey.Manage.NEW),
         PleyKey.NowPlaying,
         PleyKey.Drive(),
         PleyKey.Drive("/storage/1A2B-3C4D/Films"),

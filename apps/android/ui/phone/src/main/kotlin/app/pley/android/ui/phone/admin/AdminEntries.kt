@@ -10,7 +10,6 @@ import app.pley.android.screens.admin.AdminSection
 import app.pley.android.ui.phone.admin.dashboard.DashboardScreen
 import app.pley.android.ui.phone.admin.invitations.InvitationsScreen
 import app.pley.android.ui.phone.admin.libraries.LibrariesScreen
-import app.pley.android.ui.phone.admin.livetv.LiveTvAdminScreen
 import app.pley.android.ui.phone.admin.users.UsersScreen
 import app.pley.android.ui.phone.shell.Placeholder
 
@@ -29,7 +28,6 @@ private fun SectionScreen(key: PleyKey.Manage) {
     when (key.section) {
         AdminSection.Dashboard -> DashboardScreen(key.id)
         AdminSection.Libraries -> LibrariesScreen(key.id)
-        AdminSection.LiveTv -> LiveTvAdminScreen(key.id)
         AdminSection.Users -> UsersScreen(key.id)
         AdminSection.Invitations -> InvitationsScreen(key.id)
     }

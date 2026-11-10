@@ -207,15 +207,15 @@ Apps sign in on Pley's own page with OAuth 2.1.
   apps get, on an administrator's account and when the administrator
   allows them: approving requests (`approvals`), seeing and stopping
   everyone's streams (`activity`, which only Pley for Home Assistant asks
-  for), and managing the server's libraries, accounts, invitations and
-  Live TV lineup, with its dashboard (`server`, which Android's phones ask
-  for). Whatever holds such a token can do as much, so whoever controls a
-  Home Assistant an administrator signed in can see what everyone plays and
-  stop it, and whoever holds an administrator's phone signed in with
-  `server` can change who may sign in and what they see. No app reads or
-  changes what holds the server's keys and passwords: its settings, network
-  and transcoder, Radarr and Sonarr, backups and Live TV's sources stay
-  with the web app, and no answer an app can reach carries a key, a
+  for), and managing the server's libraries, accounts and invitations, with
+  its dashboard (`server`, which Android's phones ask for). Whatever holds
+  such a token can do as much, so whoever controls a Home Assistant an
+  administrator signed in can see what everyone plays and stop it, and
+  whoever holds an administrator's phone signed in with `server` can change
+  who may sign in and what they see. No app reads or changes what holds the
+  server's keys and passwords: its settings, network and transcoder, Radarr
+  and Sonarr, backups and Live TV's sources stay with the web app, as does
+  Live TV's lineup, and no answer an app can reach carries a key, a
   password or a provider's address (tests/app_tokens.rs checks every one).
   Such a token can't change the account's own name, password, PIN or
   two-step sign-in, nor see or sign out its devices and apps. Nor can it

@@ -11,15 +11,15 @@ describes how they are made.
 
 ### Added
 
-- Pley's own apps can manage the server's libraries, accounts,
-  invitations and Live TV channels, and show its dashboard, where an
-  administrator allows it: a new permission, "Manage the server", which
-  Pley for Android asks for on phones. It is never given with a TV's code.
-  The server's settings, network, transcoder, requests' services, backups
-  and Live TV's sources, which hold its keys and passwords, stay in the web
-  app, as do the account's own name, password, PIN, two-step sign-in,
-  devices and apps. Making an administrator, and changing another
-  administrator's password, PIN or two-step sign-in, stay there too.
+- Pley's own apps can manage the server's libraries, accounts and
+  invitations, and show its dashboard, where an administrator allows it: a
+  new permission, "Manage the server", which Pley for Android asks for on
+  phones. It is never given with a TV's code. The server's settings,
+  network, transcoder, requests' services, backups and Live TV, whose
+  sources hold keys and passwords, stay in the web app, as do the
+  account's own name, password, PIN, two-step sign-in, devices and apps.
+  Making an administrator, and changing another administrator's password,
+  PIN or two-step sign-in, stay there too.
 - An administrator's rights in an app (managing the server, approving
   requests, seeing everyone's streams) hold only for an app that
   administrator allowed: someone else's phone or TV that a cast switched to

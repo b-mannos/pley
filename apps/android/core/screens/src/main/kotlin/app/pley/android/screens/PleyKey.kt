@@ -134,7 +134,7 @@ sealed interface PleyKey : NavKey {
 
     /**
      * A part of managing the server; [id]: one thing of it on a page of its
-     * own (a library, an account, a Live TV source), [NEW] for a new one.
+     * own (a library, an account, an invitation), [NEW] for a new one.
      */
     @Serializable
     data class Manage(val section: AdminSection, val id: String? = null) : PleyKey {

@@ -781,18 +781,19 @@ again every 10 s while they show.
 ### Managing the server
 
 On phones and tablets, an administrator manages the server's libraries,
-accounts and Live TV channels, and sees its dashboard, as Settings in the
-web app does: Me → **Manage server** lists those parts, in the web's
-order, and each does what its web page does. The server's settings, its
-network, the transcoder, requests and Live TV's sources hold its keys and
-passwords, and stay in the web app: the server doesn't let apps read or
-change them, and the page says where they are. The app asks for the
-`server` scope as it signs in, where the server offers it
-([API.md](API.md#scopes)); an administrator signed in before then is
-offered to sign in again, and anyone else sees nothing of it, a phone
-someone else signed in that a cast switched to an administrator's
-profile included. TVs don't manage the server: they sign in with a code,
-and the server never gives the scope to a code.
+accounts and invitations, and sees its dashboard, as Settings in the web
+app does: Me → **Manage server** lists those parts, in the web's order,
+and each does what its web page does. The server's settings, its network,
+the transcoder and Live TV's sources hold its keys and passwords, and stay
+in the web app: the server doesn't let apps read or change them. Requests'
+settings and Live TV's channels and tuners are managed there too, and the
+page says where they are. The app asks for the `server` scope as it signs
+in, where the server offers it ([API.md](API.md#scopes)); an
+administrator signed in before then is offered to sign in again, and
+anyone else sees nothing of it, a phone someone else signed in that a
+cast switched to an administrator's profile included. TVs don't manage
+the server: they sign in with a code, and the server never gives the
+scope to a code.
 
 - **Dashboard**: what plays, with its transcode, and stopping a stream
   with a message; the server's and the machine's CPU and memory over the
@@ -803,11 +804,6 @@ and the server never gives the scope to a code.
   scanned one or all with their progress; a library's page with its kind,
   name and folders, picked on the server or typed, then scanning, a full
   rescan and deleting it.
-- **Live TV**: the tuners in use, stopping one; the groups, hidden and
-  shown a group or a region at a time; and the lineup, paged, searched
-  and filtered by group and state, with hiding, renaming, renumbering and
-  a channel's guide id. Without the list of sources, the lineup has no
-  filter by source.
 - **Users** and **Invitations**: the accounts and profiles; an account's
   page with what an administrator changes on the web (name, password,
   disabled, household, requests, libraries, age limit, label exceptions,
@@ -817,19 +813,19 @@ and the server never gives the scope to a code.
   another administrator's password, PIN and two-step sign-in, stay in the
   web app, as the server requires: either would let whoever holds the
   phone into it as an administrator. An administrator's page has no age
-  limit or label exceptions, which don't apply to one. An age limit is set as on the web: by a
-  country's rating, by age, or (for an account) by birthday, and titles
-  with some labels are always or never shown. Without a TMDB key on the
-  server, the page says that unrated movies are hidden; the key itself is
-  added in the web app. The administrator's own name, password, PIN, two-step
-  sign-in, devices and apps stay in Account in the web app, as the server
-  requires.
+  limit or label exceptions, which don't apply to one. An age limit is set
+  as on the web: by a country's rating, by age, or (for an account) by
+  birthday, and titles with some labels are always or never shown.
+  Without a TMDB key on the server, the page says that unrated movies are
+  hidden; the key itself is added in the web app. The administrator's own
+  name, password, PIN, two-step sign-in, devices and apps stay in Account
+  in the web app, as the server requires.
 
 A value is sent as it is chosen, as the phone's own Settings save theirs;
 what is made or set together (a library, an account, an invitation) has
 one button. What can't be undone asks first. The server's refusals show
 in its own words, and the page then shows what the server has. Lists that
-change (what plays, scans, tuners, the machine's load) are read again
+change (what plays, scans, the machine's load) are read again
 every few seconds while they show, and a list is read again as it shows
 after a page above it.
 
@@ -1244,8 +1240,8 @@ base64 -w0 pley-release.keystore   # the ANDROID_KEYSTORE_BASE64 secret
 
 - Downloads are on phones and tablets only; TVs stream everything.
 - Managing the server is on phones and tablets only, and leaves the
-  server's settings, network, transcoder, requests and Live TV's sources
-  to the web app.
+  server's settings, network, transcoder, requests and Live TV to the web
+  app.
 - No Watch Next row on phones or Fire TV.
 - Live TV has no picture in picture, and the TV's display mode isn't
   matched for live channels.
