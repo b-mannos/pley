@@ -6,7 +6,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { addEntries, entryOf, findSection, notes, plainText, release, sections } from "./changelog.mjs";
-import { RELEASE_TAG, lowered, parseArgs, pending, plan, status } from "./release.mjs";
+import { RELEASE_TAG, latestReleases, lowered, parseArgs, pending, plan, readmeWith, status } from "./release.mjs";
 import {
   ROOT,
   UNITS,
@@ -351,6 +351,49 @@ describe("releases", () => {
     expect(RELEASE_TAG.test("kodi-v0.0.2")).toBe(false);
   }, SLOW);
 
+  test("put each unit's latest among the README's pills as it is bumped", () => {
+    const f = fixture();
+    const { dir, git } = f;
+    git("tag", "release-2026-10-31");
+    // A README without the marks is left alone.
+    addEntry(dir, "kodi");
+    expect(plan({ unit: "kodi", how: "patch", date: "2026-11-01", root: dir }).changes.map((c) => c.path)).not.toContain("README.md");
+    f.change("README.md", "# Pley\n\n<!-- latest releases: written by scripts/release.mjs -->\nold\n<!-- /latest releases -->\n\nMore.\n", "docs: a README");
+
+    const kodi = bumped(f, "kodi", "patch");
+    expect(kodi.changes.at(-1)).toMatchObject({ path: "README.md", what: "Kodi 0.0.2 among the latest releases" });
+    const releases = "https://github.com/pley-media-server/pley/releases/tag";
+    const kodiPill = `<a href="${releases}/release-2026-11-01"><img src="https://img.shields.io/badge/Kodi-0.0.2-0284C7" alt="Kodi 0.0.2"></a>`;
+    // The units with no release of their own yet have no pill.
+    expect(latestReleases(dir)).toBe(kodiPill);
+    expect(readFileSync(join(dir, "README.md"), "utf8")).toBe(
+      `# Pley\n\n<!-- latest releases: written by scripts/release.mjs -->\n${kodiPill}\n<!-- /latest releases -->\n\nMore.\n`,
+    );
+
+    // Another unit takes its place in the units' order, and a later release its pill.
+    addEntry(dir, "server");
+    bumped(f, "server", "minor");
+    git("tag", "release-2026-11-01");
+    addEntry(dir, "kodi");
+    bumped(f, "kodi", "patch", "2026-11-02");
+    expect(latestReleases(dir)).toBe(
+      `<a href="${releases}/release-2026-11-01"><img src="https://img.shields.io/badge/Media%20Server-0.1.0-0284C7" alt="Media Server 0.1.0"></a>\n` +
+        `<a href="${releases}/release-2026-11-02"><img src="https://img.shields.io/badge/Kodi-0.0.3-0284C7" alt="Kodi 0.0.3"></a>`,
+    );
+    const readme = readmeWith(dir);
+    expect(readme.after).toBe(readme.before);
+
+    // A README that falls behind fails the check.
+    writeFileSync(join(dir, "README.md"), readme.before.replace("0.0.3", "0.0.2"));
+    expect(readmeWith(dir).after).not.toBe(readmeWith(dir).before);
+  }, SLOW);
+
+  test("the repository's README has each unit's latest release", () => {
+    const readme = readmeWith(ROOT);
+    expect(readme).not.toBeNull();
+    expect(readme.after).toBe(readme.before);
+  });
+
   test("tell what would ship without being in the notes", () => {
     const f = fixture();
     const { dir, git, change } = f;
@@ -417,6 +460,8 @@ describe("releases", () => {
     }
     expect(workflow).toContain("fetch-depth: 0");
     expect(workflow).toContain("\n      - run: bun scripts/release.mjs check\n");
+    // And the README's pills of them, whoever edits it.
+    expect(workflow.split("\n      - README.md\n").length - 1).toBe(2);
   });
 
   test("count only release-<date> tags as releases", () => {
