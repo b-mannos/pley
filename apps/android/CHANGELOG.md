@@ -86,12 +86,12 @@ On Android TV:
   this version, with no sort or filter of its own, opens on Recommended
   once more.
 - Buttons are a little smaller, those of Home's banner smaller again.
-  Chips and tabs are as tall as the buttons: a show's season tabs, the
-  tabs at the top of a library (Recommended, Library, Collections), of
-  Live TV and of Requests, and the chips over a library's grid (the
-  sort, Filter, Unwatched, Genre, Year), Discover's and Search's. The
-  player's Skip and Play now, History's Remove and the music player's
-  Play are smaller with them.
+  Chips and tabs are smaller too, as tall as the buttons: a show's
+  season tabs, the tabs at the top of a library (Recommended, Library,
+  Collections), of Live TV and of Requests, and the chips over a
+  library's grid (the sort, Filter, Unwatched, Genre, Year), Discover's
+  and Search's. The player's Skip and Play now, History's Remove and the
+  music player's Play are smaller with them.
 - Posters in a row are a little larger: seven fill the row to the
   screen's edge, where a sliver of an eighth showed beside them.
 - The rail's icons sit in the middle of its dark strip, with the same
