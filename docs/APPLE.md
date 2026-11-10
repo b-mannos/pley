@@ -767,7 +767,9 @@ password, or one that can't be used from the app.
 
 A profile that needs its password is chosen by signing in again: on
 iPhone, iPad and Mac in the browser, where the person picks it; on Apple TV
-with a new code, picking it on the consent page.
+with a new code, picking it on the consent page. The profile that signed
+the app in never needs it: the server lists it as needing nothing, or its
+PIN, from any profile the app went to since.
 
 ## What each device plays
 

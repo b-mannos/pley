@@ -52,6 +52,16 @@ export interface User {
 /** May not ask for titles; asks an administrator; approved as made. */
 export type RequestAccess = "off" | "ask" | "auto";
 
+/** A profile of the household, as "Who's watching?" lists it. */
+export interface HomeProfile extends User {
+  /**
+   * What switching to it takes from this browser: nothing, its PIN, its
+   * password, or nothing that would do until it gets a PIN. The server
+   * decides: by what each profile may see, and by who signed this browser in.
+   */
+  needs: "none" | "pin" | "password" | "locked";
+}
+
 /**
  * When subtitles come on by themselves: never, only forced ones (foreign
  * dialogue), full ones when the audio is in another language, or always.

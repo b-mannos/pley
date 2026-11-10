@@ -378,9 +378,14 @@ pub async fn update_user(
         // or allowed by it (an administrator's own included), with the
         // sign-ins of apps in progress: codes not exchanged yet, and TVs
         // allowed that haven't asked for their answer yet. Their tokens for
-        // other apps end too.
+        // other apps end too. So do the browsers the user signed in that
+        // switched to another profile since: they would go back to this one.
         if id != admin.id {
-            sqlx::query("DELETE FROM sessions WHERE user_id = ?").bind(id).execute(&state.db.write).await?;
+            sqlx::query("DELETE FROM sessions WHERE user_id = ? OR signed_in_as = ?")
+                .bind(id)
+                .bind(id)
+                .execute(&state.db.write)
+                .await?;
         }
         state.oauth.forget_user(id);
         state.auth.end_apps(id).await?;

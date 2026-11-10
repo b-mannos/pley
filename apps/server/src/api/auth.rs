@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use axum::Json;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
@@ -151,8 +153,25 @@ pub(crate) async fn login_response(
     ip: Option<&str>,
     recovery_codes: Option<Vec<String>>,
 ) -> ApiResult<Response> {
+    session_response(state, user_id, None, headers, ip, recovery_codes).await
+}
+
+/// A new session of `user_id` and its answer, for a browser `signed_in_as`
+/// signed in: theirs when it switched profiles, `None` when `user_id` signs
+/// in.
+async fn session_response(
+    state: &AppState,
+    user_id: i64,
+    signed_in_as: Option<i64>,
+    headers: &HeaderMap,
+    ip: Option<&str>,
+    recovery_codes: Option<Vec<String>>,
+) -> ApiResult<Response> {
     let agent = headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok());
-    let token = state.auth.create_session(user_id, agent, ip).await?;
+    let token = match signed_in_as {
+        Some(signed_in_as) => state.auth.create_switched_session(user_id, signed_in_as, agent, ip).await?,
+        None => state.auth.create_session(user_id, agent, ip).await?,
+    };
     let user = accounts::user(&state.db, user_id).await?.ok_or(AppError::Unauthorized)?;
     let cookie = session_cookie(&token, forwarded_https(headers));
     // Browsers (whose requests carry an Origin, which page scripts can't
@@ -427,7 +446,10 @@ pub async fn change_password(
         .bind(user.id)
         .execute(&mut *tx)
         .await?;
-    sqlx::query("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?")
+    // With the browsers they signed in that switched to another profile
+    // since: those would go back to this one.
+    sqlx::query("DELETE FROM sessions WHERE (user_id = ? OR signed_in_as = ?) AND token_hash != ?")
+        .bind(user.id)
         .bind(user.id)
         .bind(&keep)
         .execute(&mut *tx)
@@ -443,14 +465,50 @@ pub async fn change_password(
 
 // ------------------------------------------------------------------ home profiles
 
-/// Profiles a home member can switch to ("Who's watching?").
-pub async fn profiles(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<UserDto>>> {
+/// A profile of the household, for "Who's watching?".
+#[derive(Serialize)]
+pub struct HomeProfile {
+    #[serde(flatten)]
+    user: UserDto,
+    /// What switching to it takes from this browser ([`switch_needs`]):
+    /// none, pin, password or locked.
+    needs: &'static str,
+}
+
+/// Profiles a home member can switch to ("Who's watching?"), with what
+/// switching to each takes from this browser.
+pub async fn profiles(
+    State(state): State<AppState>,
+    user: AuthUser,
+    CurrentToken(token): CurrentToken,
+) -> ApiResult<Json<Vec<HomeProfile>>> {
     let all = accounts::users(&state.db).await?;
     let me_home = all.iter().any(|u| u.id == user.id && u.home);
     if !me_home {
         return Ok(Json(Vec::new()));
     }
-    Ok(Json(all.into_iter().filter(|u| u.home && !u.disabled).collect()))
+    let signed_in_as = signed_in_as(&state, token.as_deref()).await?;
+    let targets: HashMap<i64, SwitchTarget> =
+        switch_targets(&state, user.id).await?.into_iter().map(|target| (target.id, target)).collect();
+    let required = state.auth.two_step_required();
+    let listed = all
+        .into_iter()
+        .filter(|u| u.home && !u.disabled)
+        .filter_map(|u| {
+            let needs = switch_needs(&user, signed_in_as, targets.get(&u.id)?, required).name();
+            Some(HomeProfile { user: u, needs })
+        })
+        .collect();
+    Ok(Json(listed))
+}
+
+/// The profile that signed in the browser whose session token is `token`
+/// ([`crate::auth::AuthService::signed_in_as`]).
+async fn signed_in_as(state: &AppState, token: Option<&str>) -> ApiResult<Option<i64>> {
+    match token {
+        Some(token) => state.auth.signed_in_as(token).await,
+        None => Ok(None),
+    }
 }
 
 #[derive(Deserialize)]
@@ -579,18 +637,32 @@ fn is_freer(from: &AuthUser, target: &SwitchTarget) -> bool {
             || (from.max_age.is_some() && target.more_shown_labels))
 }
 
+/// Whether `target` is kept from the profile `from` acts as: it is freer
+/// ([`is_freer`]), and isn't the profile that signed this browser or app in
+/// (`signed_in_as`). Whoever signed in there was on that profile already,
+/// and goes back to it: a switch away from it isn't a sign-out. A PIN is
+/// what keeps the others on a shared device out of it.
+fn is_guarded(from: &AuthUser, signed_in_as: Option<i64>, target: &SwitchTarget) -> bool {
+    signed_in_as != Some(target.id) && is_freer(from, target)
+}
+
 /// What switching from `from`'s profile to `target` takes, by the rules of
-/// [`check_switch`] (`two_step_required`: the server requires two-step
-/// sign-in); not whether it is allowed at all (both home members, the
-/// target enabled).
-pub(crate) fn switch_needs(from: &AuthUser, target: &SwitchTarget, two_step_required: bool) -> Needs {
+/// [`check_switch`] (`signed_in_as`: the profile that signed the browser or
+/// app in; `two_step_required`: the server requires two-step sign-in); not
+/// whether it is allowed at all (both home members, the target enabled).
+pub(crate) fn switch_needs(
+    from: &AuthUser,
+    signed_in_as: Option<i64>,
+    target: &SwitchTarget,
+    two_step_required: bool,
+) -> Needs {
     if target.id == from.id {
         return Needs::None;
     }
     if target.sets_up_two_step(two_step_required) {
         return Needs::Password;
     }
-    match (&target.pin_hash, is_freer(from, target)) {
+    match (&target.pin_hash, is_guarded(from, signed_in_as, target)) {
         (Some(_), _) if target.pin_failures >= accounts::MAX_PIN_FAILURES_IN_A_ROW => Needs::Locked,
         (Some(_), _) => Needs::Pin,
         (None, true) if target.password_hash.starts_with('!') => Needs::Locked,
@@ -678,6 +750,17 @@ pub(crate) const CAST_ADMIN_TO_BROWSER: &str = "an administrator's profile isn't
 pub(crate) const SET_UP_FIRST: &str =
     "this profile has to set up two-step sign-in, which this server requires: switching to it takes its password";
 
+/// A switch [`check_switch`] allowed.
+#[derive(Debug, Default)]
+pub(crate) struct Switched {
+    /// The profile's password was checked, and its code with two-step
+    /// sign-in: the browser is signed in as it from now on.
+    pub signed_in: bool,
+    /// Two-step sign-in was set up on the way ([`second_step`]): its
+    /// recovery codes, shown once.
+    pub recovery_codes: Option<Vec<String>>,
+}
+
 /// Checks that `from` may switch to profile `target`: both home members,
 /// and the target enabled. Then, unless it is the same profile: the
 /// target's PIN when it has one (until 100 wrong ones in a row lock it);
@@ -688,19 +771,26 @@ pub(crate) const SET_UP_FIRST: &str =
 /// per profile (`profile:{id}`) and wrong PINs counted in a row
 /// (`users.pin_failures`), for the web app and apps alike.
 ///
+/// The profile that signed the browser or the app in (`signed_in_as`: a
+/// session's `signed_in_as`, a grant's `approved_by`) is gone back to like
+/// one that is no freer: with its PIN when it has one, and nothing
+/// otherwise ([`is_guarded`]).
+///
 /// While the server requires two-step sign-in, a profile that has to set it
 /// up takes its password whatever else it has, administrators' switches
 /// too, and then sets it up as a sign-in does ([`second_step`]): its
 /// recovery codes come back. A PIN can't set up how an account signs in.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn check_switch(
     state: &AppState,
     from: &AuthUser,
+    signed_in_as: Option<i64>,
     target: i64,
     pin: Option<&str>,
     password: Option<&str>,
     code: Option<&str>,
     setup_id: Option<&str>,
-) -> Result<Option<Vec<String>>, SwitchError> {
+) -> Result<Switched, SwitchError> {
     let Some(profile) = switch_target(state, from.id, target).await? else {
         return Err(SwitchError::NotFound);
     };
@@ -708,9 +798,9 @@ pub(crate) async fn check_switch(
         return Err(SwitchError::NotAllowed);
     }
     if target == from.id {
-        return Ok(None);
+        return Ok(Switched::default());
     }
-    let freer = is_freer(from, &profile);
+    let guarded = is_guarded(from, signed_in_as, &profile);
     let attempt = state.auth.throttle.begin(&format!("profile:{target}")).map_err(SwitchError::Throttled)?;
     if profile.sets_up_two_step(state.auth.two_step_required()) {
         let Some(password) = password else { return Err(SwitchError::SetUpFirst) };
@@ -719,9 +809,11 @@ pub(crate) async fn check_switch(
             return Err(SwitchError::WrongPassword);
         }
         attempt.succeeded();
-        return second_step(state, target, &profile.username, code, setup_id).await.map_err(SwitchError::TwoStep);
+        let recovery_codes =
+            second_step(state, target, &profile.username, code, setup_id).await.map_err(SwitchError::TwoStep)?;
+        return Ok(Switched { signed_in: true, recovery_codes });
     }
-    let ok = match (&profile.pin_hash, freer) {
+    let ok = match (&profile.pin_hash, guarded) {
         (Some(pin_hash), _) => match pin {
             Some(pin) => check_pin(state, &profile, pin_hash, pin).await?,
             None => return Err(SwitchError::PinNeeded),
@@ -737,12 +829,13 @@ pub(crate) async fn check_switch(
         attempt.failed();
         return Err(if profile.pin_hash.is_some() { SwitchError::WrongPin } else { SwitchError::WrongPassword });
     }
-    if profile.pin_hash.is_none() && freer {
+    let signed_in = profile.pin_hash.is_none() && guarded;
+    if signed_in {
         // Its password signs in to it: so does its second step.
         state.two_step.check(&state.auth.throttle, target, code).await.map_err(SwitchError::TwoStep)?;
     }
     attempt.succeeded();
-    Ok(None)
+    Ok(Switched { signed_in, recovery_codes: None })
 }
 
 /// Checks a switch a cast asked for ([`crate::api::remote::cast`]):
@@ -750,7 +843,9 @@ pub(crate) async fn check_switch(
 /// `target`, is spent here; both are still home members, and the target
 /// is enabled. By [`switch_needs`] from `from`'s own rights, the target may
 /// take nothing more than the PIN the caster gave as the ticket was issued:
-/// never a password, and not a locked PIN. Only an app (`app`), whose tokens
+/// never a password, and not a locked PIN. Who signed the device in changes
+/// nothing here: a cast is offered by the two profiles alone
+/// ([`crate::api::remote`]). Only an app (`app`), whose tokens
 /// never have administrator rights, switches to an administrator's profile
 /// so: a browser's or the desktop app's sign-in would keep them (casts
 /// there aren't sent; this holds whatever a ticket says).
@@ -771,7 +866,7 @@ pub(crate) async fn check_ticket_switch(
     if !profile.both_home || profile.disabled || (profile.is_admin && !app) {
         return Err(SwitchError::NotAllowed);
     }
-    match switch_needs(from, &profile, state.auth.two_step_required()) {
+    match switch_needs(from, None, &profile, state.auth.two_step_required()) {
         Needs::None | Needs::Pin => Ok(()),
         Needs::Locked if profile.pin_hash.is_some() => Err(SwitchError::PinLocked),
         Needs::Password | Needs::Locked => Err(SwitchError::NoWayIn),
@@ -820,7 +915,10 @@ pub(crate) async fn check_own_pin(state: &AppState, user: &AuthUser, pin: &str) 
 
 /// Switch this device to another home profile, by the rules of
 /// [`check_switch`], or with a cast's ticket ([`check_ticket_switch`]): the
-/// session it came from ends, and a new one starts.
+/// session it came from ends, and a new one starts. The new one remembers
+/// who signed the browser in, so it goes back to that profile as it left
+/// it, unless the switch took the new profile's password: then that is who
+/// signed in.
 pub async fn switch(
     State(state): State<AppState>,
     user: AuthUser,
@@ -829,16 +927,18 @@ pub async fn switch(
     CurrentToken(token): CurrentToken,
     Json(body): Json<Switch>,
 ) -> ApiResult<Response> {
-    let recovery_codes = match body.ticket.as_deref() {
+    let signed_in_as = signed_in_as(&state, token.as_deref()).await?;
+    let switched = match body.ticket.as_deref() {
         Some(ticket) => {
             let device = remote::device_id_of(&user, token.as_deref());
             check_ticket_switch(&state, &user, device.as_deref(), body.user_id, ticket, false).await?;
-            None
+            Switched::default()
         }
         None => {
             check_switch(
                 &state,
                 &user,
+                signed_in_as,
                 body.user_id,
                 body.pin.as_deref(),
                 body.password.as_deref(),
@@ -851,5 +951,6 @@ pub async fn switch(
     if let Some(token) = token {
         state.auth.revoke(&token).await;
     }
-    login_response(&state, body.user_id, &headers, ip.as_deref(), recovery_codes).await
+    let signed_in_as = signed_in_as.filter(|_| !switched.signed_in);
+    session_response(&state, body.user_id, signed_in_as, &headers, ip.as_deref(), switched.recovery_codes).await
 }

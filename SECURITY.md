@@ -155,6 +155,18 @@ protect your server.
   administrator, a higher age limit, other libraries, fewer labels it
   never sees or more it always sees) takes that profile's PIN, or its
   password (and code).
+- A browser or an app goes back to the profile that signed it in with
+  that profile's PIN, or with nothing when it has none: whoever signed in
+  there was on that profile already, and a switch away from it isn't a
+  sign-out. No other profile is reached that way, so a device a child's
+  profile signed in never becomes a parent's without the PIN or the
+  password. A PIN is what keeps a profile from the others who use a
+  shared device: without one, a browser or a TV an administrator signed
+  in and switched to a child's profile goes back to the administrator's.
+- A browser that switched profiles ends with the sign-ins of whoever
+  signed it in (a new password, "Sign out everywhere", `pley
+  reset-password`, deleting the account), whichever profile it is on, as
+  an app ends with whoever allowed it.
 - A profile's limits (libraries, age limit, label rules) are kept by the
   server in every listing, search, stream and compatibility API, and
   Discover; a hidden title answers as if it didn't exist. Only

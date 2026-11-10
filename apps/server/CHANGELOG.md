@@ -9,6 +9,25 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Changed
+
+- A browser that switched profiles is signed out with whoever signed it
+  in: their new password, "Sign out everywhere" and `pley reset-password`
+  end it too, whichever profile it is on, as they do the apps that person
+  allowed.
+
+### Fixed
+
+- Switching to another profile and back no longer asks you to sign in
+  again. A browser or an app goes back to the profile that signed it in
+  with that profile's PIN, or with nothing when it has none; an
+  administrator's profile, or any that sees more than the one switched
+  to, used to take its password, which in an app meant signing in again
+  in the browser or with a code. A profile that didn't sign the device in
+  still takes its PIN or its password, so a PIN on your profile is what
+  keeps it from the others who use the device. `GET /api/auth/profiles`
+  says what switching to each profile takes (`needs`).
+
 ## [0.1.9] - 2026-11-08
 
 ### Added

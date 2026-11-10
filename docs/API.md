@@ -563,7 +563,7 @@ lists carry (Kodi).
 | POST | `/api/auth/logout` | `public` | `204`, cookie cleared; ends the session of the token sent, if any. With an app's token, wherever it was sent, signs that app out (its whole grant ends); with a compatibility token, revokes it |
 | GET | `/api/auth/me` | `any app` | `User` |
 | PUT | `/api/auth/password` | `user` | `{ current_password, new_password }` → `204` |
-| GET | `/api/auth/profiles` | `user` | `User[]`: home profiles this user can switch to (empty for non-home users) |
+| GET | `/api/auth/profiles` | `user` | `(User & { needs })[]`: home profiles this user can switch to, each with what the switch takes from this browser, `none`, `pin`, `password` or `locked` (empty for non-home users) |
 | POST | `/api/auth/switch` | `user` | `{ user_id, pin?, password?, code?, setup_id? }` → `{ user, token?, recovery_codes? }`: this device becomes that profile |
 
 - `GET /api/auth/me` with an app's token: `User & { scope: string }`.
@@ -580,7 +580,13 @@ lists carry (Kodi).
   - a profile without a PIN that can see more than yours (an administrator,
     a higher age limit, libraries yours can't open): its password, and its
     `code` with two-step sign-in, unless you are an administrator;
-  - a managed profile without a PIN can't be switched to;
+  - a managed profile without a PIN that can see more can't be switched
+    to;
+  - the profile that signed this browser in, whatever it can see: its PIN
+    when it has one, and nothing otherwise. A switch away from it isn't a
+    sign-out: the browser goes back to it from any profile it went to
+    since. A switch that takes a profile's password signs the browser in
+    as that profile, which is the one it goes back to from then on;
   - while the server requires two-step sign-in, a profile with a password
     that doesn't use it yet: its password, whatever else it has and
     whoever switches (`403` without one). Then it sets two-step sign-in up
@@ -590,6 +596,10 @@ lists carry (Kodi).
   `429` after 5 wrong tries in 15 minutes. A PIN refused is `403` with
   `code` `wrong_pin` (missing or wrong) or `pin_locked`, as the apps'
   [switch-profile grant](#tokens) says by its `reason`.
+- A browser that switched profiles is still the sign-in of whoever signed
+  it in: their new password, "Sign out everywhere", `pley reset-password`
+  and deleting their account sign it out too, whichever profile it is on,
+  as they do the apps that person allowed.
 
 ### Two-step sign-in
 
@@ -1127,7 +1137,9 @@ apps allowed `profiles` move to another profile of the household. Send
   and who allowed it; its old tokens stop at once. A refusal spends
   nothing.
 - The rules are the web app's [switch](#auth), from the rights of the
-  profile the app acts as, without the administrators' exemption.
+  profile the app acts as, without the administrators' exemption. The
+  profile that signed the app in (whoever allowed it) is gone back to with
+  its PIN when it has one, and nothing otherwise.
 - Switching to the current profile with its `pin` checks that PIN (a TV
   asking "Who's watching?" at start). It follows a switch's rules (the
   same wrong-PIN answers, throttle and lock, counted with switches to it);
@@ -1146,8 +1158,8 @@ apps allowed `profiles` move to another profile of the household. Send
 | `invalid_grant`, `"reason": "wrong_pin"` | the profile has a PIN, and it is missing or wrong |
 | `invalid_grant`, `"reason": "pin_locked"` | its PIN stopped working after 100 wrong ones in a row |
 | `invalid_grant`, `"reason": "throttled"` | too many wrong PINs for it lately (5 in 15 minutes) |
-| `invalid_grant`, `"reason": "browser"` | it can see more than the app's profile and has no PIN: sign in to the app again and pick it in the browser (apps never see passwords) |
-| `invalid_grant`, `"reason": "not_allowed"` | not a household profile, disabled, or can see more with neither PIN nor password |
+| `invalid_grant`, `"reason": "browser"` | it can see more than the app's profile, has no PIN and didn't sign the app in: sign in to the app again and pick it in the browser (apps never see passwords) |
+| `invalid_grant`, `"reason": "not_allowed"` | not a household profile, disabled, or can see more with neither PIN nor password (and didn't sign the app in) |
 | `invalid_grant`, `"reason": "ticket_spent"` | a cast's `ticket` that expired, was spent, or isn't this app's for this switch |
 | `invalid_grant` | the refresh token doesn't work, as for a refresh (a spent one ends the grant) |
 | `503 temporarily_unavailable` | Pley is too busy to check the PIN now: nothing is counted, try again |
@@ -1346,7 +1358,8 @@ profiles when the app's profile is in the household, else nothing:
 
 - `current`: the profile the app acts as.
 - `needs`: what switching to it takes, by the rules above: `none`, `pin`,
-  `password` (in the browser) or `locked`. A profile that has to set up
+  `password` (in the browser) or `locked`. The profile that signed the app
+  in needs `none`, or `pin`. A profile that has to set up
   two-step sign-in, which the server requires, needs `password`: picked in
   the browser, its password sets it up there.
 - The current profile's `needs` is `none`: the app acts as it already.

@@ -2,23 +2,27 @@ import { Route, Routes } from "react-router";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-import type { User } from "@/api/types";
+import type { HomeProfile } from "@/api/types";
 import { apiError, type FakeRequest, LocationDisplay, mockApi, renderWithProviders, testSetup, testUser, twoStepSetupAnswer } from "@/test/render";
 import { challenge, ProfilesPage } from "./ProfilesPage";
 
-const me: User = { ...testUser, id: 1, name: "Sam", is_admin: false };
-const kid: User = { ...testUser, id: 2, name: "Kid", is_admin: false };
-const locked: User = { ...testUser, id: 3, name: "Alex", is_admin: false, has_pin: true };
-const admin: User = { ...testUser, id: 4, name: "Owner", is_admin: true };
-const guarded: User = { ...testUser, id: 5, name: "Boss", is_admin: true, two_step: true };
+const me: HomeProfile = { ...testUser, id: 1, name: "Sam", is_admin: false, needs: "none" };
+const kid: HomeProfile = { ...testUser, id: 2, name: "Kid", is_admin: false, needs: "none" };
+const locked: HomeProfile = { ...testUser, id: 3, name: "Alex", is_admin: false, has_pin: true, needs: "pin" };
+const admin: HomeProfile = { ...testUser, id: 4, name: "Owner", is_admin: true, needs: "password" };
+const guarded: HomeProfile = { ...testUser, id: 5, name: "Boss", is_admin: true, two_step: true, needs: "password" };
 /** Its PIN is locked after too many wrong ones. */
-const stuck: User = { ...testUser, id: 6, name: "Robin", is_admin: false, has_pin: true };
+const stuck: HomeProfile = { ...testUser, id: 6, name: "Robin", is_admin: false, has_pin: true, needs: "pin" };
 /** Listed without a PIN, which it has since. */
-const lately: User = { ...testUser, id: 7, name: "Jo", is_admin: false };
+const lately: HomeProfile = { ...testUser, id: 7, name: "Jo", is_admin: false, needs: "none" };
+/** An administrator who signed this browser in, before it switched to Sam's profile. */
+const signedIn: HomeProfile = { ...testUser, id: 8, name: "Pat", is_admin: true, needs: "none" };
+/** Sees more than Sam, with neither PIN nor password. */
+const closed: HomeProfile = { ...testUser, id: 9, name: "Teen", is_admin: false, managed: true, has_password: false, needs: "locked" };
 
 function serve() {
   return mockApi({
-    "GET /api/auth/profiles": () => [me, kid, locked, admin, guarded, stuck, lately],
+    "GET /api/auth/profiles": () => [me, kid, locked, admin, guarded, stuck, lately, signedIn, closed],
     "POST /api/auth/switch": (req) => {
       const body = req.body as { user_id: number; pin?: string; password?: string; code?: string };
       if (body.user_id === guarded.id) {
@@ -30,7 +34,7 @@ function serve() {
       if (body.user_id === stuck.id) return apiError(403, "pin_locked", "this profile's PIN is locked after too many wrong tries");
       if (body.user_id === lately.id && body.pin !== "1357") return apiError(403, "wrong_pin", body.pin ? "wrong PIN" : "this profile is protected by a PIN");
       if (body.user_id === admin.id && body.password !== "secret") return apiError(403, "forbidden", "wrong password");
-      return { user: [kid, locked, admin, lately].find((u) => u.id === body.user_id), token: "t" };
+      return { user: [kid, locked, admin, lately, signedIn].find((u) => u.id === body.user_id), token: "t" };
     },
   });
 }
@@ -160,6 +164,27 @@ describe("ProfilesPage", () => {
     expect(await screen.findByTestId("location")).toHaveTextContent("/library/2");
   });
 
+  it("goes back to the administrator who signed this browser in without asking for the password", async () => {
+    const user = userEvent.setup();
+    const requests = serve();
+    renderProfiles();
+
+    await user.click(await screen.findByRole("button", { name: "Pat" }));
+    expect(await screen.findByTestId("location")).toHaveTextContent("/library/2");
+    expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
+    expect(lastSwitch(requests)?.body).toEqual({ user_id: signedIn.id });
+  });
+
+  it("says a profile that sees more, with neither PIN nor password, needs a PIN first", async () => {
+    const user = userEvent.setup();
+    const requests = serve();
+    renderProfiles();
+
+    await user.click(await screen.findByRole("button", { name: "Teen" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Teen");
+    expect(requests.filter((r) => r.method === "POST")).toHaveLength(0);
+  });
+
   it("asks for the code too when the profile has two-step sign-in", async () => {
     const user = userEvent.setup();
     const requests = serve();
@@ -180,7 +205,7 @@ describe("ProfilesPage", () => {
   it("sets two-step sign-in up for a profile that has to, with its password, when the server requires it", async () => {
     const user = userEvent.setup();
     // Mom has a PIN, but hasn't set up two-step sign-in, which the server requires.
-    const mom: User = { ...testUser, id: 6, name: "Mom", is_admin: false, has_pin: true };
+    const mom: HomeProfile = { ...testUser, id: 6, name: "Mom", is_admin: false, has_pin: true, needs: "password" };
     const codes = Array.from({ length: 10 }, (_, i) => `${i}aaa-bbbb-cccc-dddd`);
     const requests = mockApi({
       "GET /api/server": () => ({ name: "Living Room", version: "1.0.0", setup_required: false, two_step_required: true }),
@@ -243,38 +268,32 @@ describe("ProfilesPage", () => {
 });
 
 describe("challenge", () => {
-  const child: User = { ...testUser, id: 10, is_admin: false, managed: true, has_password: false, max_age: 12 };
-  const teen: User = { ...child, id: 11, max_age: 16 };
-  const parent: User = { ...testUser, id: 12, is_admin: false, max_age: null };
+  const child: HomeProfile = { ...testUser, id: 10, is_admin: false, managed: true, has_password: false, max_age: 12, needs: "none" };
+  const parent: HomeProfile = { ...testUser, id: 12, is_admin: false, max_age: null, needs: "password" };
 
-  it("asks for nothing to switch down, or between equals", () => {
+  it("asks for what the server says the switch takes", () => {
     expect(challenge(child, parent)).toBe("none");
-    expect(challenge({ ...child, id: 13 }, child)).toBe("none");
-  });
-
-  it("asks for a password, or a PIN, to switch to a profile that can see more", () => {
     expect(challenge(parent, child)).toBe("password");
-    expect(challenge({ ...teen, has_pin: true }, child)).toBe("pin");
-    // A managed profile has no password: it needs a PIN first.
-    expect(challenge(teen, child)).toBe("locked");
+    expect(challenge({ ...child, id: 11, has_pin: true, needs: "pin" }, child)).toBe("pin");
+    // Neither PIN nor password: it needs a PIN first.
+    expect(challenge({ ...child, id: 13, needs: "locked" }, child)).toBe("locked");
+    // The administrator who signed this browser in: nothing, though it sees more.
+    expect(challenge({ ...parent, id: 14, is_admin: true, needs: "none" }, child)).toBe("none");
   });
 
-  it("counts libraries too", () => {
-    const one: User = { ...parent, id: 14, all_libraries: false, library_ids: [1] };
-    const both: User = { ...parent, id: 15, all_libraries: false, library_ids: [1, 2] };
-    expect(challenge(both, one)).toBe("password");
-    expect(challenge(one, both)).toBe("none");
+  it("asks for nothing to go on as the current profile", () => {
+    expect(challenge({ ...parent, has_pin: true, needs: "pin" }, parent)).toBe("none");
   });
 
   it("asks a profile that has to set up two-step sign-in for its password, whatever else it has", () => {
     const server = { name: "Den", version: "1.0.0", setup_required: false, two_step_required: true };
-    const withPin: User = { ...parent, id: 16, has_pin: true };
+    const withPin: HomeProfile = { ...parent, id: 16, has_pin: true, needs: "password" };
     expect(challenge(withPin, parent, server)).toBe("setup");
     expect(challenge({ ...parent, id: 17 }, testUser, server)).toBe("setup");
     // Set up already, or without a password (managed), or not required: as ever.
-    expect(challenge({ ...withPin, two_step: true }, parent, server)).toBe("pin");
+    expect(challenge({ ...withPin, two_step: true, needs: "pin" }, parent, server)).toBe("pin");
     expect(challenge(child, parent, server)).toBe("none");
-    expect(challenge(withPin, parent, { ...server, two_step_required: false })).toBe("pin");
+    expect(challenge({ ...withPin, needs: "pin" }, parent, { ...server, two_step_required: false })).toBe("pin");
     expect(challenge(withPin, withPin, server)).toBe("none");
   });
 });

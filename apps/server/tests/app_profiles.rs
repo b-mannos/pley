@@ -308,6 +308,45 @@ async fn profiles_that_need_a_password_go_through_the_browser() {
 }
 
 #[tokio::test]
+async fn an_app_goes_back_to_the_profile_that_signed_it_in() {
+    let h = household().await;
+    let app = &h.app;
+    // The administrator signed the app in, then switched it to the teen's
+    // profile: going back takes nothing. The parent's, which never signed
+    // it in, still goes through the browser.
+    let (_, refresh_token) = app.app_token(h.admin_id, "library profiles").await;
+    let (teens, teen_refresh) = pair(&switch(app, &refresh_token, h.teen, None).await);
+    let listed = needs(app, &teens).await;
+    assert_eq!((listed["admin"].as_str(), listed["parent"].as_str()), ("none", "password"));
+    assert_eq!(refused(&switch(app, &teen_refresh, h.parent, None).await), invalid_grant("browser"));
+    let (admins, admin_refresh) = pair(&switch(app, &teen_refresh, h.admin_id, None).await);
+    assert_eq!(who(app, &admins).await.0, h.admin_id);
+
+    // From any profile it went to since, the kid's with its PIN too.
+    let (kids, kid_refresh) = pair(&switch(app, &admin_refresh, h.kid, Some("1234")).await);
+    assert_eq!(needs(app, &kids).await["admin"], "none");
+    let (_, admin_refresh) = pair(&switch(app, &kid_refresh, h.admin_id, None).await);
+
+    // A PIN on the profile is asked all the same.
+    let pin = app.put("/api/me/pin", &h.admin, json!({"pin": "2468", "password": "secret-one"})).await;
+    assert_eq!(pin.status, StatusCode::NO_CONTENT, "{}", pin.text());
+    let (kids, kid_refresh) = pair(&switch(app, &admin_refresh, h.kid, Some("1234")).await);
+    assert_eq!(needs(app, &kids).await["admin"], "pin");
+    assert_eq!(refused(&switch(app, &kid_refresh, h.admin_id, None).await), invalid_grant("wrong_pin"));
+    let (admins, _) = pair(&switch(app, &kid_refresh, h.admin_id, Some("2468")).await);
+    assert_eq!(who(app, &admins).await.0, h.admin_id);
+
+    // A profile with neither PIN nor password that signed an app in isn't
+    // locked out of it once the app has been on another profile.
+    let (_, refresh_token) = app.app_token(h.teen, "library profiles").await;
+    let (kids, kid_refresh) = pair(&switch(app, &refresh_token, h.kid, Some("1234")).await);
+    let listed = needs(app, &kids).await;
+    assert_eq!((listed["teen"].as_str(), listed["parent"].as_str()), ("none", "password"));
+    let (teens, _) = pair(&switch(app, &kid_refresh, h.teen, None).await);
+    assert_eq!(who(app, &teens).await.0, h.teen);
+}
+
+#[tokio::test]
 async fn locked_profiles_say_so() {
     let h = household().await;
     let app = &h.app;

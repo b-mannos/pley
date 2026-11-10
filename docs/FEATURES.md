@@ -125,7 +125,9 @@ What Pley does, in full. The [README](../README.md) has the short version.
   profile with a PIN without it. Signing in again on the web goes straight
   in as the profile the browser was last used as, when it has no PIN. A
   profile that can see more than yours and has no PIN takes its password,
-  in the browser; a TV signs in to it again with a code.
+  in the browser; a TV signs in to it again with a code. The profile that
+  signed a browser or an app in is the exception: switching away from it
+  and back asks nothing, or its PIN when it has one.
 - Two-step sign-in with an authenticator app, with recovery codes:
   optional, or required of everyone by an administrator, in which case each
   person sets it up at their next sign-in (for a TV, on their phone).

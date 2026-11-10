@@ -789,10 +789,10 @@ async fn profiles_switch_with_pins() {
     assert_eq!(app.get("/api/auth/me", &admin).await.status, StatusCode::UNAUTHORIZED);
     assert_eq!(app.get("/api/auth/me", &kid).await.body["id"], json!(kid_id));
 
-    // Back to the administrator: its password is needed (it has no PIN).
-    let denied = app.post("/api/auth/switch", &kid, json!({"user_id": admin_id})).await;
-    assert_eq!(denied.status, StatusCode::FORBIDDEN);
-    let back = app.post("/api/auth/switch", &kid, json!({"user_id": admin_id, "password": "secret-one"})).await;
+    // Back to the administrator, who signed in on this device and has no
+    // PIN: nothing more is asked (tests/accounts.rs has the browsers someone
+    // else signed in, which take its password).
+    let back = app.post("/api/auth/switch", &kid, json!({"user_id": admin_id})).await;
     assert_eq!(back.status, StatusCode::OK, "{:?}", back.body);
     let admin = back.body["token"].as_str().unwrap().to_owned();
 

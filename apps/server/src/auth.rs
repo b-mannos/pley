@@ -451,6 +451,9 @@ const COMMON_PASSWORDS: &[&str] = &[
 
 struct CachedSession {
     user: AuthUser,
+    /// Who signed the browser in, when it switched to `user`'s profile
+    /// since (`sessions.signed_in_as`): it ends with their sign-ins too.
+    signed_in_as: Option<i64>,
     expires_at: i64,
     cached_at: Instant,
     touched_at: i64,
@@ -578,25 +581,57 @@ impl AuthService {
         user_agent: Option<&str>,
         ip: Option<&str>,
     ) -> Result<String, AppError> {
-        self.create_session_drawing(new_token, user_id, user_agent, ip).await
+        self.create_session_drawing(new_token, user_id, None, user_agent, ip).await
     }
 
-    /// [`AuthService::create_session`], with tokens from `draw`.
+    /// A session of `user_id` for a browser that `signed_in_as` signed in,
+    /// and that switched to this profile since. It goes back to
+    /// `signed_in_as`'s profile without its password
+    /// ([`crate::api::auth::check_switch`]), and ends with their sign-ins
+    /// ([`AuthService::sign_out_everywhere`]) or their account, as an app
+    /// ends with whoever allowed it.
+    pub async fn create_switched_session(
+        &self,
+        user_id: i64,
+        signed_in_as: i64,
+        user_agent: Option<&str>,
+        ip: Option<&str>,
+    ) -> Result<String, AppError> {
+        let other = (signed_in_as != user_id).then_some(signed_in_as);
+        self.create_session_drawing(new_token, user_id, other, user_agent, ip).await
+    }
+
+    /// The profile that signed in the browser of session `token`: the
+    /// session's own, unless it switched since
+    /// ([`AuthService::create_switched_session`]). `None` without such a
+    /// session.
+    pub async fn signed_in_as(&self, token: &str) -> Result<Option<i64>, AppError> {
+        Ok(sqlx::query_scalar("SELECT COALESCE(signed_in_as, user_id) FROM sessions WHERE token_hash = ?")
+            .bind(hash_token(token))
+            .fetch_optional(&self.db.read)
+            .await?)
+    }
+
+    /// [`AuthService::create_session`], with tokens from `draw`, for a
+    /// browser `signed_in_as` signed in (`None`: `user_id` did).
     async fn create_session_drawing(
         &self,
         draw: impl FnMut() -> String,
         user_id: i64,
+        signed_in_as: Option<i64>,
         user_agent: Option<&str>,
         ip: Option<&str>,
     ) -> Result<String, AppError> {
         let token = session_token(draw);
         let now = now();
         sqlx::query(
-            "INSERT INTO sessions (token_hash, user_id, created_at, last_seen_at, expires_at, user_agent, last_ip)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO sessions (token_hash, user_id, signed_in_as, created_at, last_seen_at, expires_at, user_agent,
+                                   last_ip)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(hash_token(&token))
         .bind(user_id)
+        .bind(signed_in_as)
         .bind(now)
         .bind(now)
         .bind(now + SESSION_TTL_SECS)
@@ -625,10 +660,10 @@ impl AuthService {
         // the query runs keeps what it read out of the cache.
         let epoch = self.epoch.load(Ordering::SeqCst);
         #[allow(clippy::type_complexity)]
-        let row: Option<(i64, String, bool, bool, Option<i64>, bool, bool, i64, i64)> =
+        let row: Option<(i64, String, bool, bool, Option<i64>, bool, bool, i64, i64, Option<i64>)> =
             sqlx::query_as(sqlx::AssertSqlSafe(format!(
                 "SELECT u.id, u.username, u.is_admin, u.all_libraries, u.max_age, u.disabled, {}, s.expires_at,
-                        s.last_seen_at
+                        s.last_seen_at, s.signed_in_as
                  FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?",
                 without_two_step("u")
             )))
@@ -644,8 +679,18 @@ impl AuthService {
                 gate.release.notified().await;
             }
         }
-        let Some((id, username, is_admin, all_libraries, max_age, disabled, no_two_step, expires_at, last_seen_at)) =
-            row
+        let Some((
+            id,
+            username,
+            is_admin,
+            all_libraries,
+            max_age,
+            disabled,
+            no_two_step,
+            expires_at,
+            last_seen_at,
+            signed_in_as,
+        )) = row
         else {
             self.cache.remove(&key);
             return None;
@@ -677,7 +722,7 @@ impl AuthService {
         }
         self.remember_session(
             key,
-            CachedSession { user: user.clone(), expires_at, cached_at: Instant::now(), touched_at },
+            CachedSession { user: user.clone(), signed_in_as, expires_at, cached_at: Instant::now(), touched_at },
             epoch,
         );
         Some(user)
@@ -707,11 +752,12 @@ impl AuthService {
     }
 
     /// Drop cached sessions of a user (password change, deletion, role
-    /// change), the cached tokens of apps acting as them or allowed by
-    /// them, and their cached compatibility tokens.
+    /// change) and of the browsers they signed in that switched profiles
+    /// since, the cached tokens of apps acting as them or allowed by them,
+    /// and their cached compatibility tokens.
     pub fn forget_user(&self, user_id: i64) {
         self.epoch.fetch_add(1, Ordering::SeqCst);
-        self.cache.retain(|_, s| s.user.id != user_id);
+        self.cache.retain(|_, s| s.user.id != user_id && s.signed_in_as != Some(user_id));
         self.apps
             .retain(|_, a| a.user.id != user_id && a.user.app.as_ref().is_none_or(|app| app.approved_by != user_id));
         self.compatibility.retain(|_, c| c.user.id != user_id);
@@ -1104,10 +1150,13 @@ impl AuthService {
     }
 
     /// Signs `user_id` out everywhere: their sessions but the one whose hash
-    /// is `keep_session_hash`, then every app acting as them or allowed by
-    /// them, and every compatibility token of theirs.
+    /// is `keep_session_hash`, with those of the browsers they signed in
+    /// that switched to another profile since (which would go back to
+    /// theirs), then every app acting as them or allowed by them, and every
+    /// compatibility token of theirs.
     pub async fn sign_out_everywhere(&self, user_id: i64, keep_session_hash: Option<&str>) -> Result<(), AppError> {
-        sqlx::query("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?")
+        sqlx::query("DELETE FROM sessions WHERE (user_id = ? OR signed_in_as = ?) AND token_hash != ?")
+            .bind(user_id)
             .bind(user_id)
             .bind(keep_session_hash.unwrap_or_default())
             .execute(&self.db.write)
@@ -1756,6 +1805,35 @@ mod tests {
         assert!(expires >= now() + SESSION_TTL_SECS - 5, "a full lifetime again");
     }
 
+    #[tokio::test]
+    async fn a_switched_session_remembers_who_signed_in_and_ends_with_their_sign_ins() {
+        let dir = crate::testing::tempdir();
+        let (_db, auth) = service_with_user(dir.path()).await;
+        // The administrator (2) signed in, and switched to the kid's (1).
+        let own = auth.create_session(2, None, None).await.unwrap();
+        let switched = auth.create_switched_session(1, 2, None, None).await.unwrap();
+        let kids = auth.create_session(1, None, None).await.unwrap();
+        assert_eq!(auth.signed_in_as(&own).await.unwrap(), Some(2));
+        assert_eq!(auth.signed_in_as(&switched).await.unwrap(), Some(2));
+        assert_eq!(auth.signed_in_as(&kids).await.unwrap(), Some(1));
+        assert_eq!(auth.signed_in_as("not-a-token").await.unwrap(), None);
+        // Back on their own profile, it is a session like any other.
+        let back = auth.create_switched_session(2, 2, None, None).await.unwrap();
+        assert_eq!(auth.signed_in_as(&back).await.unwrap(), Some(2));
+        // It acts as the kid, with the kid's limits.
+        assert_eq!(auth.validate(&switched).await.unwrap().id, 1);
+        assert!(!auth.validate(&switched).await.unwrap().is_admin);
+
+        // Cached, it stops at once when the administrator is signed out
+        // everywhere; the kid's own sign-in stays.
+        assert!(auth.validate(&kids).await.is_some());
+        auth.sign_out_everywhere(2, Some(&hash_token(&own))).await.unwrap();
+        assert!(auth.validate(&switched).await.is_none());
+        assert!(auth.validate(&back).await.is_none());
+        assert!(auth.validate(&own).await.is_some(), "the session that asked stays");
+        assert!(auth.validate(&kids).await.is_some());
+    }
+
     /// Tokens of an app acting as `user_id`, allowed by `approved_by`.
     async fn app_of(auth: &AuthService, user_id: i64, approved_by: i64) -> Issued {
         auth.issue(NewGrant {
@@ -1974,7 +2052,7 @@ mod tests {
         let dir = crate::testing::tempdir();
         let (_db, auth) = service_with_user(dir.path()).await;
         let mut draws = ["pley_at_x", "pley_rt_y", "pleyfine"].into_iter().map(str::to_owned);
-        let token = auth.create_session_drawing(|| draws.next().unwrap(), 1, None, None).await.unwrap();
+        let token = auth.create_session_drawing(|| draws.next().unwrap(), 1, None, None, None).await.unwrap();
         assert_eq!(token, "pleyfine");
         assert!(auth.validate(&token).await.is_some());
     }

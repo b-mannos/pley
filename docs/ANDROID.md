@@ -64,7 +64,9 @@ wait, and a PIN locked after 100 wrong ones in a row stops the pad. Going
 on as the profile a TV was left on asks its PIN at a start. A
 profile that can see more and has no PIN takes its password: a phone signs
 in again in the browser, and a TV shows a code to approve on a phone,
-where its owner picks it.
+where its owner picks it. The profile that signed the app in takes
+neither: the server lists it as needing nothing, or its PIN, so switching
+away from it and back opens it like any other.
 
 A start never goes past a PIN: with Always start as, it opens "Who's
 watching?" on the PIN pad of the profile the TV was left on, and Back

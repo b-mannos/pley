@@ -1140,7 +1140,9 @@ async fn issue_for_device(
 /// refresh does. The rules are the web app's switch ([`check_switch`]),
 /// from the app's own rights: no administrator goes anywhere through an app.
 /// Profiles that need their password are picked in the browser, where the
-/// app signs in again: apps never see passwords or two-step codes. A
+/// app signs in again: apps never see passwords or two-step codes. The
+/// profile that signed the app in (whoever allowed it) needs none: the app
+/// goes back to it with its PIN, or with nothing. A
 /// refusal spends nothing. A switch keeps the app, what it was allowed and
 /// whoever allowed it, and ends the tokens it had at once.
 ///
@@ -1188,7 +1190,10 @@ async fn switch_profile(
             return Err(OAuthError::invalid_request(SAME_PROFILE));
         }
     } else {
-        check_switch(state, &holder.user, profile, form.get("pin"), None, None, None).await.map_err(refused_switch)?;
+        // Whoever allowed the app signed it in, as the profile it then was.
+        check_switch(state, &holder.user, Some(holder.approved_by), profile, form.get("pin"), None, None, None)
+            .await
+            .map_err(refused_switch)?;
     }
     let input = SwitchInput {
         token: token.to_owned(),
@@ -1294,9 +1299,10 @@ pub struct AppProfile {
 /// `GET /api/oauth/profiles` (apps allowed `profiles`): the enabled
 /// profiles of the household the caller belongs to, with what switching to
 /// each takes from the caller's own rights (the web app's rules, without
-/// the administrators' exemption for apps). Nobody's for a caller outside
-/// the household.
+/// the administrators' exemption for apps) and from who signed the app in.
+/// Nobody's for a caller outside the household.
 pub async fn profiles(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<AppProfile>>> {
+    let signed_in_as = user.app.as_ref().map(|app| app.approved_by);
     let all = crate::accounts::users(&state.db).await?;
     if !all.iter().any(|u| u.id == user.id && u.home) {
         return Ok(Json(Vec::new()));
@@ -1315,7 +1321,7 @@ pub async fn profiles(State(state): State<AppState>, user: AuthUser) -> ApiResul
                 avatar_url: u.avatar_url,
                 avatar_color: u.avatar_color,
                 current: u.id == user.id,
-                needs: switch_needs(&user, target, required).name(),
+                needs: switch_needs(&user, signed_in_as, target, required).name(),
             })
         })
         .collect();

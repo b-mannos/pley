@@ -390,7 +390,13 @@ pub async fn reset_password(config: Config, username: &str, password: &str, admi
                 .bind(id)
                 .execute(&db.write)
                 .await?;
-            sqlx::query("DELETE FROM sessions WHERE user_id = ?").bind(id).execute(&db.write).await?;
+            // The account's sessions, and those of the browsers it signed in
+            // that switched to another profile since.
+            sqlx::query("DELETE FROM sessions WHERE user_id = ? OR signed_in_as = ?")
+                .bind(id)
+                .bind(id)
+                .execute(&db.write)
+                .await?;
             // Whoever runs this owns the server: an authenticator lost with
             // the password doesn't keep them out.
             let two_step = sqlx::query("DELETE FROM two_step WHERE user_id = ?")

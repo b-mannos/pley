@@ -334,6 +334,124 @@ async fn who_can_switch_to_whom() {
     assert_eq!(by_pin.body["user"]["is_admin"], json!(true));
 }
 
+/// What `GET /api/auth/profiles` says switching to `username` takes.
+async fn needs(app: &TestApp, token: &str, username: &str) -> String {
+    let profiles = app.get("/api/auth/profiles", token).await;
+    assert_eq!(profiles.status, StatusCode::OK, "{}", profiles.text());
+    let profile = profiles.body.as_array().unwrap().iter().find(|u| u["username"] == username).expect(username);
+    profile["needs"].as_str().unwrap().to_owned()
+}
+
+/// A switch that worked: the new session's token.
+async fn switched(app: &TestApp, token: &str, body: Value) -> String {
+    let reply = switch(app, token, body).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.text());
+    reply.body["token"].as_str().unwrap().to_owned()
+}
+
+#[tokio::test]
+async fn a_browser_goes_back_to_the_profile_that_signed_it_in() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let admin_id = app.get("/api/auth/me", &admin).await.body["id"].as_i64().unwrap();
+    let kid =
+        app.post("/api/users", &admin, json!({"username": "kid", "managed": true, "max_age": 12})).await.body["id"]
+            .as_i64()
+            .unwrap();
+    let (parent, parent_id) = app.user(&admin, "parent", json!({})).await;
+
+    // The administrator signed in here, then switched to the kid's profile:
+    // going back takes nothing, by the kid's profile or any after it. The
+    // parent's, which never signed in here, takes its password.
+    assert_eq!(needs(&app, &admin, "kid").await, "none");
+    let as_kid = switched(&app, &admin, json!({"user_id": kid})).await;
+    assert_eq!(
+        (needs(&app, &as_kid, "admin").await, needs(&app, &as_kid, "parent").await),
+        ("none".into(), "password".into())
+    );
+    assert_eq!(switch(&app, &as_kid, json!({"user_id": parent_id})).await.status, StatusCode::FORBIDDEN);
+    let as_kid = switched(&app, &as_kid, json!({"user_id": kid})).await;
+    let back = switch(&app, &as_kid, json!({"user_id": admin_id})).await;
+    assert_eq!(back.status, StatusCode::OK, "{}", back.text());
+    assert_eq!(back.body["user"]["is_admin"], json!(true));
+    let admin = back.body["token"].as_str().unwrap().to_owned();
+    assert_eq!(app.get("/api/users", &admin).await.status, StatusCode::OK, "an administrator's session again");
+
+    // A browser the parent signed in never becomes the administrator's that
+    // way: its password, as ever.
+    let as_kid = switched(&app, &parent, json!({"user_id": kid})).await;
+    assert_eq!(
+        (needs(&app, &as_kid, "admin").await, needs(&app, &as_kid, "parent").await),
+        ("password".into(), "none".into())
+    );
+    assert_eq!(switch(&app, &as_kid, json!({"user_id": admin_id})).await.status, StatusCode::FORBIDDEN);
+    // The password signs the administrator in there: from then on the
+    // browser goes back to them, and no longer to the parent.
+    let as_admin = switched(&app, &as_kid, json!({"user_id": admin_id, "password": "secret-one"})).await;
+    let as_kid = switched(&app, &as_admin, json!({"user_id": kid})).await;
+    assert_eq!(
+        (needs(&app, &as_kid, "admin").await, needs(&app, &as_kid, "parent").await),
+        ("none".into(), "password".into())
+    );
+
+    // A PIN on the profile is asked all the same: it is what keeps the
+    // others who use the browser out.
+    let elsewhere = app.login("admin", "secret-one").await;
+    let pin = app.put("/api/me/pin", &elsewhere, json!({"pin": "2468", "password": "secret-one"})).await;
+    assert_eq!(pin.status, StatusCode::NO_CONTENT, "{}", pin.text());
+    assert_eq!(needs(&app, &as_kid, "admin").await, "pin");
+    let without = switch(&app, &as_kid, json!({"user_id": admin_id})).await;
+    assert_eq!((without.status, &without.body["code"]), (StatusCode::FORBIDDEN, &json!("wrong_pin")));
+    let as_admin = switched(&app, &as_kid, json!({"user_id": admin_id, "pin": "2468"})).await;
+    assert_eq!(app.get("/api/auth/me", &as_admin).await.body["id"], json!(admin_id));
+}
+
+#[tokio::test]
+async fn a_switched_browser_ends_with_the_sign_ins_of_whoever_signed_it_in() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let admin_id = app.get("/api/auth/me", &admin).await.body["id"].as_i64().unwrap();
+    let kid =
+        app.post("/api/users", &admin, json!({"username": "kid", "managed": true, "max_age": 12})).await.body["id"]
+            .as_i64()
+            .unwrap();
+    let (parent, parent_id) = app.user(&admin, "parent", json!({})).await;
+    let signed_in = |token: String| {
+        let app = &app;
+        async move { app.get("/api/auth/me", &token).await.status == StatusCode::OK }
+    };
+    // Two browsers on the kid's profile: one the administrator signed in,
+    // one the parent did.
+    let admins = switched(&app, &app.login("admin", "secret-one").await, json!({"user_id": kid})).await;
+    let parents = switched(&app, &parent, json!({"user_id": kid})).await;
+    // Validated, so cached.
+    assert!(signed_in(admins.clone()).await && signed_in(parents.clone()).await);
+
+    // The administrator's new password ends the first, which would have
+    // gone back to their profile, and leaves the other.
+    assert_eq!(change_password(&app, &admin, "secret-one", "secret-two").await.status, StatusCode::NO_CONTENT);
+    assert!(!signed_in(admins).await, "whoever knew the old password");
+    assert!(signed_in(parents.clone()).await && signed_in(admin.clone()).await);
+
+    // Signing the parent out everywhere ends theirs.
+    assert_eq!(app.delete(&format!("/api/users/{parent_id}/devices"), &admin).await.status, StatusCode::NO_CONTENT);
+    assert!(!signed_in(parents).await);
+
+    // A new password from an administrator, and deleting the account, too.
+    let parent = app.login("parent", "test-pass-1").await;
+    let parents = switched(&app, &parent, json!({"user_id": kid})).await;
+    assert!(signed_in(parents.clone()).await);
+    let reset = app.patch(&format!("/api/users/{parent_id}"), &admin, json!({"password": "fresh-start"})).await;
+    assert_eq!(reset.status, StatusCode::OK, "{}", reset.text());
+    assert!(!signed_in(parents).await);
+    let parent = app.login("parent", "fresh-start").await;
+    let parents = switched(&app, &parent, json!({"user_id": kid})).await;
+    assert!(signed_in(parents.clone()).await);
+    assert_eq!(app.delete(&format!("/api/users/{parent_id}"), &admin).await.status, StatusCode::NO_CONTENT);
+    assert!(!signed_in(parents).await);
+    assert_eq!(app.get("/api/auth/me", &admin).await.body["id"], json!(admin_id));
+}
+
 #[tokio::test]
 async fn invitations() {
     let app = TestApp::new().await;

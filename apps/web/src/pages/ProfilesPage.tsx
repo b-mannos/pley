@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Lock } from "lucide-react";
 import { errorMessage, isApiError } from "@/api/client";
 import { useProfiles, useServer, useSwitchProfile } from "@/api/hooks";
-import type { ServerStatus, TwoStepSetup, User } from "@/api/types";
+import type { HomeProfile, ServerStatus, TwoStepSetup, User } from "@/api/types";
 import { useOptionalAudioPlayer } from "@/audio/AudioPlayer";
 import { useAuth } from "@/auth";
 import { Avatar } from "@/components/Avatar";
@@ -36,28 +36,17 @@ export function safeNext(next: string | null): string {
 }
 
 /**
- * Whether `target` can see more than `me`: an administrator, a higher age
- * limit, or libraries `me` can't open. Switching up asks for a secret (the
- * server decides the same way).
- */
-export function freer(target: User, me: User): boolean {
-  if (me.is_admin) return false;
-  if (target.is_admin) return true;
-  if (me.max_age !== null && (target.max_age === null || target.max_age > me.max_age)) return true;
-  return !me.all_libraries && (target.all_libraries || target.library_ids.some((id) => !me.library_ids.includes(id)));
-}
-
-/**
  * What switching to `target` asks for (`locked`: nothing would do, until it
- * gets a PIN). A profile that has to set up two-step sign-in, which the
- * server requires, takes its password whatever else it has: that sets it up.
+ * gets a PIN). The server says (`needs`): a profile that can see more than
+ * this one takes its PIN or its password, unless it is the one that signed
+ * this browser in, which is gone back to with its PIN or with nothing. A
+ * profile that has to set up two-step sign-in, which the server requires,
+ * takes its password whatever else it has: that sets it up.
  */
-export function challenge(target: User, me: User, server?: ServerStatus): "none" | "pin" | "password" | "setup" | "locked" {
+export function challenge(target: HomeProfile, me: User, server?: ServerStatus): "none" | "pin" | "password" | "setup" | "locked" {
   if (target.id === me.id) return "none";
   if (mustSetUpTwoStep(target, server)) return "setup";
-  if (target.has_pin) return "pin";
-  if (freer(target, me)) return target.has_password ? "password" : "locked";
-  return "none";
+  return target.needs;
 }
 
 /** The server explains 403 (wrong PIN or password) and 429 (too many tries). */
@@ -156,13 +145,13 @@ export function ProfilesPage() {
   const profiles = useProfiles();
   const switchProfile = useSwitchProfile();
   const audio = useOptionalAudioPlayer();
-  const [target, setTarget] = useState<User | null>(null);
+  const [target, setTarget] = useState<HomeProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [failures, setFailures] = useState(0);
   const [pinLocked, setPinLocked] = useState(false);
   const [settingUp, setSettingUp] = useState<SettingUp | null>(null);
 
-  const doSwitch = (user: User, secret: { pin?: string; password?: string; code?: string; setup_id?: string } = {}) => {
+  const doSwitch = (user: HomeProfile, secret: { pin?: string; password?: string; code?: string; setup_id?: string } = {}) => {
     setError(null);
     switchProfile.mutate(
       { user_id: user.id, ...secret },
@@ -184,7 +173,7 @@ export function ProfilesPage() {
           // A profile that has a PIN since the list was loaded: its pad.
           if (isApiError(err) && err.code === "wrong_pin" && !secret.pin) {
             void profiles.refetch();
-            setTarget({ ...user, has_pin: true });
+            setTarget({ ...user, has_pin: true, needs: "pin" });
             return;
           }
           setError(switchError(err));
@@ -195,7 +184,7 @@ export function ProfilesPage() {
     );
   };
 
-  const choose = (user: User) => {
+  const choose = (user: HomeProfile) => {
     const needs = challenge(user, me, server.data);
     if (user.id === me.id) return navigate(next, { replace: true });
     setError(null);

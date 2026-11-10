@@ -14,6 +14,7 @@ import type {
   Device,
   FsListing,
   HistoryPage,
+  HomeProfile,
   Hub,
   Id,
   Invite,
@@ -238,14 +239,14 @@ export function useChangePassword() {
 export function useProfiles(enabled = true) {
   return useQuery({
     queryKey: keys.profiles,
-    queryFn: () => api.get<User[]>("/api/auth/profiles"),
+    queryFn: () => api.get<HomeProfile[]>("/api/auth/profiles"),
     enabled,
     staleTime: 60_000,
   });
 }
 
 export function fetchProfiles(qc: QueryClient) {
-  return qc.fetchQuery({ queryKey: keys.profiles, queryFn: () => api.get<User[]>("/api/auth/profiles"), staleTime: 0 });
+  return qc.fetchQuery({ queryKey: keys.profiles, queryFn: () => api.get<HomeProfile[]>("/api/auth/profiles"), staleTime: 0 });
 }
 
 /**
