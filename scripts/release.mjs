@@ -163,18 +163,19 @@ export function pending(root = ROOT) {
   if (tags.length > 1) wrong.push(`the units waiting link their versions to different tags: ${tags.join(", ")}`);
   const tag = tags[0] ?? null;
   if (tag && tagExists(tag, root)) wrong.push(`the tag ${tag} exists already`);
-  const title = units.length === 1 ? `${units[0].title} ${units[0].to}` : `Pley ${tag?.replace(/^release-/, "") ?? ""}`.trim();
-  const body = units.length === 1 ? units[0].notes : units.map(folded).join("\n\n");
+  const title = `Pley ${tag?.replace(/^release-/, "") ?? ""}`.trim();
+  const body = units.map((u) => folded(u, units.length === 1)).join("\n\n");
   return { since, tag, title, units, notes: body, problems: wrong };
 }
 
 /**
- * A unit's notes in a release of several, folded under its name and version:
- * each reader opens their app's rather than scrolling past every other's.
- * GitHub renders Markdown in <details> only after a blank line.
+ * A unit's notes in a release, folded under its name and version: each
+ * reader opens their app's rather than scrolling past every other's. The
+ * only unit's are open, there being nothing to scroll past. GitHub
+ * renders Markdown in <details> only after a blank line.
  */
-function folded(u) {
-  return `<details>\n<summary><strong>${u.title} ${u.to}</strong></summary>\n\n${u.notes}\n\n</details>`;
+function folded(u, open = false) {
+  return `<details${open ? " open" : ""}>\n<summary><strong>${u.title} ${u.to}</strong></summary>\n\n${u.notes}\n\n</details>`;
 }
 
 /** The tag for a release prepared on `date`: the one HEAD waits for, else that day's first free one. */
