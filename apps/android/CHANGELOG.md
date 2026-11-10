@@ -18,6 +18,20 @@ describes how they are made.
   A phone signed in before asks to sign in again for it. Age limits are
   set as in the web app: by a country's rating, by age or by birthday,
   with titles always or never shown by their labels.
+
+### Fixed
+
+- Dolby Vision the server repackages stays Dolby Vision: a file that also
+  carries HDR10+, profile 7 made 8.1, a file that doesn't name its Dolby
+  Vision or overstates its level, or one whose sound or container is
+  changed. On a Dolby Vision screen these played as their HDR10 or HLG
+  base layer, and profile 5, which has none, in wrong colours; only files
+  played as they are came out as Dolby Vision.
+
+## [0.1.9] - 2026-11-08
+
+### Added
+
 - Home opens on the newest movies and shows you haven't watched, as the
   web does: on phones a banner under a clear top bar, with the title's
   plot, Play, More info and My List, swiped between; on Android TV and
@@ -674,7 +688,8 @@ describes how they are made.
 - First release with a version of its own (builds before it carried 0.2.0,
   the version every app shared).
 
-[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-06...HEAD
+[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-08...HEAD
+[0.1.9]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-08
 [0.1.8]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-06
 [0.1.7]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-05
 [0.1.6]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-04

@@ -396,9 +396,11 @@ impl ChannelRow {
         self.custom_number.clone().filter(|n| !n.is_empty()).or_else(|| self.number.clone())
     }
 
-    /// The guide's channel it takes its programmes from.
+    /// The guide's channel it takes its programmes from: the one set for it,
+    /// else the match found when the guide lacks the source's id, else the
+    /// source's id.
     fn guide_key(&self) -> Option<&str> {
-        [self.custom_guide_id.as_deref(), Some(self.guide_id.as_str()), self.matched_guide_id.as_deref()]
+        [self.custom_guide_id.as_deref(), self.matched_guide_id.as_deref(), Some(self.guide_id.as_str())]
             .into_iter()
             .flatten()
             .find(|id| !id.is_empty())
@@ -450,6 +452,21 @@ impl ProgramRow {
     }
 }
 
+/// Who asks for a source to be read, which says what happens while it is
+/// being read already.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Asker {
+    /// Reads that fall due: looked at again in a minute.
+    Schedule,
+    /// An administrator (a source added or changed, Refresh): read once more
+    /// after the read under way, channels and guide.
+    Admin,
+    /// Channels given a guide channel or a name: the guide read once more,
+    /// unless the read under way hadn't chosen its channels yet. Not counted
+    /// as a try, which would put off reads that fall due.
+    ChannelsSet,
+}
+
 pub struct LiveTv {
     db: Db,
     events: EventBus,
@@ -466,6 +483,10 @@ pub struct LiveTv {
     downloads: PathBuf,
     /// Sources being read now, and when each was last tried.
     refreshing: Mutex<HashSet<i64>>,
+    /// Sources read once more when their read ends, their channels too when
+    /// `true`: asked for meanwhile ([`Asker`]). Taken with `refreshing`
+    /// locked first.
+    again: Mutex<HashMap<i64, bool>>,
     tried: Mutex<HashMap<i64, Instant>>,
     refresh_lock: tokio::sync::Mutex<()>,
     /// Every channel, in order, read once and kept until something changes:
@@ -665,6 +686,7 @@ impl LiveTv {
             pictures_pruned: Mutex::default(),
             downloads,
             refreshing: Mutex::default(),
+            again: Mutex::default(),
             tried: Mutex::default(),
             refresh_lock: tokio::sync::Mutex::new(()),
             lineup: Mutex::default(),
@@ -1163,10 +1185,10 @@ impl LiveTv {
             .ok_or_else(|| AppError::not_found(format!("live TV source {id} not found")))
     }
 
-    /// Reads a source again in the background.
+    /// Reads a source again in the background, after a read under way.
     pub fn refresh_soon(self: &Arc<Self>, id: i64) {
         let this = self.clone();
-        tokio::spawn(async move { this.refresh(id, true, true).await });
+        tokio::spawn(async move { this.read_source(id, true, true, Asker::Admin).await });
     }
 
     /// Reads a source's details without saving them: what an administrator
@@ -1208,15 +1230,51 @@ impl LiveTv {
     }
 
     /// Reads a source's channels (when `channels`) and its guide (when
-    /// `guide`), saying how it went in the source.
+    /// `guide`) as they fall due, saying how it went in the source.
     pub async fn refresh(&self, id: i64, channels: bool, guide: bool) {
-        if !self.refreshing.lock().insert(id) {
-            return;
+        self.read_source(id, channels, guide, Asker::Schedule).await;
+    }
+
+    /// [`Self::refresh`] for `asker`.
+    async fn read_source(&self, id: i64, mut channels: bool, mut guide: bool, asker: Asker) {
+        {
+            let mut refreshing = self.refreshing.lock();
+            if !refreshing.insert(id) {
+                match asker {
+                    Asker::Schedule => {}
+                    Asker::Admin => {
+                        self.again.lock().insert(id, true);
+                    }
+                    Asker::ChannelsSet => {
+                        self.again.lock().entry(id).or_insert(false);
+                    }
+                }
+                return;
+            }
         }
-        self.tried.lock().insert(id, Instant::now());
+        if asker != Asker::ChannelsSet {
+            self.tried.lock().insert(id, Instant::now());
+        }
         self.changed();
         // One source at a time: guides are large.
         let _one = self.refresh_lock.lock().await;
+        loop {
+            self.read_source_once(id, channels, guide).await;
+            let next = {
+                let mut refreshing = self.refreshing.lock();
+                let next = self.again.lock().remove(&id);
+                if next.is_none() {
+                    refreshing.remove(&id);
+                }
+                next
+            };
+            let Some(next_channels) = next else { break };
+            (channels, guide) = (next_channels, true);
+        }
+        self.changed();
+    }
+
+    async fn read_source_once(&self, id: i64, channels: bool, guide: bool) {
         if channels {
             let result = self.refresh_channels(id).await;
             if let Err(err) = &result {
@@ -1230,22 +1288,61 @@ impl LiveTv {
             self.changed();
         }
         if guide {
-            let result = self.refresh_guide(id).await;
-            match &result {
-                Ok(Some(n)) => tracing::info!(source = id, programs = n, "live TV guide read"),
-                Ok(None) => {}
-                Err(err) => tracing::warn!(source = id, "reading the live TV guide failed: {err:#}"),
-            }
-            if let Err(err) = result {
-                let _ = sqlx::query("UPDATE live_sources SET guide_error = ? WHERE id = ?")
-                    .bind(format!("{err:#}"))
-                    .bind(id)
-                    .execute(&self.db.write)
-                    .await;
-            }
+            self.read_guide(id).await;
         }
-        self.refreshing.lock().remove(&id);
-        self.changed();
+    }
+
+    /// Reads a source's guide, saying in the source how it went.
+    async fn read_guide(&self, id: i64) {
+        let result = self.refresh_guide(id).await;
+        match &result {
+            Ok(Some(n)) => tracing::info!(source = id, programs = n, "live TV guide read"),
+            Ok(None) => {}
+            Err(err) => tracing::warn!(source = id, "reading the live TV guide failed: {err:#}"),
+        }
+        if let Err(err) = result {
+            let _ = sqlx::query("UPDATE live_sources SET guide_error = ? WHERE id = ?")
+                .bind(format!("{err:#}"))
+                .bind(id)
+                .execute(&self.db.write)
+                .await;
+        }
+    }
+
+    /// Reads again the guides of the sources of channels `ids`, given a
+    /// guide channel with no programmes (when `guide_set`) or a name that
+    /// decides their guide channel (when `renamed`). A guide read keeps the
+    /// guide channels some channel took then, by guide channel or by name,
+    /// so one set by hand since has nothing until the next read. A source
+    /// being read now is read once more after it, unless that read hadn't
+    /// chosen its channels yet.
+    async fn read_guides_wanted(&self, ids: &[i64], guide_set: bool, renamed: bool) -> Result<(), AppError> {
+        let ids: HashSet<i64> = ids.iter().copied().collect();
+        let lineup = self.lineup().await?;
+        // The name decides only for channels given no guide channel by hand,
+        // whose playlist's guide channel the guide lacks: none, or one with
+        // no programmes (see `ChannelRow::guide_key`).
+        let by_name = |c: &ChannelRow| {
+            c.custom_guide_id.as_deref().is_none_or(str::is_empty)
+                && (c.guide_id.is_empty() || !lineup.guided.contains(&(c.source_id, c.guide_id.clone())))
+        };
+        let unguided: HashSet<i64> = lineup
+            .rows
+            .iter()
+            .filter(|c| ids.contains(&c.id) && ((guide_set && !lineup.has_guide(c)) || (renamed && by_name(c))))
+            .map(|c| c.source_id)
+            .collect();
+        if unguided.is_empty() {
+            return Ok(());
+        }
+        let sources = self.source_rows().await.map_err(|e| AppError::Internal(e.into()))?;
+        for source in sources {
+            if !source.enabled || source.effective_guide_url().is_none() || !unguided.contains(&source.id) {
+                continue;
+            }
+            self.read_source(source.id, false, true, Asker::ChannelsSet).await;
+        }
+        Ok(())
     }
 
     async fn list_channels(&self, source: &SourceRow) -> anyhow::Result<Listed> {
@@ -1318,7 +1415,9 @@ impl LiveTv {
                 "INSERT INTO live_channels (source_id, key, name, number, group_name, logo_url, guide_id, stream_url, \
                  user_agent, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
                  ON CONFLICT(source_id, key) DO UPDATE SET name = excluded.name, number = excluded.number, \
-                 group_name = excluded.group_name, logo_url = excluded.logo_url, guide_id = excluded.guide_id, \
+                 group_name = excluded.group_name, logo_url = excluded.logo_url, \
+                 matched_guide_id = CASE WHEN guide_id = excluded.guide_id THEN matched_guide_id END, \
+                 guide_id = excluded.guide_id, \
                  offline_since = CASE WHEN stream_url = excluded.stream_url THEN offline_since END, \
                  stream_url = excluded.stream_url, user_agent = excluded.user_agent, position = excluded.position, \
                  missing_since = NULL",
@@ -1370,6 +1469,14 @@ impl LiveTv {
         let source = self.source_row(id).await.map_err(|e| anyhow::anyhow!("{e}"))?;
         let Some(url) = source.effective_guide_url() else { return Ok(None) };
         let path = self.download_guide(&url, &source).await?;
+        // Channels set by hand until now are seen by this read: no guide read
+        // after it for them (one asked for by an administrator stays).
+        {
+            let mut again = self.again.lock();
+            if again.get(&id) == Some(&false) {
+                again.remove(&id);
+            }
+        }
         let channels = self.channel_rows(Some(id), true).await.map_err(|e| anyhow::anyhow!("{e}"))?;
         let days = i64::from(self.settings().guide_days);
         let (from, to) = (now() - GUIDE_BEHIND, now() + days * 86_400);
@@ -1386,27 +1493,19 @@ impl LiveTv {
             };
             let mut matches: HashMap<i64, String> = HashMap::new();
             let guide = xmltv::read(input, from, to, |guide_channels| {
-                let ids: HashSet<&str> = guide_channels.iter().map(|c| c.id.as_str()).collect();
-                let mut by_name: HashMap<String, &str> = HashMap::new();
-                for c in guide_channels {
-                    for name in &c.names {
-                        by_name.entry(normalize(name)).or_insert(&c.id);
-                    }
-                }
+                let index = GuideIndex::new(guide_channels);
                 let mut wanted = HashSet::new();
                 for c in &channels_for_match {
                     for id in [c.custom_guide_id.as_deref(), Some(c.guide_id.as_str())].into_iter().flatten() {
-                        if ids.contains(id) {
+                        if index.ids.contains(id) {
                             wanted.insert(id.to_owned());
                         }
                     }
-                    let named = [c.custom_guide_id.as_deref(), Some(c.guide_id.as_str())]
-                        .into_iter()
-                        .flatten()
-                        .any(|id| ids.contains(id));
-                    if !named && let Some(id) = by_name.get(&normalize(c.display_name())) {
-                        matches.insert(c.id, (*id).to_owned());
-                        wanted.insert((*id).to_owned());
+                    // Made whether or not a guide channel is set, so that
+                    // clearing it falls back to this at once.
+                    if let Some(id) = index.matching(&c.guide_id, c.display_name()) {
+                        matches.insert(c.id, id.to_owned());
+                        wanted.insert(id.to_owned());
                     }
                 }
                 wanted
@@ -2059,7 +2158,7 @@ impl LiveTv {
     }
 
     /// Changes channels `ids` as `patch` says.
-    pub async fn patch_channels(&self, ids: &[i64], patch: &ChannelPatch) -> Result<(), AppError> {
+    pub async fn patch_channels(self: &Arc<Self>, ids: &[i64], patch: &ChannelPatch) -> Result<(), AppError> {
         if ids.is_empty() {
             return Ok(());
         }
@@ -2108,6 +2207,16 @@ impl LiveTv {
             }
         }
         self.changed();
+        // A guide channel, or a name the guide may know, that the last read
+        // left out: in the background, as the lineup is read again for it.
+        if guide.is_some() || name.is_some() {
+            let (this, ids, guide_set, renamed) = (self.clone(), ids.to_vec(), guide.is_some(), name.is_some());
+            tokio::spawn(async move {
+                if let Err(err) = this.read_guides_wanted(&ids, guide_set, renamed).await {
+                    tracing::warn!("reading the guides of channels set again failed: {err}");
+                }
+            });
+        }
         Ok(())
     }
 
@@ -2341,6 +2450,75 @@ fn is_divider(name: &str) -> bool {
     name.chars().take_while(|c| "#=*-~_+•●★☆✦━─|".contains(*c)).count() >= 3 || !name.chars().any(char::is_alphanumeric)
 }
 
+/// A guide's channels, as a source's channels are looked up in them.
+struct GuideIndex<'a> {
+    ids: HashSet<&'a str>,
+    /// By [`loose_id`].
+    loose: HashMap<String, &'a str>,
+    /// By [`normalize`]d name.
+    by_name: HashMap<String, &'a str>,
+}
+
+impl<'a> GuideIndex<'a> {
+    fn new(channels: &'a [xmltv::GuideChannel]) -> Self {
+        let mut index = GuideIndex { ids: HashSet::new(), loose: HashMap::new(), by_name: HashMap::new() };
+        let mut ambiguous = HashSet::new();
+        for c in channels {
+            index.ids.insert(&c.id);
+            let loose = loose_id(&c.id);
+            if !loose.is_empty() {
+                match index.loose.get(&loose) {
+                    Some(id) if *id != c.id => {
+                        ambiguous.insert(loose);
+                    }
+                    Some(_) => {}
+                    None => {
+                        index.loose.insert(loose, &c.id);
+                    }
+                }
+            }
+            for name in &c.names {
+                index.by_name.entry(normalize(name)).or_insert(&c.id);
+            }
+        }
+        // Two guide channels written alike would be a guess between them.
+        for loose in ambiguous {
+            index.loose.remove(&loose);
+        }
+        index
+    }
+
+    /// The guide's channel for one whose source gives it `id` and `name`,
+    /// when the guide doesn't have `id` as it is: `id` written otherwise
+    /// (`Kika.de` for `KIKA.de`, `ARD-alpha.de` for `ARD.alpha.de`), else the
+    /// channel of its name.
+    fn matching(&self, id: &str, name: &str) -> Option<&'a str> {
+        if self.ids.contains(id) {
+            return None;
+        }
+        let loose = loose_id(id);
+        let by_id = if loose.is_empty() { None } else { self.loose.get(&loose) };
+        by_id.or_else(|| self.by_name.get(&normalize(name))).copied()
+    }
+}
+
+/// A guide id as compared when it isn't found as it is: lower case, letters
+/// and digits only. Sources and guides often write the same id in another
+/// case or with other dots and dashes. Between two digits a separator stays,
+/// as one dot: `21.1` and `2.11` are different channels.
+fn loose_id(id: &str) -> String {
+    let mut loose = String::with_capacity(id.len());
+    let mut chars = id.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c.is_alphanumeric() {
+            loose.extend(c.to_lowercase());
+        } else if loose.ends_with(|p: char| p.is_ascii_digit()) && chars.peek().is_some_and(|n| n.is_ascii_digit()) {
+            loose.push('.');
+        }
+    }
+    loose
+}
+
 /// A channel name as compared with the guide's: lower case, letters and
 /// digits only, and a trailing quality said or not (`HD`, `FHD`, `4K`).
 fn normalize(name: &str) -> String {
@@ -2410,6 +2588,59 @@ fn describe(e: &reqwest::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_channel_missing_from_the_guide_is_matched_by_its_id_written_otherwise_then_its_name() {
+        let channel =
+            |id: &str, name: &str| xmltv::GuideChannel { id: id.into(), names: vec![name.into()], icon: None };
+        let channels =
+            [channel("KIKA.de", "KiKA"), channel("ARD.alpha.de", "ARD alpha"), channel("WDR.de", "WDR Fernsehen")];
+        let index = GuideIndex::new(&channels);
+        // The guide has the id: nothing to match.
+        assert_eq!(index.matching("KIKA.de", "Anything"), None);
+        assert_eq!(index.matching("Kika.de", "Anything"), Some("KIKA.de"));
+        assert_eq!(index.matching("ARD-alpha.de", "Anything"), Some("ARD.alpha.de"));
+        // An id the guide has in no form: the name decides.
+        assert_eq!(index.matching("WDRFernsehen.de", "WDR Fernsehen HD"), Some("WDR.de"));
+        assert_eq!(index.matching("", "KiKA HD"), Some("KIKA.de"));
+        assert_eq!(index.matching("-", "Nothing like it"), None);
+
+        // Digits keep their separator, and ids two channels share in their
+        // loose form match neither.
+        let channels =
+            [channel("2.11", "Two"), channel("SPORT.de", "S1"), channel("Sport.de", "S2"), channel("5-1", "Five")];
+        let index = GuideIndex::new(&channels);
+        assert_eq!(index.matching("21.1", "Anything"), None);
+        assert_eq!(index.matching("2-11", "Anything"), Some("2.11"));
+        assert_eq!(index.matching("5.1", "Anything"), Some("5-1"));
+        assert_eq!(index.matching("sport.de", "Anything"), None);
+    }
+
+    #[test]
+    fn a_match_comes_before_an_id_the_guide_lacks() {
+        let row = |custom: Option<&str>, matched: Option<&str>| ChannelRow {
+            id: 1,
+            source_id: 1,
+            name: "KiKA".into(),
+            number: None,
+            group_name: String::new(),
+            logo_url: String::new(),
+            guide_id: "Kika.de".into(),
+            matched_guide_id: matched.map(Into::into),
+            stream_url: String::new(),
+            user_agent: None,
+            position: 0,
+            hidden: false,
+            custom_name: None,
+            custom_number: None,
+            custom_guide_id: custom.map(Into::into),
+            offline_since: None,
+        };
+        assert_eq!(row(None, None).guide_key(), Some("Kika.de"));
+        assert_eq!(row(None, Some("KIKA.de")).guide_key(), Some("KIKA.de"));
+        assert_eq!(row(Some("kika.example"), Some("KIKA.de")).guide_key(), Some("kika.example"));
+        assert_eq!(row(Some(""), Some("KIKA.de")).guide_key(), Some("KIKA.de"));
+    }
 
     #[test]
     fn channels_found_come_closest_first() {

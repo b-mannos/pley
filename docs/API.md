@@ -4073,7 +4073,7 @@ household) or `admins`; profiles with an age limit only with `age_limited`;
 | PUT | `/api/live/channels/{id}/favorite` | `play` | `204` |
 | DELETE | `/api/live/channels/{id}/favorite` | `play` | `204` |
 | POST | `/api/live/channels/{id}/watch` | `play` | optional `{ client_id?, keyed_urls?, take_over?, controls?, device_name?, device_kind? }` → `{ session_id, url, kind: "hls", channel: LiveChannel }`: `url` is the channel's live HLS playlist; with `keyed_urls`, an address carrying a key of its own ([Keyed URLs](#keyed-urls)); `take_over`: see Watching, below; `controls`, `device_name` and `device_kind` as a play request's ([Remote control](#remote-control)) |
-| GET | `/api/live/channels/{id}/stream.ts` | `play` | `?client_id=&take_over=&device_kind=`: the channel's MPEG-TS (`video/mp2t`) as the provider sends it, for as long as it is read (VLC, Kodi, TVs that read MPEG-TS). `take_over` counts only with a token: over plain HTTP, a GET the browser's cookie signs in may be another site's link (Pley's page uses `POST …/watch`). A reader that watches by itself obeys no remote and is named from its User-Agent; `device_kind` says what it plays on ([Remote control](#remote-control)) |
+| GET | `/api/live/channels/{id}/stream.ts` | `play` | `?client_id=&take_over=&device_kind=`: the channel's MPEG-TS (`video/mp2t`) as the provider sends it (one served as HLS: its segments, with the default audio track put in when the provider keeps it apart), for as long as it is read (VLC, Kodi, TVs that read MPEG-TS). `take_over` counts only with a token: over plain HTTP, a GET the browser's cookie signs in may be another site's link (Pley's page uses `POST …/watch`). A reader that watches by itself obeys no remote and is named from its User-Agent; `device_kind` says what it plays on ([Remote control](#remote-control)) |
 | GET | `/api/live/sessions/{session}/plan` | `play` | `LivePlan \| null`: what the transcoder makes of the channel, waited for up to 3 s; `null` when not known in time. A player that reads MPEG-TS plays a channel whose video and audio are copied from `stream.ts` (with a client id of its own), sooner than its first segments |
 | GET | `/api/live/sessions/{session}/{file}` | `play` | `index.m3u8` or a segment of a watching session; `410 session_stopped` once the session is over, with why as `message` |
 | GET | `/api/live/media/{key}/{file}` | `public` (the key) | the same, for a session watched with `keyed_urls` |
@@ -4085,7 +4085,7 @@ household) or `admins`; profiles with an age limit only with `age_limited`;
 | POST | `/api/live/sources/test` | `admin` | `LiveSourceInput & { source_id? }` → `{ channels, groups, guide_url, account }` without saving; `source_id` lends a saved source's password |
 | PUT | `/api/live/sources/{id}` | `admin` | `LiveSourceInput` → `LiveSource`; no `password` keeps the saved one |
 | DELETE | `/api/live/sources/{id}` | `admin` | `204`, with its channels |
-| POST | `/api/live/sources/{id}/refresh` | `admin` | `202`: reads its channels and guide again now |
+| POST | `/api/live/sources/{id}/refresh` | `admin` | `202`: reads its channels and guide again now, or after a read under way |
 | GET | `/api/live/lineup` | `admin` | `?source_id=` → `LiveLineupChannel[]`, hidden ones too |
 | PATCH | `/api/live/lineup` | `admin` | `{ ids?: Id[], groups?: string[], filter?: { source_id?, group?, state?, q? }, hidden?, name?, number?, guide_id? }` → `204`: those channels, every one of `groups` and every one `filter` keeps; `""` gives back the source's own value; 20,000 ids and 5,000 groups at most |
 | GET | `/api/live/lineup/page` | `admin` | `?source_id=&group=&state=all\|shown\|hidden\|no-guide\|offline&q=&offset=&limit=` → `{ total, hidden, offset, channels: LiveLineupChannel[] }`: a page of the lineup, filtered |
@@ -4149,7 +4149,7 @@ interface LiveLineupChannel {          // a channel as administrators see it
   guide_id: string;                    // the guide channel it uses
   hidden: boolean; has_guide: boolean;
   source_number: string | null; source_guide_id: string; // as the source has them
-  matched_guide_id: string | null;     // the guide's channel of its name, when the source names none
+  matched_guide_id: string | null;     // when the guide lacks source_guide_id: the same id written otherwise (case, dots, dashes), else the guide's channel of its name
   custom_name: string | null; custom_number: string | null; custom_guide_id: string | null; // as set
   offline: boolean; offline_since: number | null;
 }
@@ -4227,6 +4227,13 @@ interface LiveTuner {                  // a connection in use
 - **Hidden channels** are nobody's to watch, administrators' included,
   until shown again. Names, numbers and guide channels set in the lineup
   stay when the source is read again.
+- **Guide channels set by hand.** A guide read keeps the programmes of the
+  guide channels the source's channels take as it reads, by guide channel
+  or, when the guide lacks theirs, by name. A channel given a guide channel
+  with no programmes in the lineup, or renamed while its name decides its
+  guide channel, has the source's guide read again in the background; a
+  read under way is followed by one more when it had already listed the
+  channels.
 
 ## Users *(admin)*
 

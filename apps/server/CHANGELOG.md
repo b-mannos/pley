@@ -24,6 +24,16 @@ describes how they are made.
   requests, seeing everyone's streams) hold only for an app that
   administrator allowed: someone else's phone or TV that a cast switched to
   their profile plays as it, and nothing more.
+
+### Fixed
+
+- Settings → Live TV → Channels lists a source's channels when one is
+  picked, where the server answered with an error.
+
+## [0.1.9] - 2026-11-08
+
+### Added
+
 - In Settings → Users and Invitations, the age limit is set "By rating"
   (one of 29 countries' ratings, the metadata region's first) or "By
   age", each showing only its own fields, and lists show it that way
@@ -50,6 +60,8 @@ describes how they are made.
 
 ### Changed
 
+- The Docker image comes with FFmpeg 9, as the Windows installer does,
+  in place of Debian's 7.1.
 - Age limits read a rating with its country's ratings, so that one of the
   same name in another country isn't misread: "A" is for all ages in
   Denmark, Spain and Mexico and for adults in India, and the UK's PG is
@@ -74,12 +86,29 @@ describes how they are made.
 
 ### Fixed
 
-- Settings → Live TV → Channels lists a source's channels when one is
-  picked, where the server answered with an error.
 - An NFO file's rating with a slash in it, such as India's "U/A 13+" or
   Portugal's "M/18", is read whole, no longer as "U" or "M", which allowed
   younger viewers. A file that gives a bare `<mpaa>` and a
   `<certification>` naming countries gives the latter's.
+- A Live TV channel given a guide channel by hand, or a channel without
+  one renamed as the guide names it, shows its programmes once the
+  source's guide is read again for it, no longer after the next guide
+  refresh.
+- Refreshing a Live TV source, or changing it, while it is being read
+  reads it again after that read, no longer nothing.
+- HDR video that libplacebo tone maps plays again in the Docker image and
+  with other FFmpeg 7 installs: the transcoder no longer asks it for a
+  shader cache that FFmpeg before 8.0 doesn't have.
+- A Live TV channel whose playlist id isn't in the guide shows the
+  programmes of the guide channel found for it, rather than "No guide".
+  That guide channel is now also found when the guide writes the same id
+  in another case or with other dots and dashes (`Kika.de` and `KIKA.de`).
+- A quality fits a film wider than 16:9 into its box: 1080p of a 2.40:1
+  film is 1920×800, no longer 2592×1080, so it isn't wider than the
+  screen and plays on players that decode H.264 up to level 4.1.
+- Live TV channels served as HLS with their sound in an audio track of
+  its own, as many broadcasters serve theirs, play with sound: the
+  default track is put into the picture's stream.
 
 ## [0.1.8] - 2026-11-06
 
@@ -861,7 +890,8 @@ describes how they are made.
 - First release with a version of its own (builds before it carried 0.2.0,
   the version every app shared).
 
-[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-06...HEAD
+[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-08...HEAD
+[0.1.9]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-08
 [0.1.8]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-06
 [0.1.7]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-05
 [0.1.6]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-04
