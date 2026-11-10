@@ -1152,7 +1152,10 @@ async fn issue_for_device(
 /// Profiles that need their password are picked in the browser, where the
 /// app signs in again: apps never see passwords or two-step codes. A
 /// refusal spends nothing. A switch keeps the app, what it was allowed and
-/// whoever allowed it, and ends the tokens it had at once.
+/// whoever allowed it, and ends the tokens it had at once. One a cast's
+/// ticket allowed is kept as such, so the app has none of an
+/// administrator's rights over others on the profile it lands on
+/// ([`AuthUser::role_holds`]) until a profile is picked on the device.
 ///
 /// A switch to the profile the app acts as checks that profile's PIN ("Who's
 /// watching?" as a TV starts) and, when it is right, answers as a switch
@@ -1204,6 +1207,8 @@ async fn switch_profile(
         token: token.to_owned(),
         grant_id: holder.grant_id,
         user_id: profile,
+        // The ticket stood for a PIN given on the caster's device, not here.
+        by_cast: form.get("ticket").is_some(),
         user_agent: user_agent(headers),
         ip,
     };

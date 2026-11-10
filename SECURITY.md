@@ -168,7 +168,9 @@ protect your server.
   takes its PIN and,
   without one, can't cast there, so a child's device never becomes an
   administrator's without that PIN. An administrator's profile is cast
-  only to Pley's apps, whose tokens never carry administrator rights,
+  only to Pley's apps, whose tokens never carry administrator rights and
+  which a cast leaves without those an administrator allowed them
+  ([Apps signing in](#apps-signing-in)),
   never to a browser's or the desktop app's sign-in, which would stay one
   with those rights, and such a sign-in never switches to an
   administrator with a ticket. When the profile has a PIN, the remote
@@ -225,11 +227,15 @@ Apps sign in on Pley's own page with OAuth 2.1.
   which anyone in front of a screen could pass to an administrator. Each
   is checked against the account at every request, so a role taken away
   takes them at once, and holds only for an app that administrator
-  allowed: someone else's phone or TV that a cast switched to an
-  administrator's profile plays as it, with none of the three. Other apps, and
-  apps on other accounts, see and stop only their profile's own streams.
-  Every route apps may use is listed with the scope it needs, anything
-  else is refused, and the compatibility APIs refuse their tokens.
+  allowed, on a profile picked at the device. An app someone else allowed
+  never has them on an administrator's profile. Nor does a phone or TV
+  that a cast switched to one, whoever signed it in: the caster gave
+  their PIN on their own device, so it plays as them with none of the
+  three until their profile is picked on it with that PIN, or they sign in
+  to it again. Other apps, and apps on other accounts, see and stop only
+  their profile's own streams. Every route apps may use is listed with the
+  scope it needs, anything else is refused, and the compatibility APIs
+  refuse their tokens.
 - Android's app is answered at a private-use address
   (`app.pley.android:/oauth/callback`), as RFC 8252 allows. Another app on
   the phone that claims that scheme can start a sign-in as Pley for Android

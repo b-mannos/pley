@@ -572,8 +572,9 @@ lists carry (Kodi).
   (`"library play"`); `is_admin`, `all_libraries` and `max_age` are the
   app's rights (`is_admin` is always false); `account_admin`, for Pley's own
   apps only, whether the account is an administrator who allowed the app
-  (false once a cast switched someone else's app to an administrator's
-  profile).
+  (false for an app someone else allowed, and for any app a cast switched
+  to an administrator's profile, until the profile is picked on the
+  device).
 - `PUT /api/auth/password` signs the user out everywhere but this device,
   signs out every app using the account or allowed by it, and ends the
   account's compatibility tokens.
@@ -1141,7 +1142,11 @@ apps allowed `profiles` move to another profile of the household. Send
 - A cast from another profile's remote carries a `switch_ticket`
   ([Casting](#casting)): sent as `ticket`, with `profile` the cast's
   `profile_id`, it stands for the PIN and the rest of the rules. It is good
-  once, for this app on the profile it acts as now.
+  once, for this app on the profile it acts as now. The PIN was given on
+  the caster's device, not this one: on an administrator's profile, an app
+  switched so has none of the administrator's rights in apps (`server`,
+  `approvals`, everyone's streams), whoever allowed it, until its next
+  switch without a ticket, a PIN check of the current profile included.
 
 | Answer | When |
 |---|---|
@@ -1290,9 +1295,10 @@ What apps see:
   the account does, and administers nothing: history, sessions and
   collections answer it as they would anyone else. Three exceptions, on an
   administrator's account, for Pley's own apps alone, and only for an app
-  that administrator allowed (not one someone else allowed that a cast
-  switched to the profile since, which plays as it and nothing more): one
-  allowed
+  that administrator allowed, on a profile picked at the device (not an
+  app someone else allowed, nor any app a cast switched to the profile,
+  which plays as it and nothing more until a switch without a cast's
+  ticket): one allowed
   `server` manages the server (below), one allowed `approvals` manages
   requests (approves and declines them, marks them as added by hand, sees and
   deletes everyone's, and hears the managers' request events; see
@@ -3806,7 +3812,9 @@ would.
   as it is spent, from the rights the device has: a caster's profile that
   would now take its password (its PIN removed meanwhile) or whose PIN is
   locked isn't switched to, and `POST /api/auth/switch` never switches to
-  an administrator's profile with a ticket. A device keeps its 4 newest
+  an administrator's profile with a ticket. An app switched to one plays
+  as it, without the administrator's rights in apps
+  ([Apps (OAuth 2.1)](#apps-oauth-21)). A device keeps its 4 newest
   tickets. A receiver that doesn't name `switch`, or whose stream comes
   from an app other than Pley's own or one not allowed `profiles`, gets no
   such cast: it isn't offered across profiles. A progress report naming

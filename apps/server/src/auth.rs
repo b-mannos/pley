@@ -77,6 +77,9 @@ pub struct AppAccess {
     pub scopes: Scopes,
     /// Who allowed it (the profile it acts as, unless it switched since).
     pub approved_by: i64,
+    /// Whether a cast put it on the profile it acts as (a switch with the
+    /// cast's ticket), until the profile is picked on the device itself.
+    pub by_cast: bool,
 }
 
 impl AuthUser {
@@ -109,12 +112,16 @@ impl AuthUser {
 
     /// Whether the account's administrator role holds for this request:
     /// Pley's own sign-in or a compatibility token on an administrator's
-    /// account, or an app that administrator allowed. An app someone else
-    /// allowed that switched to the profile since (a cast to their phone or
-    /// TV) acts as it, but never with its role's rights over others: the
-    /// scopes it holds were never that administrator's to give.
+    /// account, or an app that administrator allowed and put on their
+    /// profile at the device: by signing in, or by picking the profile
+    /// there. An app someone else allowed that switched to the profile
+    /// since acts as it, but never with its role's rights over others: the
+    /// scopes it holds were never that administrator's to give. Nor does an
+    /// app a cast switched to the profile, whoever allowed it
+    /// ([`AppAccess::by_cast`]): the caster gave their PIN on their own
+    /// device, and whoever holds this one may be someone else.
     pub fn role_holds(&self) -> bool {
-        self.account_admin && self.app.as_ref().is_none_or(|app| app.approved_by == self.id)
+        self.account_admin && self.app.as_ref().is_none_or(|app| app.approved_by == self.id && !app.by_cast)
     }
 
     /// Whether this request manages requests (approves and declines them,
@@ -820,6 +827,7 @@ impl AuthService {
                 client_id: row.client_id.into(),
                 scopes: Scopes::from_stored(&row.scope),
                 approved_by: row.approved_by,
+                by_cast: row.by_cast,
             })),
             compatibility: None,
         };
@@ -833,7 +841,7 @@ impl AuthService {
             "SELECT u.id, u.username, u.is_admin AS role_admin, u.all_libraries, u.max_age, u.disabled,
                     a.disabled AS approver_disabled, {} AS user_without_two_step,
                     {} AS approver_without_two_step, t.expires_at AS token_expires, g.id AS grant_id, g.client_id,
-                    g.scope, g.approved_by, g.expires_at AS grant_expires, g.ends_at
+                    g.scope, g.approved_by, g.by_cast, g.expires_at AS grant_expires, g.ends_at
              FROM app_tokens t
              JOIN app_grants g ON g.id = t.grant_id
              JOIN users u ON u.id = g.user_id
@@ -1180,6 +1188,7 @@ struct AppRow {
     client_id: String,
     scope: String,
     approved_by: i64,
+    by_cast: bool,
     grant_expires: i64,
     ends_at: Option<i64>,
 }
@@ -1812,7 +1821,7 @@ mod tests {
     #[tokio::test]
     async fn app_tokens_act_without_administrator_rights() {
         let dir = crate::testing::tempdir();
-        let (_db, auth) = service_with_user(dir.path()).await;
+        let (db, auth) = service_with_user(dir.path()).await;
         let admin = app_of(&auth, 2, 2).await;
         let user = auth.validate_app(&admin.access_token).await.unwrap();
         assert!(!user.is_admin, "never an administrator through an app");
@@ -1837,6 +1846,18 @@ mod tests {
         assert!(auth.validate_any(&admin.access_token).await.is_some_and(|u| u.app.is_some()));
         assert!(auth.validate_app(admin.refresh_token.as_ref().unwrap()).await.is_none(), "no refresh token");
         assert!(auth.validate_app("pley_at_unknown").await.is_none());
+
+        // The administrator's own app, which a cast put on their profile:
+        // whoever holds the device didn't give the PIN.
+        sqlx::query("UPDATE app_grants SET by_cast = 1 WHERE id = ?")
+            .bind(admin.grant_id)
+            .execute(&db.write)
+            .await
+            .unwrap();
+        auth.forget_grants(&[admin.grant_id]);
+        let cast = auth.validate_app(&admin.access_token).await.unwrap();
+        assert!(cast.all_libraries && cast.max_age.is_none(), "it sees as the profile does");
+        assert!(!cast.role_holds(), "but has none of its role's rights over others");
     }
 
     #[tokio::test]

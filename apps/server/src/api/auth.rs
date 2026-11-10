@@ -375,8 +375,8 @@ pub struct Me {
     /// of pley's own apps (`is_admin` is the app's rights): such an app
     /// allowed `server` manages the server, and one signed in before it
     /// could is told to sign in again for it. An app someone else allowed,
-    /// switched to an administrator's profile since, is told no
-    /// ([`AuthUser::role_holds`]).
+    /// switched to an administrator's profile since, is told no, and so is
+    /// any app a cast switched there ([`AuthUser::role_holds`]).
     #[serde(skip_serializing_if = "Option::is_none")]
     account_admin: Option<bool>,
 }
@@ -761,8 +761,9 @@ pub(crate) async fn check_switch(
 /// take nothing more than the PIN the caster gave as the ticket was issued:
 /// never a password, and not a locked PIN. Only an app (`app`) switches to
 /// an administrator's profile so: its tokens never have administrator
-/// rights, nor that role's rights over others, which hold only for an app
-/// the administrator allowed ([`AuthUser::role_holds`]). A browser's or the
+/// rights, nor, switched by a ticket, that role's rights over others, which
+/// hold only where the administrator allowed the app and picked their
+/// profile on its device ([`AuthUser::role_holds`]). A browser's or the
 /// desktop app's sign-in would keep them (casts there aren't sent; this
 /// holds whatever a ticket says).
 pub(crate) async fn check_ticket_switch(

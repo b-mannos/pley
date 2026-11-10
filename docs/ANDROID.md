@@ -795,8 +795,12 @@ settings and Live TV's channels and tuners are managed there too, and the
 page says where they are. The app asks for the `server` scope as it signs
 in, where the server offers it ([API.md](API.md#scopes)); an
 administrator signed in before then is offered to sign in again, and
-anyone else sees nothing of it, a phone someone else signed in that a
-cast switched to an administrator's profile included. TVs don't manage
+anyone else sees nothing of it. Nor does a phone that a cast switched to
+an administrator's profile, whoever signed it in: the caster gave their
+PIN on their own phone, and the server gives such a phone none of their
+rights over others. Manage server is back once the administrator
+switches to their profile on the phone itself, which takes their PIN, or
+signs in to it again. TVs don't manage
 the server: they sign in with a code, and the server never gives the
 scope to a code.
 

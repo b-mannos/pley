@@ -22,8 +22,10 @@ describes how they are made.
   PIN or two-step sign-in, stay there too.
 - An administrator's rights in an app (managing the server, approving
   requests, seeing everyone's streams) hold only for an app that
-  administrator allowed: someone else's phone or TV that a cast switched to
-  their profile plays as it, and nothing more.
+  administrator allowed, on a profile picked at the device: a phone or TV
+  that a cast switched to their profile plays as it, and nothing more,
+  until they pick their profile on it with their PIN or sign in to it
+  again.
 
 ### Fixed
 
