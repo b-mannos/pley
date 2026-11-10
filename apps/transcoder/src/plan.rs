@@ -325,6 +325,12 @@ pub struct VideoOut {
     /// libplacebo was asked for (`tonemap=libplacebo`): it tone maps however
     /// busy the GPU is, Quick Sync's scaler never in its place.
     pub libplacebo_asked: bool,
+    /// Quick Sync could decode and scale this video for its HDR10 base layer
+    /// alone, its Dolby Vision or HDR10+ metadata unread, where FFmpeg's own
+    /// decoder brings libplacebo the frames with it: what
+    /// [`Plan::with_share`] does where that decoder's GPU decoding failed
+    /// (the CPU would decode in its place), or the computer falls behind.
+    pub qsv_base_layer: bool,
     /// FFmpeg uploads the frames to the AMD GPU for AMF ([`AMF_D3D11_DEVICE`]),
     /// which copies them from memory itself several times slower.
     pub amf_upload: bool,
@@ -666,6 +672,7 @@ impl Plan {
                         tonemap_quality: TonemapQuality::High,
                         tonemap_input: None,
                         libplacebo_asked: false,
+                        qsv_base_layer: false,
                         amf_upload: false,
                         vui_primaries: None,
                         hw_decode: None,
@@ -827,6 +834,18 @@ impl Plan {
                         && !turned
                         && !scene_metadata
                         && (resized || ten_bits || src.bit_depth.unwrap_or(8) > 8);
+                    // What Quick Sync could take over where the computer
+                    // falls behind: the HDR10 picture under that metadata.
+                    // Not from Vulkan, which decodes it straight into
+                    // libplacebo's memory with its metadata.
+                    let qsv_base_layer = scene_metadata
+                        && pipeline == Pipeline::Software
+                        && hdr.is_none()
+                        && src.has_hdr10_base()
+                        && req.options.hardware_decoding
+                        && qsv_decodes(encoder.accel)
+                        && !deinterlace
+                        && !turned;
                     let hw_decode = match pipeline {
                         Pipeline::Vulkan { .. } => Some("vulkan".to_owned()),
                         Pipeline::D3d11 { .. } => Some("d3d11va".to_owned()),
@@ -875,6 +894,7 @@ impl Plan {
                         tonemap_quality: quality_for(ff.caps.tonemap_speed.as_ref(), src, (width, height), 0.0),
                         tonemap_input,
                         libplacebo_asked: req.options.tonemap == TonemapMode::Libplacebo,
+                        qsv_base_layer,
                         amf_upload,
                         // BT.709 out of every tone mapper; the source's otherwise.
                         vui_primaries: (ff.caps.h264_metadata
@@ -1124,15 +1144,35 @@ impl Plan {
     /// Whether Quick Sync's scaler could tone map this video in libplacebo's
     /// place ([`Tonemapper::QuickSync`]), where its start-up test passed
     /// (`qsv_tonemap`): HDR10 made SDR, decoded and scaled by Quick Sync,
-    /// where libplacebo wasn't asked for.
+    /// or the HDR10 base layer of Dolby Vision or HDR10+ that it could
+    /// decode ([`VideoOut::qsv_base_layer`]), where libplacebo wasn't asked
+    /// for. Only video that carries HDR10's static metadata: Quick Sync's
+    /// scaler tone maps by it, and leaves the picture as it is without
+    /// (VAAPI's refuses it).
     pub fn quick_sync_could_tonemap(&self, media: &MediaInfo, qsv_tonemap: bool) -> bool {
         qsv_tonemap
             && self.placebo_source(media).is_some_and(|(v, src)| {
                 !v.libplacebo_asked
                     && v.hdr.is_none()
-                    && v.gpu_scale == Some(HwAccel::Qsv)
-                    && src.dynamic_range() == DynamicRange::Hdr10
+                    && src.hdr10_metadata == Some(true)
+                    && (v.qsv_base_layer
+                        || (v.gpu_scale == Some(HwAccel::Qsv) && src.dynamic_range() == DynamicRange::Hdr10))
             })
+    }
+
+    /// Whether Quick Sync could decode this video's HDR10 base layer in
+    /// place of FFmpeg's own decoder ([`VideoOut::qsv_base_layer`]): what
+    /// relieves a CPU that decodes it, the GPU's decoder having failed.
+    pub fn quick_sync_would_decode(&self) -> bool {
+        self.video.as_ref().is_some_and(|v| !v.copy && v.qsv_base_layer)
+    }
+
+    /// The key of the video's decoder ([`decode_key`]), where it is
+    /// transcoded.
+    pub fn decode_key(&self, media: &MediaInfo) -> Option<String> {
+        let v = self.video.as_ref().filter(|v| !v.copy)?;
+        let src = media.stream(v.stream_index)?;
+        Some(decode_key(&src.codec, src.bit_depth, src.pix_fmt.as_deref()))
     }
 
     /// The pixels a frame of the source has and its frame rate: what
@@ -1152,6 +1192,12 @@ impl Plan {
             v.tonemap_quality = share.quality;
             if share.cpu_decode {
                 v.hw_decode = None;
+            }
+            // The base layer alone: Quick Sync decodes and scales it, for
+            // libplacebo or for its own tone mapping.
+            if (share.base_layer || share.quick_sync) && v.qsv_base_layer {
+                v.hw_decode = Some("qsv".to_owned());
+                v.gpu_scale = Some(HwAccel::Qsv);
             }
             if share.quick_sync {
                 v.tonemap = Some(Tonemapper::QuickSync);
@@ -3218,13 +3264,14 @@ mod tests {
         let mut ff = intel(HwAccel::Qsv, true);
         // Vulkan doesn't decode 10-bit HEVC (Iris Xe's driver doesn't).
         ff.caps.vulkan_decode = vec!["h264".into(), "hevc".into()];
-        let m = ten_bit(media(DynamicRange::Hdr10, None));
+        let mut m = ten_bit(media(DynamicRange::Hdr10, None));
+        m.streams[0].hdr10_metadata = Some(true);
         let plan = Plan::build(&request(), &m, &ff, None).unwrap();
         assert!(!plan.quick_sync_could_tonemap(&m, false));
         ff.caps.qsv_tonemap = true;
         let plan = Plan::build(&request(), &m, &ff, None).unwrap();
         assert!(plan.quick_sync_could_tonemap(&m, true));
-        let share = Share { quality: TonemapQuality::Fast, cpu_decode: false, quick_sync: true };
+        let share = Share { quality: TonemapQuality::Fast, cpu_decode: false, quick_sync: true, base_layer: false };
         let intel = plan.with_share(share);
         let v = intel.video.as_ref().unwrap();
         assert_eq!((v.pipeline, v.tonemap), (Pipeline::Gpu(HwAccel::Qsv), Some(Tonemapper::QuickSync)));
@@ -3310,6 +3357,94 @@ mod tests {
         tagged.streams[0].color_space = Some("bt2020nc".into());
         let args = args_string(&Plan::build(&request(), &tagged, &ff, None).unwrap().with_share(share), 0, 2);
         assert!(args.contains("[0:0]vpp_qsv=w=1920:h=1080:format=p010le,vpp_qsv=procamp="), "{args}");
+
+        // Video without HDR10's static metadata, or not known to carry it:
+        // Quick Sync's scaler would pass its picture through, untouched.
+        for metadata in [Some(false), None] {
+            let mut bare = m.clone();
+            bare.streams[0].hdr10_metadata = metadata;
+            let plan = Plan::build(&request(), &bare, &ff, None).unwrap();
+            assert!(!plan.quick_sync_could_tonemap(&bare, true), "{metadata:?}");
+        }
+    }
+
+    /// Dolby Vision over an HDR10 base layer and HDR10+ keep FFmpeg's own
+    /// decoder for libplacebo, which reads their metadata. Where the
+    /// computer falls behind, Quick Sync decodes, scales and tone maps the
+    /// base layer instead, without the frames leaving the GPU.
+    #[test]
+    fn quick_sync_takes_over_the_hdr10_base_layer_of_dolby_vision_and_hdr10plus() {
+        let mut ff = intel(HwAccel::Qsv, true);
+        ff.caps.vulkan_decode = vec!["h264".into(), "hevc".into()];
+        ff.caps.qsv_tonemap = true;
+        let with_metadata = |mut m: MediaInfo| {
+            m.streams[0].hdr10_metadata = Some(true);
+            m
+        };
+        let p81 = with_metadata(ten_bit(media(DynamicRange::DolbyVision, Some(8))));
+        let mut p7 = with_metadata(ten_bit(media(DynamicRange::DolbyVision, Some(7))));
+        p7.streams[0].dv_bl_compat = Some(6);
+        let mut plus = with_metadata(ten_bit(media(DynamicRange::Hdr10plus, None)));
+        plus.streams[0].hdr10plus = Some(true);
+        let share = Share { quality: TonemapQuality::Fast, cpu_decode: false, quick_sync: true, base_layer: false };
+        for source in [&p81, &p7, &plus] {
+            let plan = Plan::build(&request(), source, &ff, None).unwrap();
+            let v = plan.video.as_ref().unwrap();
+            // As planned: FFmpeg's decoder, libplacebo reading the metadata.
+            let decoder = if cfg!(windows) { "d3d11va" } else { "vaapi" };
+            assert_eq!(
+                (v.tonemap, v.hw_decode.as_deref(), v.gpu_scale),
+                (Some(Tonemapper::Libplacebo), Some(decoder), None)
+            );
+            assert!(v.qsv_base_layer && plan.quick_sync_would_decode());
+            assert!(plan.quick_sync_could_tonemap(source, true));
+            let intel = plan.with_share(share);
+            let v = intel.video.as_ref().unwrap();
+            assert_eq!((v.pipeline, v.tonemap), (Pipeline::Gpu(HwAccel::Qsv), Some(Tonemapper::QuickSync)));
+            assert_eq!((v.hw_decode.as_deref(), v.gpu_scale), (Some("qsv"), Some(HwAccel::Qsv)));
+            let args = args_string(&intel, 0, 2);
+            assert!(args.contains(QSV_DECODE_ARGS), "{args}");
+            assert!(args.contains(&qsv_tonemap(1920, 1080)), "{args}");
+            assert!(!args.contains("libplacebo") && !args.contains("d3d11va"), "{args}");
+            assert_eq!(intel.video_plan(source, None).unwrap().decoder.as_deref(), Some("qsv"));
+
+            // Where FFmpeg's decoder failed on the GPU, Quick Sync decodes
+            // and scales the base layer for libplacebo, as it does HDR10:
+            // the CPU doesn't decode in its place.
+            let taken = plan.with_share(Share { quick_sync: false, base_layer: true, ..share });
+            let v = taken.video.as_ref().unwrap();
+            assert_eq!((v.pipeline, v.tonemap), (Pipeline::Software, Some(Tonemapper::Libplacebo)));
+            assert_eq!((v.hw_decode.as_deref(), v.gpu_scale), (Some("qsv"), Some(HwAccel::Qsv)));
+            let args = args_string(&taken, 0, 2);
+            assert!(args.contains(QSV_DECODE_ARGS) && !args.contains("d3d11va"), "{args}");
+            assert!(
+                args.contains("vpp_qsv=w=1920:h=1080:format=p010le,hwdownload,format=p010le,libplacebo=w=1920:h=1080"),
+                "{args}"
+            );
+        }
+        // Profile 5 has no HDR10 under its metadata, and a base layer
+        // without HDR10's static metadata nothing for Quick Sync to tone
+        // map by.
+        let p5 = with_metadata(ten_bit(media(DynamicRange::DolbyVision, Some(5))));
+        let plan = Plan::build(&request(), &p5, &ff, None).unwrap();
+        assert!(!plan.quick_sync_would_decode() && !plan.quick_sync_could_tonemap(&p5, true));
+        let mut bare = p81.clone();
+        bare.streams[0].hdr10_metadata = Some(false);
+        assert!(!Plan::build(&request(), &bare, &ff, None).unwrap().quick_sync_could_tonemap(&bare, true));
+        // Nor where Vulkan decodes it straight into libplacebo's memory,
+        // its metadata with it: nothing there for Quick Sync to relieve.
+        let mut vulkan = intel(HwAccel::Qsv, true);
+        vulkan.caps.qsv_tonemap = true;
+        let plan = Plan::build(&request(), &p81, &vulkan, None).unwrap();
+        assert!(matches!(plan.video.as_ref().unwrap().pipeline, Pipeline::Vulkan { .. }));
+        assert!(!plan.quick_sync_would_decode() && !plan.quick_sync_could_tonemap(&p81, true));
+        // Nor with hardware decoding off, or libplacebo asked for.
+        let mut req = request();
+        req.options.hardware_decoding = false;
+        assert!(!Plan::build(&req, &p81, &ff, None).unwrap().quick_sync_would_decode());
+        let mut req = request();
+        req.options.tonemap = TonemapMode::Libplacebo;
+        assert!(!Plan::build(&req, &p81, &ff, None).unwrap().quick_sync_could_tonemap(&p81, true));
     }
 
     /// HDR10 made SDR goes from Quick Sync's decoder through OpenCL's tone
@@ -3709,14 +3844,24 @@ mod tests {
         assert!(plan.tonemapping_falls_behind(Some(&vega), &m, 2.0 * film));
         assert!(!plan.tonemapping_falls_behind(None, &m, 2.0 * film));
 
-        let shared = plan.with_share(Share { quality: TonemapQuality::Fast, cpu_decode: true, quick_sync: false });
+        let shared = plan.with_share(Share {
+            quality: TonemapQuality::Fast,
+            cpu_decode: true,
+            quick_sync: false,
+            base_layer: false,
+        });
         let args = args_string(&shared, 0, 2);
         assert!(!args.contains("-hwaccel "), "{args}");
         assert!(args.contains("contrast_recovery=0:skip_aa=1:extra_opts=force_low_bit_depth_fbos=yes"), "{args}");
         assert!(args.contains("-init_hw_device vulkan=vk@va -filter_hw_device vk"), "{args}");
         assert!(args.contains("hwupload=derive_device=vaapi[vout]"), "{args}");
         // The GPU keeps decoding where the share leaves it the decoding.
-        let kept = plan.with_share(Share { quality: TonemapQuality::Balanced, cpu_decode: false, quick_sync: false });
+        let kept = plan.with_share(Share {
+            quality: TonemapQuality::Balanced,
+            cpu_decode: false,
+            quick_sync: false,
+            base_layer: false,
+        });
         assert!(args_string(&kept, 0, 2).contains("-hwaccel vaapi "));
 
         // NVIDIA's decoder works apart from its encoder.

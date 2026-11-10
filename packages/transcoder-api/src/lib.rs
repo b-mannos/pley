@@ -234,6 +234,14 @@ pub struct MediaStream {
     /// by an older transcoder).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hdr10plus: Option<bool>,
+    /// HDR10's static metadata (the mastering display's colours and
+    /// brightness, SMPTE ST 2086) in the video's first frames, looked for
+    /// in Dolby Vision and PQ streams. Quick Sync's scaler and VAAPI tone
+    /// map by it: without it the first leaves the picture as it is and the
+    /// second refuses the frames. `None`: not looked for (other streams, or
+    /// probed by an older transcoder).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hdr10_metadata: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color_transfer: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -333,6 +341,17 @@ impl MediaStream {
     pub fn is_dolby_vision_only(&self) -> bool {
         self.dynamic_range() == DynamicRange::DolbyVision
             && (self.dv_profile == Some(5) || self.dv_bl_compat == Some(0))
+    }
+
+    /// Whether the picture is HDR10 once its scene-by-scene metadata is left
+    /// unread: HDR10 and HDR10+, and Dolby Vision over an HDR10 base layer
+    /// (compatibility 1, and 6, profile 7's Blu-ray HDR10).
+    pub fn has_hdr10_base(&self) -> bool {
+        match self.dynamic_range() {
+            DynamicRange::Hdr10 | DynamicRange::Hdr10plus => true,
+            DynamicRange::DolbyVision => matches!(self.dv_bl_compat, Some(1 | 6)),
+            DynamicRange::Hlg | DynamicRange::Sdr => false,
+        }
     }
 
     /// The Dolby Vision level the stream's size and frame rate need: the
@@ -1866,6 +1885,13 @@ mod tests {
         let hdr10plus =
             MediaStream { dynamic_range: Some(DynamicRange::Hdr10plus), hdr10plus: Some(true), ..Default::default() };
         assert_eq!(hdr10plus.dynamic_range_label(), "HDR10+");
+        // What is HDR10 under its scene-by-scene metadata: HDR10+, and
+        // Dolby Vision over an HDR10 base layer, profile 7's included.
+        assert!(hdr10plus.has_hdr10_base());
+        assert!(dv(8, 1, None, None).has_hdr10_base() && dv(7, 6, Some(DolbyVisionLayer::Fel), None).has_hdr10_base());
+        assert!(!dv(5, 0, None, None).has_hdr10_base(), "profile 5 has no picture without its metadata");
+        assert!(!dv(8, 4, None, None).has_hdr10_base() && !dv(8, 2, None, None).has_hdr10_base(), "HLG and SDR bases");
+        assert!(!MediaStream::default().has_hdr10_base());
         let p5 =
             MediaStream { dynamic_range: Some(DynamicRange::DolbyVision), dv_profile: Some(5), ..Default::default() };
         assert!(p5.is_dolby_vision_only());

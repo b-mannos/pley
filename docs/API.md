@@ -409,6 +409,8 @@ interface MediaStream {
   dv_level?: number;                // Dolby Vision level (absent with dv_unnamed)
   hdr10plus?: boolean;              // Dolby Vision and PQ streams: HDR10+ in the first frames (absent: not
                                     // looked for). On Dolby Vision, true means Dolby Vision + HDR10+
+  hdr10_metadata?: boolean;         // Dolby Vision and PQ streams: HDR10's mastering display metadata in the
+                                    // first frames, which some tone mappers need (absent: not looked for)
   // Clients name the dynamic range the same way everywhere: "Dolby Vision P8.1", "Dolby Vision P8.4",
   // "Dolby Vision P5", "Dolby Vision P7 FEL" (or MEL; "P7" when not known, never "P7.6"),
   // "Dolby Vision P8.1 + HDR10+", "HDR10+", "HDR10", "HLG". Badges shorten "Dolby Vision" to "DV".

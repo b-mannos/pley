@@ -79,6 +79,11 @@ pub struct Share {
     /// ([`pley_transcoder_api::Tonemapper::QuickSync`]): where the GPU falls
     /// behind with jobs it decodes and scales.
     pub quick_sync: bool,
+    /// Quick Sync decodes and scales the HDR10 base layer of Dolby Vision or
+    /// HDR10+ for libplacebo, its metadata unread, rather than FFmpeg's own
+    /// decoder, which reads it: where that one's GPU decoding failed, and
+    /// the CPU would decode in its place.
+    pub base_layer: bool,
 }
 
 impl Share {
@@ -86,11 +91,12 @@ impl Share {
     /// less to do (a cheaper quality, the decoding moved to the CPU, or the
     /// tone mapping to Quick Sync's scaler), or
     /// the CPU, where it was found with no time to spare (`cpu_busy`, see
-    /// [`Lessons`]).
+    /// [`Lessons`]) or decodes what Quick Sync could (`base_layer`).
     pub fn moves_at_once(self, to: Share, cpu_busy: bool) -> bool {
         to.quality < self.quality
             || (to.cpu_decode && !self.cpu_decode)
             || (to.quick_sync && !self.quick_sync)
+            || (to.base_layer && !self.base_layer)
             || (cpu_busy && self.cpu_decode && !to.cpu_decode)
     }
 }
@@ -370,7 +376,7 @@ mod tests {
         let starved = Measured { others: 2.27 / 0.31, ..measured(0.31, 0.0, Some(0.22)) };
         assert_eq!(verdict(starved), Verdict::Starved);
         let mut lessons = Lessons::default();
-        let fast = Share { quality: TonemapQuality::Fast, cpu_decode: false, quick_sync: false };
+        let fast = Share { quality: TonemapQuality::Fast, cpu_decode: false, quick_sync: false, base_layer: false };
         assert!(!lessons.learn(Verdict::Starved, fast, 67.0, Instant::now()));
         assert_eq!(lessons.holding(67.0, Instant::now()), Held::default());
         // Three 4K films the GPU holds back: 0.47× beside 0.85×, together.
@@ -380,7 +386,7 @@ mod tests {
 
     #[test]
     fn only_jobs_tone_mapping_alike_tell_that_one_waits_for_its_input() {
-        let gpu = Share { quality: TonemapQuality::Fast, cpu_decode: false, quick_sync: false };
+        let gpu = Share { quality: TonemapQuality::Fast, cpu_decode: false, quick_sync: false, base_layer: false };
         let cpu = Share { cpu_decode: true, ..gpu };
         let balanced = Share { quality: TonemapQuality::Balanced, ..gpu };
         // Three 4K films as measured: two decoded on the GPU, at 0.56× and
@@ -405,7 +411,8 @@ mod tests {
     fn a_gpu_that_fell_behind_takes_a_cheaper_quality_then_leaves_the_decoding_to_the_cpu() {
         let now = Instant::now();
         let mut lessons = Lessons::default();
-        let balanced = Share { quality: TonemapQuality::Balanced, cpu_decode: false, quick_sync: false };
+        let balanced =
+            Share { quality: TonemapQuality::Balanced, cpu_decode: false, quick_sync: false, base_layer: false };
         assert!(!lessons.learn(Verdict::KeepsUp, balanced, 100.0, now));
         assert_eq!(lessons.holding(100.0, now), Held::default());
 
@@ -436,7 +443,7 @@ mod tests {
     fn a_cpu_with_no_time_to_spare_decodes_no_more() {
         let now = Instant::now();
         let mut lessons = Lessons::default();
-        let decoding = Share { quality: TonemapQuality::Fast, cpu_decode: true, quick_sync: false };
+        let decoding = Share { quality: TonemapQuality::Fast, cpu_decode: true, quick_sync: false, base_layer: false };
         assert!(lessons.learn(Verdict::CpuBound, decoding, 100.0, now));
         assert!(!lessons.learn(Verdict::CpuBound, decoding, 120.0, now + Duration::from_secs(5)));
         let held = lessons.holding(100.0, now + Duration::from_secs(5));
@@ -449,8 +456,9 @@ mod tests {
 
     #[test]
     fn moves_relieving_the_gpu_or_a_busy_cpu_happen_at_once() {
-        let alone = Share { quality: TonemapQuality::Balanced, cpu_decode: false, quick_sync: false };
-        let shared = Share { quality: TonemapQuality::Fast, cpu_decode: true, quick_sync: false };
+        let alone =
+            Share { quality: TonemapQuality::Balanced, cpu_decode: false, quick_sync: false, base_layer: false };
+        let shared = Share { quality: TonemapQuality::Fast, cpu_decode: true, quick_sync: false, base_layer: false };
         assert!(alone.moves_at_once(shared, false));
         assert!(alone.moves_at_once(Share { quality: TonemapQuality::Fast, ..alone }, false));
         assert!(alone.moves_at_once(Share { cpu_decode: true, ..alone }, false));
@@ -459,9 +467,11 @@ mod tests {
         // Back to the GPU at once where the CPU had no time to spare.
         assert!(shared.moves_at_once(Share { cpu_decode: false, ..shared }, true));
         // To Quick Sync's tone mapping at once, back to libplacebo later.
-        let fast = Share { quality: TonemapQuality::Fast, cpu_decode: false, quick_sync: false };
+        let fast = Share { quality: TonemapQuality::Fast, cpu_decode: false, quick_sync: false, base_layer: false };
         let intel = Share { quick_sync: true, ..fast };
         assert!(fast.moves_at_once(intel, false));
         assert!(!intel.moves_at_once(fast, false));
+        // To Quick Sync's decoder at once, from a CPU decoding in the GPU's place.
+        assert!(alone.moves_at_once(Share { base_layer: true, ..alone }, false));
     }
 }

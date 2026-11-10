@@ -35,6 +35,13 @@ describes how they are made.
   Windows, where its startup checks pass: it decodes and scales HDR before
   tone mapping, tone maps with Intel's VAAPI driver when several HDR
   transcodes would fall behind, and overlays picture subtitles on the GPU.
+- Intel graphics: Dolby Vision with an HDR10 base layer (profiles 7 and
+  8.1) and HDR10+ are decoded by Quick Sync where the GPU can't decode them
+  otherwise, instead of by the CPU. A 4K60 Dolby Vision clip went from 1.2x
+  real time on nearly three CPU cores to 2.2x on half a core.
+- Intel graphics: when the computer can't keep up with Dolby Vision
+  (profiles 7 and 8.1) or HDR10+, Quick Sync decodes, scales and tone maps
+  their HDR10 picture on the GPU, at 3.4x real time for that clip.
 
 ### Fixed
 
@@ -48,6 +55,9 @@ describes how they are made.
   GPUs that can't decode it, such as Intel's.
 - HDR tone mapping quality is no longer chosen from a slow first startup
   benchmark, which made Intel GPUs pick a quality too slow to keep up.
+- Intel graphics: HDR10 video that carries no mastering metadata is no
+  longer left washed out when Quick Sync tone maps it. Quick Sync needs that
+  metadata, so such video stays with libplacebo.
 
 ## [0.1.9] - 2026-11-08
 

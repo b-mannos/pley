@@ -9,7 +9,7 @@
 //! (seeking). Idle processes are stopped, idle jobs expire, and segments far
 //! behind the playhead are pruned.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering::Relaxed};
@@ -18,8 +18,8 @@ use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use pley_transcoder_api::{
-    EncoderInfo, JobCreated, JobRequest, JobState, JobStatus, Limits, Load, MediaInfo, ProcessStatus, SegmentFormat,
-    TonemapQuality, VideoCodec, VideoMode,
+    EncoderInfo, JobCreated, JobRequest, JobState, JobStatus, Limits, Load, MediaInfo, MediaStream, ProcessStatus,
+    SegmentFormat, TonemapQuality, VideoCodec, VideoMode,
 };
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 use tokio::process::ChildStdout;
@@ -184,6 +184,10 @@ pub struct JobManager {
     memory_available: AtomicU64,
     /// What jobs falling behind their players taught (see [`crate::share`]).
     lessons: Mutex<Lessons>,
+    /// The videos ([`pley_transcoder_api::decode_key`]) FFmpeg's own
+    /// hardware decoder failed on, of jobs Quick Sync could decode in its
+    /// place ([`Plan::quick_sync_would_decode`]): the next ones start there.
+    decode_failed: Mutex<HashSet<String>>,
     /// Whether the CPU may decode for a GPU that falls behind (see
     /// [`crate::share`]).
     cpu_decode: AtomicBool,
@@ -463,6 +467,18 @@ struct Runtime {
     stop_cost: Option<Duration>,
 }
 
+/// What a job warns of once FFmpeg said its GPU couldn't decode the video.
+const GPU_DECODING_FAILED: &str = "GPU decoding failed, using the CPU";
+
+impl Runtime {
+    /// Whether the latest process decodes with Quick Sync what FFmpeg's own
+    /// decoder was planned for: the HDR10 base layer of Dolby Vision or
+    /// HDR10+ ([`Plan::quick_sync_would_decode`]).
+    fn quick_sync_decodes(&self, plan: &Plan) -> bool {
+        plan.quick_sync_would_decode() && self.share.is_some_and(|s| s.base_layer || s.quick_sync)
+    }
+}
+
 struct Proc {
     /// The segment it started at.
     start: u32,
@@ -597,6 +613,7 @@ impl JobManager {
             cpu: Arc::default(),
             memory_available: AtomicU64::new(u64::MAX),
             lessons: Mutex::default(),
+            decode_failed: Mutex::default(),
             cpu_decode: AtomicBool::new(true),
         })
     }
@@ -694,6 +711,17 @@ impl JobManager {
         {
             Some(media) => Arc::new(media),
             None => self.prober.probe(&input).await.map_err(|e| ApiError::Failed(format!("probe failed: {e:#}")))?,
+        };
+        // Media info from before probes looked for HDR10's static metadata:
+        // Quick Sync's tone mapping does nothing without it (see
+        // `Plan::quick_sync_could_tonemap`), so the first frames say now.
+        let unknown = |v: &MediaStream| v.has_hdr10_base() && v.hdr10_metadata.is_none();
+        let media = if self.ff.caps.qsv_tonemap && !wants_copy && media.video().is_some_and(unknown) {
+            let mut known = (*media).clone();
+            self.prober.read_first_frames(&input, &mut known).await;
+            Arc::new(known)
+        } else {
+            media
         };
         let keyframes = if wants_copy {
             let index = self.keyframes.get_or_read(&input).await;
@@ -1105,11 +1133,42 @@ impl JobManager {
             foreign: if decoding { 0.0 } else { self.cpu.foreign().unwrap_or(0.0) },
         };
         let takes = job.plan.source_rate(&job.media).map_or(0.0, |(pixels, fps)| share::decode_cores(pixels, fps));
-        let cpu_decode = self.cpu_decode.load(Relaxed) && !held.cpu_busy && share::cpu_decodes(gpu, cpu, takes);
         // Where Quick Sync decodes and scales, its scaler tone maps instead,
-        // several times cheaper.
-        let quick_sync = gpu.behind && job.plan.quick_sync_could_tonemap(&job.media, self.ff.caps.qsv_tonemap);
-        Some(Share { quality, cpu_decode, quick_sync })
+        // several times cheaper: where the GPU falls behind, and where the
+        // CPU has no time to spare for video Quick Sync would decode in its
+        // place (Dolby Vision and HDR10+, as their HDR10 base layer).
+        let relieved = gpu.behind || (held.cpu_busy && job.plan.quick_sync_would_decode());
+        let quick_sync = relieved && job.plan.quick_sync_could_tonemap(&job.media, self.ff.caps.qsv_tonemap);
+        let base_layer = self.quick_sync_decodes(job);
+        // Quick Sync decodes what it tone maps, and what it took over.
+        let cpu_decode = !quick_sync
+            && !base_layer
+            && self.cpu_decode.load(Relaxed)
+            && !held.cpu_busy
+            && share::cpu_decodes(gpu, cpu, takes);
+        Some(Share { quality, cpu_decode, quick_sync, base_layer })
+    }
+
+    /// Whether Quick Sync decodes the HDR10 base layer of `job`'s Dolby
+    /// Vision or HDR10+ for libplacebo, in place of FFmpeg's own decoder:
+    /// where that one's GPU decoding failed on this job, or on an earlier
+    /// one's video of the same kind (some Intel drivers give Direct3D 11 no
+    /// HEVC). The CPU would decode it otherwise, 4K HEVC taking cores of
+    /// it; the metadata goes unread, and libplacebo tone maps the HDR10
+    /// picture under it.
+    fn quick_sync_decodes(&self, job: &Job) -> bool {
+        if !job.plan.quick_sync_would_decode() {
+            return false;
+        }
+        let Some(key) = job.plan.decode_key(&job.media) else { return false };
+        let mut failed = self.decode_failed.lock();
+        if job.runtime.lock().decoded_in_software && failed.insert(key.clone()) {
+            tracing::info!(
+                job = %job.id,
+                "FFmpeg's own decoder failed on the GPU for {key}: Quick Sync decodes the HDR10 base layer of Dolby Vision and HDR10+"
+            );
+        }
+        failed.contains(&key)
     }
 
     /// What the jobs tone mapping on the GPU now need together (see
@@ -1152,6 +1211,12 @@ impl JobManager {
                 continue;
             }
             let learned = match verdict {
+                share::Verdict::CpuBound
+                    if job.plan.quick_sync_would_decode()
+                        && job.plan.quick_sync_could_tonemap(&job.media, self.ff.caps.qsv_tonemap) =>
+                {
+                    "the CPU has no time to spare: Quick Sync decodes and tone maps the HDR10 base layer".to_owned()
+                }
                 share::Verdict::CpuBound => "the CPU has no time to spare: the GPU decodes".to_owned(),
                 _ if share.quick_sync => "the GPU falls behind even with Quick Sync tone mapping".to_owned(),
                 _ if share.quality == TonemapQuality::Fast
@@ -1204,7 +1269,11 @@ impl JobManager {
             {
                 continue;
             }
-            let decoder = |s: Share| if s.cpu_decode { "CPU" } else { "GPU" };
+            let decoder = |s: Share| match (s.cpu_decode, s.base_layer) {
+                (true, _) => "CPU",
+                (false, true) => "Quick Sync",
+                (false, false) => "GPU",
+            };
             let mapper = |s: Share| if s.quick_sync { "Quick Sync" } else { s.quality.as_str() };
             tracing::info!(
                 job = %job.id,
@@ -1768,7 +1837,8 @@ impl Job {
         let rt = self.runtime.lock();
         let planned =
             self.plan.video.as_ref().is_some_and(|v| v.pipeline == Pipeline::Software && v.hw_decode.is_none());
-        let on_cpu = planned || rt.decoded_in_software || rt.share.is_some_and(|s| s.cpu_decode);
+        let failed = rt.decoded_in_software && !rt.quick_sync_decodes(&self.plan);
+        let on_cpu = planned || failed || rt.share.is_some_and(|s| s.cpu_decode);
         match self.plan.source_rate(&self.media) {
             Some((pixels, fps)) if on_cpu && rt.state == JobState::Running && rt.process.is_some() => {
                 share::decode_cores(pixels, fps)
@@ -1937,7 +2007,7 @@ impl Job {
     /// The GPU couldn't decode the video: the CPU does, which the job says.
     fn decoded_in_software(&self) {
         self.runtime.lock().decoded_in_software = true;
-        if self.warn("GPU decoding failed, using the CPU") {
+        if self.warn(GPU_DECODING_FAILED) {
             tracing::warn!(job = %self.id, "hardware decoding failed: decoding on the CPU");
         }
     }
@@ -2156,7 +2226,9 @@ impl Job {
     fn own_status(&self) -> JobStatus {
         let rt = self.runtime.lock();
         let mut video = self.plan.video_plan(&self.media, rt.encoder_override.as_ref());
-        if let Some(v) = video.as_mut().filter(|_| rt.decoded_in_software) {
+        // Quick Sync took the decoding over from the decoder that failed.
+        let quick_sync_decodes = rt.quick_sync_decodes(&self.plan);
+        if let Some(v) = video.as_mut().filter(|_| rt.decoded_in_software && !quick_sync_decodes) {
             v.decoder = Some("cpu".into());
             if v.pipeline.as_deref() == Some("gpu") {
                 v.pipeline = Some("hybrid".into());
@@ -2168,19 +2240,23 @@ impl Job {
             if share.cpu_decode {
                 v.decoder = Some("cpu".into());
             }
+            if quick_sync_decodes {
+                v.decoder = Some("qsv".into());
+            }
             // Tone mapped by Quick Sync's scaler, maybe without leaving the GPU.
             if share.quick_sync
                 && let Some(intel) = self.plan.with_share(share).video_plan(&self.media, rt.encoder_override.as_ref())
             {
                 (v.tonemap, v.tonemap_quick_sync, v.tonemap_quality) = (intel.tonemap, intel.tonemap_quick_sync, None);
                 // CPU-decoded frames still go through memory (`hybrid`, above).
-                if !rt.decoded_in_software {
+                if !rt.decoded_in_software || quick_sync_decodes {
                     v.pipeline = intel.pipeline;
                 }
             }
         }
         let mut warnings = self.plan.warnings.clone();
-        warnings.extend(rt.warnings.iter().cloned());
+        // The CPU decodes no more once Quick Sync took over.
+        warnings.extend(rt.warnings.iter().filter(|w| !(quick_sync_decodes && *w == GPU_DECODING_FAILED)).cloned());
         JobStatus {
             id: self.id.clone(),
             label: self.request.label.clone(),

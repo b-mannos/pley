@@ -894,6 +894,16 @@ the VPS, SPS and PPS with every forced keyframe.
   libplacebo tone maps: Quick Sync's decoder reads neither's metadata, and
   Dolby Vision profile 5's colours are in it. A software encoder standing in
   for Quick Sync's gets its frames through `vpp_qsv`.
+- **Where that decoder fails.** Some Intel drivers give Direct3D 11 no HEVC,
+  and FFmpeg then decodes on the CPU. For Dolby Vision over an HDR10 base
+  layer (profiles 7 and 8.1) and for HDR10+, Quick Sync decodes and scales
+  that base layer instead, from the job's next segment on and from the start
+  of the jobs that follow with video of the same kind, and libplacebo tone
+  maps the HDR10 picture, the metadata unread. The job's status then says
+  `decoder: qsv`, without the warning. On an Iris Xe, a 4K60 profile 8.1
+  clip made 1080p went from 1.2 times real time on 2.8 cores to 2.2 times
+  on half a core. Profile 5, whose colours are in the metadata, stays on
+  the CPU.
 - **Chroma and depth.** The start-up tests decode 8- and 10-bit 4:2:0
   video, and 10-bit 4:2:2 HEVC (what cameras record). Other video (4:2:2
   H.264, 4:4:4, 12 bits) stays off the GPU pipelines and Vulkan decoding,
@@ -1006,8 +1016,19 @@ Several jobs tone mapping with libplacebo share the GPU (`src/share.rs`):
 - **Tone mapping on Quick Sync.** Where the GPU falls behind (as for decoding
   on the CPU), HDR10 made SDR that Quick Sync decodes and scales is tone
   mapped by its scaler instead (status `tonemap_quick_sync: true`), where
-  that passed a start-up test (`qsv_tonemap`) and libplacebo isn't asked for
-  (`tonemap=libplacebo`): scaled in 10 bits, then brightness 16 up and tone
+  that passed a start-up test (`qsv_tonemap`), libplacebo isn't asked for
+  (`tonemap=libplacebo`) and the video carries HDR10's static metadata
+  (`MediaStream.hdr10_metadata`, the mastering display's): Quick Sync's
+  scaler tone maps by it and passes the picture through untouched without
+  it, and VAAPI's refuses the frames. The start-up test's clip carries it for that reason. Dolby Vision
+  over an HDR10 base layer (profiles 7 and 8.1) and HDR10+ move there too,
+  as that base layer: FFmpeg's own decoder brings libplacebo their frames
+  with their metadata, and where the GPU falls behind, or the CPU has no
+  time to spare (it decodes them where the GPU's decoder fails), Quick Sync
+  decodes, scales and tone maps the HDR10 picture under it, the metadata
+  unread (a 4K60 profile 8.1 clip made 1080p went at 3.4 times real time on
+  a fifth of a core on an Iris Xe). Profile 5 has no such picture and stays
+  with libplacebo. The route: scaled in 10 bits, then brightness 16 up and tone
   mapped to NV12 at the output's size, each in a pass of its own (Quick Sync
   does each at the size it is given), into `h264_qsv` without leaving the
   GPU (to memory for x264 standing in, or for burned-in subtitles). It costs
@@ -1273,9 +1294,14 @@ decodes its first frames' side data and records:
   its base layer's HDR10+ (Dolby Vision + HDR10+).
 - For profile 7, `MediaStream.dv_el`: `mel` (minimal) when the enhancement
   layer's residual is zero in every component, else `fel` (full).
+- `MediaStream.hdr10_metadata`: whether the frames carry HDR10's static
+  metadata, the mastering display's (SMPTE ST 2086). Quick Sync's scaler
+  and VAAPI tone map by it ([Sharing the GPU](#sharing-the-gpu)).
 
 These are absent when the frames can't be read, and for other streams. The
-job's video plan repeats `dv_el` and `hdr10plus`.
+job's video plan repeats `dv_el` and `hdr10plus`. A job whose caller sent
+media info from before `hdr10_metadata` was read has its first frames read
+when it is made, where Quick Sync's tone mapping passed its start-up test.
 
 The probe of every video reads the same first frames' side data for closed
 captions (CEA-608/708, "ATSC A53 Part 4 Closed Captions") and records

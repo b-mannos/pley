@@ -23,7 +23,7 @@ use crate::devices;
 use crate::util::{configure_child, resolve_executable};
 
 /// Bump when detection logic changes so stale caches are ignored.
-const DETECTION_REVISION: u32 = 20;
+const DETECTION_REVISION: u32 = 21;
 
 pub struct Ffmpeg {
     pub ffmpeg: PathBuf,
@@ -797,6 +797,11 @@ struct GpuDetection {
     qsv_opencl_tonemap: bool,
 }
 
+/// x265's options for the 10-bit test clip: a 1000-nit P3 mastering display
+/// and the content's light levels, HDR10's static metadata.
+const HDR10_TEST_PARAMS: &str = "log-level=error:max-cll=1000,400:\
+    master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1)";
+
 /// Encoder arguments for the tiny clips used to probe hardware decoding,
 /// keyed like [`pley_transcoder_api::decode_key`].
 fn test_clip_specs(encoders: &HashSet<String>) -> Vec<(&'static str, Vec<&'static str>)> {
@@ -807,7 +812,11 @@ fn test_clip_specs(encoders: &HashSet<String>) -> Vec<(&'static str, Vec<&'stati
     if encoders.contains("libx265") {
         let x265 = ["-c:v", "libx265", "-preset", "ultrafast", "-x265-params", "log-level=error"];
         specs.push(("hevc", [x265.as_slice(), &["-pix_fmt", "yuv420p"]].concat()));
-        specs.push(("hevc10", [x265.as_slice(), &["-pix_fmt", "yuv420p10le"]].concat()));
+        // With HDR10's static metadata, as HDR10 video carries it: Quick
+        // Sync's scaler tone maps only frames that have it, and passes the
+        // others through, which would test nothing.
+        let hdr10 = ["-c:v", "libx265", "-preset", "ultrafast", "-x265-params", HDR10_TEST_PARAMS];
+        specs.push(("hevc10", [hdr10.as_slice(), &["-pix_fmt", "yuv420p10le"]].concat()));
         // What cameras record: some GPUs decode it (Intel's), others don't.
         specs.push(("hevc10-yuv422p10le", [x265.as_slice(), &["-pix_fmt", "yuv422p10le"]].concat()));
     }
