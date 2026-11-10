@@ -8,14 +8,130 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Added
+
+- On Android TV, a show whose seasons have posters of their own shows
+  them as a row of posters over its episodes, each with the season's
+  name and episode count under it, as the web app does. A season without
+  one shows the show's poster. Resting on a season shows its episodes,
+  and Down from the buttons comes to the seasons. Select on a season
+  goes down into its episodes, on the one to watch.
+- On Android TV, Home's banner shows a dash for each title it turns
+  through, at the top right: the one on is longer and fills as its time
+  runs. Up from the banner's buttons reaches the dashes, where Left and
+  Right turn to the title before or after.
+- On Android TV, an episode's page marks its own episode in its
+  season's row, with a thin ring and its title in bold, so it is found
+  among the others before focus is on it.
+
+### Changed
+
+- Home's banner mixes in top rated titles you haven't watched: one in
+  three, among the newest, with "Top rated in Movies" over its name. They
+  are the same all day and others the next day.
+- A show with more than 12 seasons lists them newest first, with Specials
+  last, so the seasons still coming out are the first ones. On Android
+  TV the seasons open at the one shown, wherever it is in the row.
+- A show you haven't started, or have watched to its end, opens on the
+  first season listed: the newest of a show with more than 12, which
+  opened on Season 1, at the far end of its seasons. A show you are
+  part-way through still opens on the season of the next episode.
+- A title's page that is already held in memory (seen before, or asked
+  for ahead) opens whole at once, where it showed an empty outline for a
+  moment first.
+- On Android TV, the words at the top of a show's page keep up with the
+  episode focused, and no longer show an episode of another season, or
+  the show's description, while focus is on the seasons.
+- On Android TV, a title's page starts higher, and what follows the
+  buttons shows whole where the screen's edge cut it: a show's season
+  posters with their names and episode counts, its episodes with their
+  titles, a movie's Cast & Crew with their names. For that the room
+  under the buttons closes up first, then the description gives up a
+  line, and the line of who made it goes before the description's
+  second. A movie's page leaves "Directed by" and "Starring" to that
+  row.
+- On Android TV, a title's page gives its title and its description
+  more of the screen's width, and a long title up to three lines.
+- On Android TV, the title and the picture behind the page change as
+  soon as focus moves to another tile, on Home, Discover and a show's
+  episodes, where they waited for focus to rest. Under a held key they
+  change where it lands.
+- On Android TV, coming down from Home's banner to the rows, the words
+  at the top are the focused title's at once. They used to stay the
+  banner's title for a moment first. Going back up, and each time the
+  banner turns, its picture changes with its words, where the last
+  picture stayed under them for a moment.
+- On Android TV, Home's banner sits higher and is shorter: the line
+  over its title (New in Movies) is level with the dashes at the top
+  right, and Continue Watching shows whole under it, its pictures and
+  the titles under them, where the screen's edge cut them.
+- On Android TV, Home's banner gives a title and its description more
+  of the screen's width too, so a long title seldom takes two lines; when
+  one does, the description keeps two of its three lines, where it kept
+  one.
+- On Android TV, the chips over a library's grid (the sort, Filter,
+  Unwatched, Genre, Year), Discover's and Search's are smaller again.
+- On Android TV, the tabs at the top of a library (Recommended,
+  Library, Collections), of Live TV and of Requests are smaller.
+- On Android TV, a library opens on Recommended the first time; after
+  that, on the tab it was left on, as before. A library left on its
+  Library tab before this version, with no sort or filter of its own,
+  opens on Recommended once more.
+- On Android TV, Right on the last button of Home's banner (My List)
+  stays there. It used to turn to the next title, which the dashes at the
+  top right and the banner's own time still do.
+- On Android TV, Search's empty page no longer explains how to type.
+- On Android TV, buttons are a little smaller, those of Home's banner
+  smaller again, and the banner's words fade in as it turns to the next
+  title.
+- On Android TV, chips and tabs, a show's season tabs among them, are
+  as tall as the buttons, and the player's Skip and Play now, History's
+  Remove and the music player's Play are smaller with them.
+- On Android TV, posters in a row are a little larger: seven fill the
+  row to the screen's edge, where a sliver of an eighth showed beside
+  them.
+- On Android TV, the dark under the closed rail thins out softly into
+  the page, where it ended in a hard edge.
+- On Android TV, the rail's icons sit in the middle of its dark strip,
+  with the same room at either side, where they stood nearer the page.
+  Open, the current entry and the focused one are as wide as each other
+  and as far from the panel's edge as from the screen's, and the panel is
+  narrower, widening only for a name that needs it.
+- On Android TV, the rail's focused entry grows from its icon, so the
+  icons stay in line, and it no longer reaches the edge of the screen or
+  of the rail's panel.
+- On Android TV, resting on a season shows its episodes sooner. The
+  seasons beside the one shown have their episodes loaded ahead, on
+  phones too, so moving along a show's seasons keeps up.
+- On Android TV, who made a title and its facts (director, writers, release,
+  studio or network) sit under the cast, each a small label over its
+  value, where they were in Details at the end of the page.
+- On Android TV, a show's episodes sit further below its season tabs, so
+  the focused episode no longer crowds them.
+
 ### Fixed
 
+- On Android TV, Back from an episode's page returns to the episode it
+  was opened from, in its season. Focus used to land on the season's
+  first episode, or the one to watch.
+- On Android TV, on an episode's page, Select on that episode in its
+  season's row plays it, where it did nothing and took a second Back to
+  leave; Select on another episode shows that one in the page's place, so
+  Back still returns to the show.
 - Dolby Vision the server repackages stays Dolby Vision: a file that also
   carries HDR10+, profile 7 made 8.1, a file that doesn't name its Dolby
   Vision or overstates its level, or one whose sound or container is
   changed. On a Dolby Vision screen these played as their HDR10 or HLG
   base layer, and profile 5, which has none, in wrong colours; only files
   played as they are came out as Dolby Vision.
+- On Android TV, the line over a title in Home's banner (New in Movies)
+  reached the top of the screen when the title took two lines. It now
+  keeps its place and the title grows down.
+- On Android TV, a show with more seasons than fit across the screen
+  showed its later season tabs squeezed into a thin column that pushed the
+  episodes' lengths off the bottom, and the seasons after it couldn't be
+  chosen. The tabs now keep their size and slide along as focus moves, so
+  every season can be chosen.
 
 ## [0.1.9] - 2026-11-08
 

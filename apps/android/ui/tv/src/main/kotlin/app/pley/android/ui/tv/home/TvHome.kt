@@ -12,8 +12,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -21,6 +23,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -30,9 +33,13 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.currentStateAsState
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.pley.android.common.TestTags
+import app.pley.android.common.Tier
 import app.pley.android.designsystem.PleyMotion
 import app.pley.android.designsystem.PleyTv
 import app.pley.android.designsystem.reducedMotion
@@ -44,10 +51,12 @@ import app.pley.android.screens.home.HomeInfo
 import app.pley.android.screens.home.HomeMessage
 import app.pley.android.screens.home.HomeState
 import app.pley.android.screens.home.HomeViewModel
+import app.pley.android.screens.home.homeInfo
 import app.pley.android.screens.home.pageOf
 import app.pley.android.ui.tv.R
 import app.pley.android.ui.tv.item.tileActions
 import app.pley.android.ui.tv.kit.BackdropScrim
+import app.pley.android.ui.tv.kit.KeyRepeatGate
 import app.pley.android.ui.tv.kit.LocalTvRailFocus
 import app.pley.android.ui.tv.kit.SeeAll
 import app.pley.android.ui.tv.kit.TvBackdrop
@@ -63,10 +72,11 @@ import app.pley.android.ui.tv.shell.failedBody
 import app.pley.android.ui.tv.shell.failedTitle
 import app.pley.android.ui.tv.theme.LocalTvTier
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Home on TV (design spec §2.2, §4.1; TV addendum §3.4).
@@ -76,12 +86,14 @@ import kotlinx.coroutines.withTimeoutOrNull
  * each with its backdrop, why it is there, Play and My List, with initial
  * focus on Play; without any, the first Continue Watching item. Then the
  * server's rows. The hero turns to the next title every [TURN_MS] while
- * nothing is pressed (each key starts the time over), and Right from its
- * last button goes on to the next; with less motion asked for, only Right
- * does. Down moves into the rows: the hero's buttons go, the rows come up
- * under a compact info block about the focused tile, and the backdrop and
- * the info block follow the tile once focus has rested about 400 ms.
- * Nothing plays on its own.
+ * nothing is pressed (each key starts the time over); with less motion
+ * asked for, it never turns by itself. Right from its last button stays
+ * there. Dashes at the top right show which title is on and how
+ * long it has left; Up from the buttons reaches them, and Left and Right
+ * there turn the titles. Down moves into the rows: the hero's buttons go,
+ * the rows come up under a compact info block about the focused tile, and
+ * the backdrop and the info block follow the focused tile at once (a
+ * held key, where it lands). Nothing plays on its own.
  *
  * Back from the rows gives focus to the rail's Home and puts the page back
  * at its hero, where focus lands when the rail closes. Coming back from an
@@ -139,14 +151,50 @@ private fun ReportHomeStatus(vm: HomeViewModel) {
 private class FocusedTile(val item: ItemSummary, val row: TvHomeRow)
 
 /**
- * Once focus rests on a tile ([rememberRested]), the info block follows
- * it and the next tiles' details are asked for ahead. Only this reads
- * [focused], so a focus move composes nothing else on the page.
+ * Once focus rests on a tile ([rememberRested]), its details are asked
+ * for, for the info block's summary and badges, and the next tiles' ahead:
+ * what costs a request waits for focus to rest.
  */
 @Composable
 private fun RestedFocus(focused: State<FocusedTile?>, vm: HomeViewModel) {
     val rested = rememberRested(focused.value)
     LaunchedEffect(rested) { rested?.let { vm.focus(it.item, it.row.after(it.item)) } }
+}
+
+/**
+ * The backdrop and the info block. At rest they are the [hero]'s. In the
+ * rows they follow the focused tile at once: after a press, and where a
+ * held key lands ([KeyRepeatGate.FOLLOW_MS]), never through each tile the
+ * key passes. They say what the tile's row lists of it, then the model's
+ * word on it, which has its summary and badges, once focus has rested
+ * there ([RestedFocus]). Only this and [RestedFocus] read [focused] and
+ * the model's word, so a focus move composes these and nothing else on
+ * the page.
+ */
+@Composable
+private fun HomeAbout(
+    hero: TvHero,
+    focused: State<FocusedTile?>,
+    vm: HomeViewModel,
+    inRows: Boolean,
+    heroAlpha: State<Float>,
+    origin: String,
+    tier: Tier,
+) {
+    val tile = rememberRested(focused.value, KeyRepeatGate.FOLLOW_MS)
+    val listed = remember(tile) { tile?.let { homeInfo(it.item, null) } }
+    val detailed by vm.info.collectAsStateWithLifecycle()
+    val about: HomeInfo = when {
+        !inRows -> hero.info
+        listed == null -> detailed ?: hero.info
+        else -> detailed?.takeIf { it.item.id == listed.item.id } ?: listed
+    }
+    val backdrop = remember(about.item.id, origin, tier) {
+        if (about.item.id == hero.info.item.id) hero.backdrop else TvHomeModel.backdropOf(about.item, origin, tier)
+    }
+    TvBackdrop(backdrop, about.title, scrim = if (inRows) BackdropScrim.Rows else BackdropScrim.Hero)
+    // Only in the rows is it there for screen readers too; at rest the hero says the same.
+    TvInfoBlock(about, Modifier.graphicsLayer { alpha = 1f - heroAlpha.value }.then(if (inRows) Modifier else Modifier.clearAndSetSemantics { }))
 }
 
 @Composable
@@ -164,37 +212,74 @@ private fun TvHomeRows(model: TvHomeModel, origin: String, vm: HomeViewModel, na
     val focused = remember { mutableStateOf<FocusedTile?>(null) }
     RestedFocus(focused, vm)
     val backdrops = rememberBackdropPrefetcher()
-    val info by vm.info.collectAsStateWithLifecycle()
-    val heroAlpha by animateFloatAsState(if (inRows) 0f else 1f, PleyMotion.reveal(), label = "hero")
+    // Read as it is drawn: its frames compose nothing.
+    val heroAlpha = animateFloatAsState(if (inRows) 0f else 1f, PleyMotion.reveal(), label = "hero")
     // What the rows' callbacks read when they run: rows that didn't change keep theirs, and aren't composed again.
     val current by rememberUpdatedState(model)
 
     // The hero's turns. Keys go to the clock as events, not state: a key press composes nothing.
     val heroes = model.heroes
     var turn by rememberSaveable { mutableIntStateOf(0) }
-    val hero = heroes[turn % heroes.size]
+    // The titles can change under the banner (the top rated ones come a moment after the newest):
+    // the one that is on stays on, wherever it now is among them.
+    var on by rememberSaveable { mutableStateOf<Long?>(null) }
+    val at = remember(heroes, turn, on) { heroes.indexOfFirst { it.info.item.id == on }.takeIf { it >= 0 } ?: (turn % heroes.size) }
+    val hero = heroes[at]
+    SideEffect {
+        turn = at
+        on = hero.info.item.id
+    }
+    val titles by rememberUpdatedState(heroes)
     val keys = remember { MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST) }
     val calm = reducedMotion()
-    LaunchedEffect(turn, inRows, heroes.size, calm) {
-        if (inRows || heroes.size < 2 || calm) return@LaunchedEffect
-        // TURN_MS with no key pressed: each press starts the time over.
-        while (withTimeoutOrNull(TURN_MS) { keys.first() } != null) Unit
-        turn = (turn + 1) % heroes.size
-        // Its buttons may not be the last one's (From start): focus starts again on Play.
-        if (hasFocus) runCatching { resume.requestFocus() }
+    // Under another page, or with the app away, the hero waits: its clock runs only in front.
+    val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
+    val inFront = lifecycle.isAtLeast(Lifecycle.State.RESUMED)
+    // How far the title on is through its time: its dash fills with it, read as the dash draws.
+    // Small timed steps rather than an animation: each draws the dashes again and nothing else.
+    val time = remember { mutableFloatStateOf(1f) }
+    // Whether focus is on the dashes. Only the clock reads it, when it turns: it composes nothing.
+    val onDashes = remember { mutableStateOf(false) }
+    // The title on and its time change together: a dash coming on is never drawn with the last one's time.
+    val turnTo: (Int) -> Unit = { index ->
+        val to = index.mod(titles.size)
+        turn = to
+        on = titles[to].info.item.id
+        if (!calm) time.floatValue = 0f
     }
-    val next: () -> Unit = {
-        turn = (turn + 1) % heroes.size
-        runCatching { resume.requestFocus() }
+    LaunchedEffect(turn, inRows, heroes.size, calm, inFront) {
+        // The dash stays as it is under the page that covers it, and starts over when that one goes.
+        if (!inFront) return@LaunchedEffect
+        if (inRows || heroes.size < 2 || calm) {
+            time.floatValue = 1f
+            return@LaunchedEffect
+        }
+        val timed = turn
+        // TURN_MS with no key pressed: each press starts the time over, and the dash with it.
+        keys.onStart { emit(Unit) }.collectLatest {
+            var gone = 0L
+            time.floatValue = 0f
+            while (gone < TURN_MS) {
+                delay(FILL_STEP_MS)
+                gone += FILL_STEP_MS
+                time.floatValue = gone.toFloat() / TURN_MS
+            }
+            // A turn made by hand at this very moment has its own time coming: it isn't turned past.
+            if (turn != timed) return@collectLatest
+            turnTo(timed + 1)
+            // Its buttons may not be the last one's (From start): focus starts again on Play. The dashes stay, and keep theirs.
+            if (hasFocus && !onDashes.value) runCatching { resume.requestFocus() }
+        }
     }
+    // The dashes turn the titles under their own focus.
+    val step: (Int) -> Unit = { by -> turnTo(turn + by) }
+    // With one title left to feature the dashes go, and focus that was on them goes to Play.
+    // Read as they go and not observed: focus on the dashes composes nothing.
+    val dashesGone = heroes.size < 2 && Snapshot.withoutReadObservation { onDashes.value }
+    LaunchedEffect(dashesGone) { if (dashesGone) runCatching { resume.requestFocus() } }
 
-    // In the rows, the backdrop and the info block show the tile focus rests on.
-    val about: HomeInfo = if (inRows) info ?: hero.info else hero.info
     // A tile its actions took away (Remove from Continue Watching): focus comes back to its neighbour.
     memory.settle(model::hasTile)
-    val backdrop = remember(about.item.id, origin, tier) {
-        if (about.item.id == hero.info.item.id) hero.backdrop else TvHomeModel.backdropOf(about.item, origin, tier)
-    }
 
     // Back from the rows: the page goes back to its hero (focus on Resume), then to the rail.
     BackHandler(enabled = inRows && hasFocus) {
@@ -213,9 +298,7 @@ private fun TvHomeRows(model: TvHomeModel, origin: String, vm: HomeViewModel, na
                 false
             },
     ) {
-        TvBackdrop(backdrop, about.title, scrim = if (inRows) BackdropScrim.Rows else BackdropScrim.Hero)
-        // Only in the rows is it there for screen readers too; at rest the hero says the same.
-        TvInfoBlock(about, Modifier.graphicsLayer { alpha = 1f - heroAlpha }.then(if (inRows) Modifier else Modifier.clearAndSetSemantics { }))
+        HomeAbout(hero, focused, vm, inRows, heroAlpha, origin, tier)
         TvRowColumn(
             state = column,
             heroHeight = HeroHeight,
@@ -231,11 +314,13 @@ private fun TvHomeRows(model: TvHomeModel, origin: String, vm: HomeViewModel, na
                     onInfo = { navigator.open(pageOf(hero.info.item)) },
                     onWatched = { vm.setWatched(hero.info.item, !hero.info.watched) },
                     onList = { vm.setInList(hero.info.item, !hero.info.inList) },
-                    modifier = Modifier.graphicsLayer { alpha = heroAlpha }.tvRowColumnHero(),
+                    modifier = Modifier.graphicsLayer { alpha = heroAlpha.value }.tvRowColumnHero(),
                     label = hero.label?.asString(),
                     turns = heroes.size,
-                    turn = turn % heroes.size,
-                    onNext = if (heroes.size > 1) next else null,
+                    turn = at,
+                    progress = { time.floatValue },
+                    onTurn = step,
+                    onDashesFocus = { onDashes.value = it },
                 )
             }
             model.rows.forEach { row ->
@@ -272,11 +357,19 @@ private fun TvHomeRows(model: TvHomeModel, origin: String, vm: HomeViewModel, na
     }
 }
 
-/** The hero, down to the first row's header at y = 384 less the gap between rows (design spec §2.2): the first row's tiles show whole under it. */
-internal val HeroHeight = 384.dp - PleyTv.RowGap
+/**
+ * The hero, down to the first row's header at y = 332 less the gap between
+ * rows: Continue Watching, the first row, shows whole under it, its
+ * pictures and the two lines under them, which end 7 dp above the
+ * screen's bottom edge.
+ */
+internal val HeroHeight = 332.dp - PleyTv.RowGap
 
 /** How long each featured title stays in the hero while nothing is pressed: the web's banner's. */
 private const val TURN_MS = 9_000L
+
+/** The dash of the title on fills in steps this far apart: about a pixel each at 1080p, five small draws a second. */
+private const val FILL_STEP_MS = 200L
 
 /** About one row of posters: the next row is composed before focus reaches it. */
 private val RowAhead = 300.dp
