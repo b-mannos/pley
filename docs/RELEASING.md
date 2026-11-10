@@ -15,7 +15,11 @@ at their commit.
 
 1. As you work, write what changed under `## [Unreleased]` in the unit's
    `CHANGELOG.md` (Added, Changed, Fixed, Removed), or draft it from the
-   commits with `bun scripts/release.mjs <unit> draft` and edit.
+   commits with `bun scripts/release.mjs <unit> draft` and edit. The
+   entries become the release's notes, so they read as a list: an entry
+   doesn't open with the app or the device it is for ("On Android TV, …").
+   Entries for one device alone follow the others in their section, under
+   one line that names it ("On Android TV:").
 2. On GitHub: **Actions → Prepare release → Run workflow**, or
    `gh workflow run prepare-release.yml`. Leave **Units** blank for every
    unit with Unreleased entries but the web Samsung app (`samsung`), or name
