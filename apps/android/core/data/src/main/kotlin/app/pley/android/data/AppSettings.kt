@@ -66,6 +66,8 @@ data class Settings(
     val alwaysStartAs: Long? = null,
     val showPlaybackDetails: Boolean = false,
     val gridDensity: GridDensity = GridDensity.Medium,
+    /** TVs: Home opens on its banner of featured titles; off, on its rows. */
+    val homeBanner: Boolean = true,
     /** Move less (design spec §5.3), whatever the system says: Fire OS has no "Remove animations". */
     val reduceMotion: Boolean = false,
     /** Debug builds only (emulators): let software decoders play video beyond what the device's policy allows. */

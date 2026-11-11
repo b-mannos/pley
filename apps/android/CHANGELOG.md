@@ -8,6 +8,11 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Added
+
+- On Android TV, Settings → Display → Home banner turns off the banner
+  of featured titles at the top of Home: Home then opens on its rows.
+
 ## [0.1.11] - 2026-11-10
 
 ### Fixed
