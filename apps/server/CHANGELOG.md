@@ -9,6 +9,13 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Fixed
+
+- A movie whose title is a number, such as "300" or "1917", takes its year
+  from the file's name, as other movies do, rather than from its folder's.
+  Two copies of the film in folders named with different years are now one
+  movie with two versions.
+
 ## [0.1.9] - 2026-11-08
 
 ### Added
